@@ -1,26 +1,34 @@
 # BuildHuman Asset Service
 
-FastAPI service for managing 3D human assets with LLM-powered quality control.
+FastAPI service for managing 3D human assets - body parts, clothing, accessories, morphs, and textures.
 
 ## Features
 
-- 🔍 Asset library with search and filtering
-- 📦 Upload/download models, textures, and morphs
-- 🤖 LLM quality control (content moderation, validation)
-- 🎨 Automatic thumbnail generation
-- 📊 OpenAPI/Swagger docs at `/docs`
-- 🆓 Deploy for free on Fly.io
+- 🔍 **Asset Library**: Browse and search human-related 3D assets
+- 📦 **Asset Management**: Upload, download, and organize models
+- 🎨 **Metadata**: Detailed asset information (author, license, version, ratings)
+- 📊 **API Docs**: Interactive OpenAPI/Swagger docs at `/docs`
+- 💾 **Local Storage**: File-based storage with efficient caching
+
+## Asset Types
+
+- **Body Parts**: Base human meshes, heads, hands, feet
+- **Clothing**: Shirts, pants, shoes, accessories
+- **Morphs**: Blend shapes for customization (facial features, body proportions)
+- **Textures**: Skin textures, normal maps, roughness maps
+- **Accessories**: Glasses, jewelry, hats, props
 
 ## Quick Start
 
 ### Local Development
 
 ```bash
-# Install dependencies
+# Install dependencies (using Poetry)
+pip install poetry
 poetry install
 
-# Initialize database
-poetry poe init-db
+# Seed database with sample assets
+poetry poe seed
 
 # Run development server (with hot reload)
 poetry poe dev
@@ -33,139 +41,162 @@ poetry poe dev
 
 ```bash
 poetry poe dev      # Run with hot reload
-poetry poe serve    # Run production server
-poetry poe test     # Run tests
-poetry poe format   # Format code with black
-poetry poe lint     # Lint with ruff
-poetry poe init-db  # Initialize database
+poetry poe start    # Run production server
+poetry poe seed     # Populate with sample assets
+poetry poe test     # Run tests (when implemented)
 ```
-
-## Deploy to Fly.io (Free)
-
-### 1. Install Fly CLI
-
-```bash
-# macOS
-brew install flyctl
-
-# Linux/WSL
-curl -L https://fly.io/install.sh | sh
-
-# Windows
-pwsh -Command "iwr https://fly.io/install.ps1 -useb | iex"
-```
-
-### 2. Sign Up & Login
-
-```bash
-fly auth signup  # or fly auth login
-```
-
-### 3. Create App
-
-```bash
-# Launch app (will create fly.toml if not exists)
-fly launch
-
-# Create persistent volume for storage
-fly volumes create buildhuman_data --size 1
-```
-
-### 4. Deploy
-
-```bash
-fly deploy
-```
-
-### 5. Check Status
-
-```bash
-fly status
-fly logs
-```
-
-Your API will be live at `https://buildhuman-assets.fly.dev`
 
 ## API Endpoints
 
 ### Assets
 
 - `GET /api/assets` - List/search assets
-  - Query params: `category`, `search`, `sort` (recent|rating|name|downloads)
+  - Query params: `type`, `category`, `search`, `sort` (recent|rating|name|downloads)
 - `GET /api/assets/{id}` - Get asset metadata
-- `GET /api/assets/{id}/download` - Download asset file
-- `POST /api/assets` - Upload new asset
+- `GET /api/assets/{id}/download` - Download asset GLB file
+- `POST /api/assets/upload` - Upload new asset
+- `PUT /api/assets/{id}` - Update asset metadata
 - `DELETE /api/assets/{id}` - Delete asset
 
 ### Categories
 
 - `GET /api/categories` - List all categories
+  - Returns categories organized by asset type
 
 ## Storage Structure
 
 ```
-storage/
-├── models/      # 3D mesh models (.glb, .gltf, .fbx)
-├── textures/    # Texture maps (.png, .jpg)
-└── morphs/      # Blend shapes and morphs
+service/
+├── cache/           # Downloaded/cached assets
+│   ├── metadata.json
+│   └── {asset_id}.glb
+│
+├── storage/         # Original uploaded assets (if using uploads)
+│   └── {asset_id}/
+│       ├── model.glb
+│       └── metadata.json
+│
+└── main.py          # FastAPI application
 ```
 
-## LLM Quality Control
+## Configuration
 
-The service includes hooks for LLM-powered quality control:
+The service uses local file-based storage by default. Asset metadata is stored in `cache/metadata.json`.
 
-- Content moderation (check names/descriptions for inappropriate content)
-- Asset validation (verify mesh integrity, texture formats)
-- Auto-tagging and categorization
-- Quality scoring
-
-Set your API key:
+### Environment Variables
 
 ```bash
-fly secrets set ANTHROPIC_API_KEY=your_key_here
+# Optional: Set custom cache directory
+CACHE_DIR=/path/to/cache
+
+# Optional: Enable CORS for specific origins
+CORS_ORIGINS=http://localhost:5173,http://localhost:1420
 ```
 
-## Free Tier Limits
+**⚠️ Security Note**: Never commit API keys or secrets to version control. Use environment variables and add them to `.gitignore`.
 
-Fly.io free tier includes:
-- 3 shared VMs (256MB RAM each)
-- 160GB outbound data transfer/month
-- Persistent volumes (1GB free)
+## Asset Metadata Format
 
-Perfect for getting started - no credit card required!
+Each asset includes:
+
+```json
+{
+  "id": "unique-asset-id",
+  "name": "Asset Name",
+  "type": "models|clothing|morphs|textures",
+  "category": "Category within type",
+  "author": "Creator name",
+  "description": "Asset description",
+  "license": "CC-BY|CC-BY-SA|CC-BY-ND|All Rights Reserved",
+  "version": "1.0.0",
+  "file_size": 1234567,
+  "required": false,
+  "rating": 4.5,
+  "rating_count": 10,
+  "downloads": 100,
+  "publish_date": "2025-01-01T00:00:00Z"
+}
+```
 
 ## Development
 
 ### Project Structure
 
 ```
-asset-service/
-├── main.py              # FastAPI app
-├── pyproject.toml       # Poetry config
-├── Dockerfile           # Container image
-├── fly.toml            # Fly.io config
-└── storage/            # Asset files
+service/
+├── main.py              # FastAPI app and routes
+├── seed_assets.py       # Sample data generator
+├── pyproject.toml       # Poetry dependencies
+├── requirements.txt     # Pip dependencies
+├── Dockerfile           # Container image (optional)
+└── cache/              # Asset storage
 ```
 
-### Adding LLM Features
-
-Example: Content moderation on upload
+### Adding New Endpoints
 
 ```python
-from anthropic import Anthropic
+from fastapi import APIRouter
 
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+router = APIRouter(prefix="/api")
 
-def moderate_content(name: str, description: str) -> bool:
-    prompt = f"Is this asset appropriate? Name: {name}, Description: {description}"
-    response = client.messages.create(
-        model="claude-3-haiku-20240307",
-        max_tokens=10,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return "yes" in response.content[0].text.lower()
+@router.get("/custom-endpoint")
+async def custom_endpoint():
+    return {"message": "Custom endpoint"}
 ```
+
+### Testing
+
+```bash
+# Run tests (when implemented)
+poetry poe test
+
+# Manual testing via Swagger UI
+open http://localhost:8000/docs
+```
+
+## Deployment
+
+### Option 1: Local Server
+
+```bash
+poetry poe start
+```
+
+### Option 2: Docker (Optional)
+
+```bash
+docker build -t buildhuman-service .
+docker run -p 8000:8000 -v $(pwd)/cache:/app/cache buildhuman-service
+```
+
+### Option 3: Cloud Platform
+
+The service can be deployed to:
+- **Fly.io**: Free tier with persistent volumes
+- **Railway**: Simple Git-based deployment
+- **DigitalOcean App Platform**: Managed hosting
+
+**Note**: Deployment configuration not included in this repository. Configure based on your hosting provider's requirements.
+
+## Integration with Desktop App
+
+The desktop app connects to this service to:
+1. Browse available assets
+2. Download assets to local cache
+3. Upload user-created assets (future feature)
+4. Sync ratings and metadata
+
+Default service URL: `http://localhost:8000`
+
+## Future Features
+
+- **User Authentication**: Per-user asset libraries
+- **Cloud Storage**: S3/B2 integration for uploaded assets
+- **Asset Validation**: Automatic GLB validation
+- **Thumbnails**: Auto-generate preview images
+- **Search**: Full-text search with filters
+- **Collections**: Curated asset bundles
 
 ## License
 
-MIT
+GPL - See main repository README for details.

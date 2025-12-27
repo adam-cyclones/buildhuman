@@ -4,51 +4,64 @@
 
 # BuildHuman
 
-A 3D asset management and editing platform built with Tauri, SolidJS, and Python.
+A customizable 3D human generator and asset creation platform built with modern web technologies.
+
+Create realistic human characters with customizable morphs, body types, clothing, and accessories. Export to industry-standard formats for use in games, films, and visualizations.
 
 ## Project Structure
 
 ```
 BuildHuman/
-├── app/              # Tauri desktop application (SolidJS + TypeScript + Bevy)
-│   ├── src/          # SolidJS frontend source
-│   ├── src-tauri/    # Rust backend with Bevy integration
+├── app/              # Desktop application (SolidJS + Tauri + Bevy)
+│   ├── src/          # SolidJS frontend
+│   ├── src-tauri/    # Rust backend with Bevy 3D engine
 │   └── dist/         # Build output
 │
-├── service/          # Python FastAPI backend
-│   ├── api/          # API routes
-│   ├── models/       # Data models
-│   └── cache/        # Asset cache storage
+├── service/          # Python FastAPI asset service
+│   ├── main.py       # API server
+│   ├── cache/        # Cached assets
+│   └── storage/      # Asset files
 │
 └── README.md         # This file
 ```
 
 ## Features
 
-- **Asset Library**: Browse, download, and manage 3D assets (GLB/GLTF)
-- **Asset Editing**: Edit assets in Blender with seamless workflow
-- **Real-time Preview**: Babylon.js 3D preview in the app
-- **Bevy Integration**: Rust-based 3D rendering backend
-- **Local Cache**: Efficient asset caching system
+### Human Generation
+- **Parametric Bodies**: Customize height, weight, proportions, muscle definition
+- **Morphs & Blend Shapes**: Fine-tune facial features, body shapes
+- **Age & Gender**: Generate diverse human characters
+- **Real-time Preview**: See changes instantly with Babylon.js renderer
+
+### Asset Library
+- **Browse & Download**: Extensive library of clothing, accessories, and body parts
+- **Local Cache**: Fast access to downloaded assets
+- **Blender Integration**: Edit assets seamlessly in Blender
+- **Format Support**: GLB/GLTF for maximum compatibility
+
+### Advanced Features
+- **Bevy Integration**: High-performance 3D rendering backend
+- **Scene Creation**: Pose and light your characters
+- **Batch Generation**: Create variations automatically
+- **Export Options**: Export to GLB, FBX, and other formats
+
+## Future Development
+
+BuildHuman may evolve or fork into:
+- **Architecture Tools**: Scene and environment creation
+- **CAD Integration**: Technical human models for ergonomic design
+- **Animation**: Character rigging and motion capture
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+
-- Rust (latest stable)
-- Python 3.9+
-- Blender (for asset editing)
+- **Node.js** 18+ (for the desktop app)
+- **Rust** latest stable (for Tauri backend)
+- **Python** 3.9+ (for asset service)
+- **Blender** (optional, for asset editing)
 
-### Running the App
-
-```bash
-cd app
-npm install
-npm run tauri dev
-```
-
-### Running the Service
+### 1. Run the Asset Service
 
 ```bash
 cd service
@@ -58,10 +71,33 @@ pip install -r requirements.txt
 poetry poe start
 ```
 
+Service will be available at `http://localhost:8000`
+
+### 2. Run the Desktop App
+
+```bash
+cd app
+npm install
+npm run tauri dev
+```
+
 ## Development
 
 This is a monorepo containing both the desktop application and the asset service backend.
 
+### Tech Stack
+
+- **Frontend**: SolidJS, TypeScript, Babylon.js
+- **Backend**: Rust, Tauri, Bevy 3D engine
+- **Service**: Python, FastAPI
+- **3D Formats**: GLB, GLTF
+
+## Contributing
+
+BuildHuman is in active development. Contributions welcome!
+
 ## License
 
-TBD
+GPL - See LICENSE file for details.
+
+Forks and derivatives must maintain attribution and remain open source.

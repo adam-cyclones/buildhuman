@@ -1,39 +1,150 @@
-# Bevy + Tauri Example
+# BuildHuman Desktop App
 
-This is an example of how to use Tauri as the window manager for a Bevy game.
-Rendering everything native in bevy and using Tauri for the window management and UI elements.
+The desktop application for BuildHuman - a 3D human generator and character creation tool.
 
+![BuildHuman Preview](./doc/present.png)
 
-![image](./doc/present.png)
+## Features
 
-## The Example
+### Character Generation
+- Create customizable 3D human characters
+- Adjust height, weight, proportions, and body shapes
+- Fine-tune facial features with morphs and blend shapes
+- Generate diverse ages, genders, and body types
 
-There are two different examples in the same codebase: wgpu and bevy.
-If you want to run the wgpu example, you need to give additional flag as the following command after building the release version:
+### Asset Management
+- Browse and download clothing, accessories, and body parts
+- Local caching for fast access
+- Edit assets in Blender with seamless integration
+- Import/export GLB and GLTF formats
 
-```bash
-cd src-tauri/ && src-tauri/target/release/btexample --use-wgpu
-```
+### Real-time Rendering
+- **Babylon.js Renderer**: Fast web-based 3D preview
+- **Bevy Integration**: High-performance native 3D rendering
+- Switch between renderers for different workflows
+
+### Scene & Posing
+- Position and pose characters
+- Lighting controls
+- Camera management
+- Export scenes for external use
+
+## Tech Stack
+
+- **Frontend**: SolidJS + TypeScript
+- **Window Manager**: Tauri (Rust)
+- **3D Rendering**:
+  - Babylon.js (web renderer)
+  - Bevy (native renderer)
+  - WGPU for GPU acceleration
 
 ## Development
 
-This project is using the [Tauri](https://tauri.app/) framework for the window manager and UI elements. And the build tools from tauri-cli and yarn.
+### Prerequisites
+- Node.js 18+
+- Rust (latest stable)
+- Cargo
 
-To run a development server, you can use the following command:
-
-```bash
-yarn tauri dev
-```
-
-Build the release version:
+### Run Development Server
 
 ```bash
-yarn tauri build
+npm install
+npm run tauri dev
 ```
 
+### Build for Production
 
+```bash
+npm run tauri build
+```
 
+The build will create platform-specific installers in `src-tauri/target/release/bundle/`
+
+### Project Structure
+
+```
+app/
+├── src/                    # SolidJS frontend source
+│   ├── AssetLibrary.tsx   # Asset browser & management
+│   ├── Settings.tsx       # App configuration
+│   ├── BabylonScene.tsx   # 3D preview component
+│   └── ...
+│
+├── src-tauri/             # Rust backend
+│   ├── src/
+│   │   ├── asset_manager.rs  # Asset download & caching
+│   │   ├── settings.rs       # App settings
+│   │   ├── bevy.rs          # Bevy 3D integration
+│   │   ├── mesh/            # Mesh generation
+│   │   └── main.rs
+│   └── Cargo.toml
+│
+└── package.json
+```
+
+## Renderer Modes
+
+### Babylon.js (Default)
+Web-based 3D renderer integrated into the UI. Best for:
+- Quick previews
+- Asset browsing
+- General workflow
+
+### Bevy (Native)
+High-performance Rust-based renderer. Best for:
+- Complex scenes
+- High polygon counts
+- Advanced lighting
+
+### WGPU (Experimental)
+Direct GPU rendering for maximum performance.
+
+Run with WGPU after building release:
+```bash
+./src-tauri/target/release/buildhuman --use-wgpu
+```
+
+## Configuration
+
+Settings are stored locally:
+- **macOS**: `~/Library/Application Support/com.buildhuman.app/`
+- **Linux**: `~/.config/buildhuman/`
+- **Windows**: `%APPDATA%\buildhuman\`
+
+### Key Settings
+- **Author Name**: Your name for created assets
+- **Default Editor**: Path to Blender executable
+- **Cache Location**: Where downloaded assets are stored
+- **Created Assets Folder**: Where your edited assets are saved
+
+## Asset Editing Workflow
+
+1. Browse assets in the Asset Library
+2. Download and cache assets locally
+3. Click "Edit" to create an editable copy
+4. Asset opens in Blender automatically
+5. Edit in Blender, hit Ctrl+S to save
+6. Changes auto-export to GLB
+7. Asset Library detects changes and updates
 
 ## Recommended IDE Setup
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- [VS Code](https://code.visualstudio.com/)
+- [Tauri Extension](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode)
+- [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+
+## Troubleshooting
+
+### Blender Integration Issues
+- Ensure Blender is installed and path is set in Settings
+- Check that Blender version is 2.93 or later
+- Verify export path has write permissions
+
+### Rendering Issues
+- Try switching between Babylon.js and Bevy renderers
+- Check GPU drivers are up to date
+- For WGPU issues, fall back to default renderer
+
+## Contributing
+
+See the main [BuildHuman README](../README.md) for contribution guidelines.
