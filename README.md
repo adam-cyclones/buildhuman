@@ -1,13 +1,17 @@
+<p align="center">
+  <img src="logo.png" alt="BuildHuman Logo" width="400"/>
+</p>
+
 # BuildHuman
 
-A 3D asset management and editing platform built with Tauri, React, and Python.
+A 3D asset management and editing platform built with Tauri, SolidJS, and Python.
 
 ## Project Structure
 
 ```
 BuildHuman/
-├── app/              # Tauri desktop application (React + TypeScript + Bevy)
-│   ├── src/          # React frontend source
+├── app/              # Tauri desktop application (SolidJS + TypeScript + Bevy)
+│   ├── src/          # SolidJS frontend source
 │   ├── src-tauri/    # Rust backend with Bevy integration
 │   └── dist/         # Build output
 │
