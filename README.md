@@ -59,21 +59,24 @@ BuildHuman may evolve or fork into:
 - **Node.js** 18+ (for the desktop app)
 - **Rust** latest stable (for Tauri backend)
 - **Python** 3.9+ (for asset service)
+- **Poetry** (for Python dependency management)
 - **Blender** (optional, for asset editing)
 
 ### 1. Run the Asset Service
 
+First, set up and run the Python backend service.
+
 ```bash
 cd service
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-poetry poe start
+poetry install
+poetry run poe dev
 ```
 
-Service will be available at `http://localhost:8000`
+The service will be available at `http://localhost:8000`.
 
 ### 2. Run the Desktop App
+
+In a separate terminal, run the desktop application.
 
 ```bash
 cd app
@@ -94,10 +97,11 @@ This is a monorepo containing both the desktop application and the asset service
 
 ## Contributing
 
-BuildHuman is in active development. Contributions welcome!
+BuildHuman is in active development. Contributions are welcome! Please open an issue to discuss any major changes.
 
 ## License
 
-GPL - See LICENSE file for details.
+This project is licensed under the GNU General Public License v3.0 or any later version.
 
-Forks and derivatives must maintain attribution and remain open source.
+It is recommended to create a `LICENSE` file in the root of the project containing the full text of the GPL-3.0 license.
+

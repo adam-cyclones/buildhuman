@@ -1,5 +1,6 @@
 import { createSignal, For, onMount, createResource, createEffect, on } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import "./AssetLibrary.css";
 
 interface Asset {
@@ -17,6 +18,7 @@ interface Asset {
   file_size?: number;
   version: string;
   required: boolean;
+  thumbnail_url?: string;
 }
 
 interface Category {
@@ -51,9 +53,9 @@ const AssetLibrary = () => {
   const [editedAssets, setEditedAssets] = createSignal<Map<string, LocalAsset>>(new Map());
   const [showMetadataToast, setShowMetadataToast] = createSignal(false);
   const [metadataToastMessage, setMetadataToastMessage] = createSignal("");
-  const [defaultEditor, setDefaultEditor] = createSignal<string>("");
-  const [defaultEditorType, setDefaultEditorType] = createSignal<string>("");
   const [originalEditedMetadata, setOriginalEditedMetadata] = createSignal<Map<string, Asset>>(new Map());
+  const [changedAssetId, setChangedAssetId] = createSignal<string | null>(null);
+  const [selectedVersions, setSelectedVersions] = createSignal<Map<string, 'original' | 'edited'>>(new Map());
 
   // Fetch assets from API
   const fetchAssets = async () => {
@@ -118,6 +120,33 @@ const AssetLibrary = () => {
     refetch();
   };
 
+  // Merge API assets with local edited assets
+  const allAssets = () => {
+    const apiAssets = assets() || [];
+    const localAssets = Array.from(editedAssets().values()).map(local => local.metadata);
+
+    // Combine both
+    const combined = [...apiAssets, ...localAssets];
+
+    // Sort so forks appear right after their parent
+    combined.sort((a, b) => {
+      // Extract base ID (without _edited_ suffix and timestamp)
+      const getBaseId = (id: string) => id.split("_edited_")[0];
+      const baseA = getBaseId(a.id);
+      const baseB = getBaseId(b.id);
+
+      // If they share the same base ID, parent comes first
+      if (baseA === baseB) {
+        return a.id.includes("_edited_") ? 1 : -1;
+      }
+
+      // Otherwise, sort by base ID
+      return baseA.localeCompare(baseB);
+    });
+
+    return combined;
+  };
+
   interface LocalAsset {
     metadata: {
       id: string;
@@ -134,27 +163,54 @@ const AssetLibrary = () => {
   const fetchCachedAssets = async () => {
     try {
       const cached = await invoke<LocalAsset[]>("list_cached_assets");
+      console.log("📦 Loaded cached assets:", cached);
+
       const assetIds = cached.map(asset => asset.metadata.id);
       setCachedAssets(new Set(assetIds));
+
+      // Also populate edited assets map
+      const edited = cached.filter(asset =>
+        asset.is_edited || asset.metadata.id.endsWith("_editing") || asset.metadata.id.includes("_edited_")
+      );
+
+      console.log("✏️ Edited assets found:", edited);
+
+      setEditedAssets(prev => {
+        const newMap = new Map(prev);
+        edited.forEach(asset => {
+          newMap.set(asset.metadata.id, asset);
+        });
+        return newMap;
+      });
     } catch (error) {
       console.error("Failed to fetch cached assets:", error);
     }
   };
 
-  const loadSettings = async () => {
-    try {
-      const settings = await invoke<{ default_editor: string; default_editor_type: string }>("get_app_settings");
-      setDefaultEditor(settings.default_editor);
-      setDefaultEditorType(settings.default_editor_type);
-    } catch (error) {
-      console.error("Failed to load settings:", error);
-    }
-  };
-
-  onMount(() => {
-    // Fetch cached assets and settings
+  onMount(async () => {
+    // Fetch cached assets
     fetchCachedAssets();
-    loadSettings();
+
+    // Listen for asset file changes from Tauri
+    const unlisten = await listen<string>("asset-file-changed", (event) => {
+      console.log("Asset file changed:", event.payload);
+      const assetId = event.payload;
+
+      // Show notification
+      setChangedAssetId(assetId);
+
+      // Auto-hide notification after 10 seconds
+      setTimeout(() => {
+        if (changedAssetId() === assetId) {
+          setChangedAssetId(null);
+        }
+      }, 10000);
+    });
+
+    // Return cleanup function
+    return () => {
+      unlisten();
+    };
   });
 
   const handleDownload = async (assetId: string, assetName: string) => {
@@ -238,54 +294,76 @@ const AssetLibrary = () => {
   };
 
   const handleEditAsset = async (assetId: string) => {
-    try {
-      const editedCopy = await invoke<LocalAsset>("create_editable_copy", { assetId });
+    // Just switch to editing mode - don't create files yet
+    // Files will be created when user clicks "Edit in Blender" or "Save"
 
-      // Add to edited assets map
-      setEditedAssets(prev => {
-        const newMap = new Map(prev);
-        newMap.set(editedCopy.metadata.id, editedCopy);
-        return newMap;
-      });
+    const asset = selectedAsset();
+    if (!asset) return;
 
-      // Switch to viewing the edited version with updated metadata
-      const editedAsset: Asset = {
-        ...selectedAsset()!,
-        id: editedCopy.metadata.id,
-        name: editedCopy.metadata.name,
-        author: editedCopy.metadata.author, // Use the author from settings
-      };
-      setSelectedAsset(editedAsset);
+    // Check if there's already a saved edited version
+    const existingEdited = editedAssets().get(assetId + "_editing");
 
-      // Store the original metadata for comparison later
+    // Create a temporary edited asset (no files created yet)
+    // If an edited version already exists, use that as the base
+    const editedAsset: Asset = existingEdited
+      ? {
+          ...existingEdited.metadata,
+          id: assetId + "_editing",
+        }
+      : {
+          ...asset,
+          id: assetId + "_editing", // Temporary ID to track editing mode
+        };
+
+    setSelectedAsset(editedAsset);
+
+    // Store the original for later copy creation (only if not already stored)
+    if (!existingEdited) {
       setOriginalEditedMetadata(prev => {
         const newMap = new Map(prev);
-        newMap.set(editedCopy.metadata.id, { ...editedAsset });
+        newMap.set(editedAsset.id, { ...asset });
         return newMap;
       });
-    } catch (error) {
-      console.error("Failed to create editable copy:", error);
-      alert(`Failed to create editable copy: ${error}`);
     }
   };
 
   const handleRevertToOriginal = async (editedId: string) => {
-    // Only show confirmation if changes were made
-    if (hasMetadataChanges(editedId)) {
-      if (!confirm("Revert to original? This will discard your changes.")) {
-        return;
+    // Check if we actually created files or just in "_editing" mode
+    const hasRealCopy = editedAssets().has(editedId);
+
+    if (hasRealCopy) {
+      // Files were created - need to delete them
+      if (hasMetadataChanges(editedId)) {
+        if (!confirm("Revert to original? This will discard your changes and delete the edited files.")) {
+          return;
+        }
       }
-    }
 
-    try {
-      await invoke("revert_to_original", { editedId });
+      try {
+        await invoke("revert_to_original", { editedId });
 
-      // Remove from edited assets map
-      setEditedAssets(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(editedId);
-        return newMap;
-      });
+        // Remove from edited assets map
+        setEditedAssets(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(editedId);
+          return newMap;
+        });
+
+        // Remove from original metadata map
+        setOriginalEditedMetadata(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(editedId);
+          return newMap;
+        });
+
+        setIsPanelOpen(false);
+      } catch (error) {
+        console.error("Failed to revert to original:", error);
+        alert(`Failed to revert: ${error}`);
+      }
+    } else {
+      // Just in "_editing" mode - no files created, just close
+      console.log("Canceling edit mode - no files to delete");
 
       // Remove from original metadata map
       setOriginalEditedMetadata(prev => {
@@ -295,16 +373,12 @@ const AssetLibrary = () => {
       });
 
       setIsPanelOpen(false);
-    } catch (error) {
-      console.error("Failed to revert to original:", error);
-      alert(`Failed to revert: ${error}`);
     }
   };
 
-  const getEditorDisplayName = () => {
-    const type = defaultEditorType();
-    if (!type) return "Editor";
-    return type.charAt(0).toUpperCase() + type.slice(1);
+  const isEditingAsset = (assetId: string) => {
+    // Check if asset is in editing mode (either has real copy or is in "_editing" mode)
+    return editedAssets().has(assetId) || assetId.endsWith("_editing");
   };
 
   const isLicenseEditable = (license: string) => {
@@ -336,33 +410,78 @@ const AssetLibrary = () => {
     );
   };
 
-  const handleOpenInEditor = async (assetId: string) => {
-    if (!defaultEditor()) {
-      alert("Please configure a default editor in Settings first.");
-      return;
-    }
+  const hasEditedVersion = (assetId: string) => {
+    return editedAssets().has(assetId + "_editing");
+  };
 
+  const getDisplayAsset = (asset: Asset): Asset => {
+    const editedVersionId = asset.id + "_editing";
+    const selectedVersion = selectedVersions().get(asset.id) || 'original';
+
+    if (selectedVersion === 'edited' && editedAssets().has(editedVersionId)) {
+      return editedAssets().get(editedVersionId)!.metadata;
+    }
+    return asset;
+  };
+
+  const toggleVersion = (assetId: string, e: MouseEvent) => {
+    e.stopPropagation();
+    const current = selectedVersions().get(assetId) || 'original';
+    const newVersion = current === 'original' ? 'edited' : 'original';
+
+    setSelectedVersions(prev => {
+      const newMap = new Map(prev);
+      newMap.set(assetId, newVersion);
+      return newMap;
+    });
+  };
+
+  const handleOpenInBlender = async (assetId: string) => {
     try {
-      // Get the file path for the edited asset
-      const editedAsset = editedAssets().get(assetId);
-      if (editedAsset) {
-        await invoke("open_in_editor", {
-          filePath: editedAsset.file_path,
-          editorPath: defaultEditor(),
+      // Create editable copy if it doesn't exist yet
+      let editedAsset = editedAssets().get(assetId);
+
+      if (!editedAsset) {
+        // Extract original asset ID (remove "_editing" suffix if present)
+        const originalId = assetId.replace("_editing", "");
+
+        console.log("Creating editable copy for:", originalId);
+        const newCopy = await invoke<LocalAsset>("create_editable_copy", { assetId: originalId });
+
+        // Add to edited assets map
+        setEditedAssets(prev => {
+          const newMap = new Map(prev);
+          newMap.set(newCopy.metadata.id, newCopy);
+          return newMap;
         });
 
-        // Copy the file path to clipboard for easy export
-        try {
-          await navigator.clipboard.writeText(editedAsset.file_path);
-          showMetadataSaveToast(`📋 Export path copied! Export GLB to this path when done editing.`, 5000);
-        } catch (clipboardError) {
-          // If clipboard fails, still show the path
-          showMetadataSaveToast(`Export GLB to: ${editedAsset.file_path}`, 5000);
+        // Update selected asset to use the real edited ID
+        const asset = selectedAsset();
+        if (asset) {
+          const realEditedAsset: Asset = {
+            ...asset,
+            id: newCopy.metadata.id,
+            name: newCopy.metadata.name,
+            author: newCopy.metadata.author,
+          };
+          setSelectedAsset(realEditedAsset);
         }
+
+        editedAsset = newCopy;
+      }
+
+      if (editedAsset) {
+        await invoke("open_in_blender", {
+          filePath: editedAsset.file_path,
+          assetId: editedAsset.metadata.id,
+        });
+
+        // Show success message with auto-export info
+        showMetadataSaveToast(`✨ Opening in Blender... Auto-export enabled! Just press Ctrl+S to save.`, 5000);
       }
     } catch (error) {
-      console.error("Failed to open in editor:", error);
-      alert(`Failed to open in editor: ${error}`);
+      console.error("Failed to open in Blender:", error);
+      alert(`Failed to open in Blender: ${error}`);
     }
   };
 
@@ -372,14 +491,87 @@ const AssetLibrary = () => {
     setTimeout(() => setShowMetadataToast(false), duration);
   };
 
+  const convertToAssetPath = (thumbnailUrl: string) => {
+    if (thumbnailUrl.startsWith('http')) {
+      return thumbnailUrl; // External URL
+    }
+    // Convert local filename to file:// URL using the created-assets directory
+    const homeDir = '~/.buildhuman'; // Will be resolved by Tauri
+    return `file://${homeDir}/created-assets/${thumbnailUrl}`;
+  };
+
+  const handleCaptureScreenshot = async (assetId: string) => {
+    try {
+      const editedAsset = editedAssets().get(assetId);
+      if (!editedAsset) {
+        alert("Asset not found");
+        return;
+      }
+
+      showMetadataSaveToast("Capturing screenshot...", 30000); // Long timeout for Blender render
+
+      // Call backend to capture screenshot
+      const thumbnailPath = await invoke<string>("capture_asset_screenshot", {
+        assetId: editedAsset.metadata.id,
+        glbPath: editedAsset.file_path
+      });
+
+      // Update metadata with new thumbnail
+      const updatedMetadata = {
+        ...editedAsset.metadata,
+        thumbnail_url: thumbnailPath
+      };
+
+      await invoke("update_asset_metadata", {
+        assetId: editedAsset.metadata.id,
+        metadata: updatedMetadata
+      });
+
+      // Refresh UI
+      await fetchCachedAssets();
+      showMetadataSaveToast("Screenshot captured!", 2000);
+    } catch (error) {
+      console.error("Failed to capture screenshot:", error);
+      showMetadataSaveToast(`Screenshot failed: ${error}`, 3000);
+    }
+  };
+
   const handleSaveMetadata = async (assetId: string) => {
     try {
       const updatedAsset = selectedAsset();
       if (!updatedAsset) return;
 
+      // Create editable copy if it doesn't exist yet
+      let editedAsset = editedAssets().get(assetId);
+
+      if (!editedAsset) {
+        // Extract original asset ID (remove "_editing" suffix if present)
+        const originalId = assetId.replace("_editing", "");
+
+        console.log("Creating editable copy for save:", originalId);
+        const newCopy = await invoke<LocalAsset>("create_editable_copy", { assetId: originalId });
+
+        // Add to edited assets map
+        setEditedAssets(prev => {
+          const newMap = new Map(prev);
+          newMap.set(newCopy.metadata.id, newCopy);
+          return newMap;
+        });
+
+        // Update selected asset to use the real edited ID
+        const realEditedAsset: Asset = {
+          ...updatedAsset,
+          id: newCopy.metadata.id,
+        };
+        setSelectedAsset(realEditedAsset);
+
+        editedAsset = newCopy;
+        assetId = newCopy.metadata.id; // Use real ID for saving
+      }
+
       // Convert Asset to AssetMetadata format for backend
       const metadata = {
-        id: updatedAsset.id,
+        id: assetId,
         name: updatedAsset.name,
         type: updatedAsset.type,
         category: updatedAsset.category,
@@ -423,6 +615,29 @@ const AssetLibrary = () => {
     }
   };
 
+  const handleReloadChangedAsset = () => {
+    const assetId = changedAssetId();
+    if (!assetId) return;
+
+    // Dismiss the notification
+    setChangedAssetId(null);
+
+    // Refresh the view if the asset detail panel is open
+    if (selectedAsset() && selectedAsset()!.id === assetId) {
+      // Close and reopen the panel to refresh
+      setIsPanelOpen(false);
+      setTimeout(() => {
+        const asset = assets()?.find((a: Asset) => a.id === assetId);
+        if (asset) {
+          setSelectedAsset(asset);
+          setIsPanelOpen(true);
+        }
+      }, 100);
+    }
+
+    showMetadataSaveToast("✨ Asset reloaded from disk", 2000);
+  };
+
   // Filter categories by selected type
   const filteredCategories = () => {
     if (!categories()) return [];
@@ -432,6 +647,59 @@ const AssetLibrary = () => {
 
   return (
     <div class="asset-library">
+      {changedAssetId() && (
+        <div class="asset-changed-banner">
+          <div class="banner-content">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            <span>
+              Asset "{editedAssets().get(changedAssetId()!)?.metadata.name || changedAssetId()}" has been updated externally.
+            </span>
+          </div>
+          <div class="banner-actions">
+            <button class="reload-btn" onClick={handleReloadChangedAsset}>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="23 4 23 10 17 10" />
+                <polyline points="1 20 1 14 7 14" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+              Reload
+            </button>
+            <button class="dismiss-btn" onClick={() => setChangedAssetId(null)}>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
       <div class="asset-library-header">
         <div class="search-bar">
           <div class="view-toggle">
@@ -561,14 +829,24 @@ const AssetLibrary = () => {
       <div class={`asset-grid ${viewMode() === "list" ? "list-view" : ""}`}>
         {assets.loading && <div class="loading">Loading assets...</div>}
         {assets.error && <div class="error">Failed to load assets. Make sure the asset service is running at {API_URL}</div>}
-        {assets() && assets().length === 0 && !assets.loading && (
+        {allAssets().length === 0 && !assets.loading && (
           <div class="empty">No assets found. Try running: poetry poe seed</div>
         )}
-        <For each={assets()}>
+        <For each={allAssets()}>
           {(asset) => (
             <div class="asset-card" onClick={() => handleAssetClick(asset)}>
               <div class="asset-thumbnail">
-                <div class="placeholder-icon">
+                {asset.thumbnail_url ? (
+                  <img
+                    src={convertToAssetPath(asset.thumbnail_url)}
+                    alt={asset.name}
+                    class="asset-thumbnail-image"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                    }}
+                  />
+                ) : null}
+                <div class={`placeholder-icon ${asset.thumbnail_url ? 'hidden' : ''}`}>
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     width="48"
@@ -589,6 +867,39 @@ const AssetLibrary = () => {
                   <div class="asset-name-wrapper">
                     <h3 class="asset-name">{asset.name}</h3>
                     {asset.required && <span class="required-badge">Essential</span>}
+                    {asset.id.includes("_edited_") && (() => {
+                      const originalId = asset.id.split("_edited_")[0];
+                      const originalAsset = assets()?.find((a: Asset) => a.id === originalId);
+                      return (
+                        <span
+                          class="forked-badge"
+                          title={`Forked from "${originalAsset?.name || originalId}" - click to view original`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (originalAsset) {
+                              handleAssetClick(originalAsset);
+                            }
+                          }}
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                          >
+                            <circle cx="12" cy="18" r="3" />
+                            <circle cx="6" cy="6" r="3" />
+                            <circle cx="18" cy="6" r="3" />
+                            <path d="M18 9v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9" />
+                            <path d="M12 12v3" />
+                          </svg>
+                          Forked
+                        </span>
+                      );
+                    })()}
                   </div>
                   <button
                     class={`download-icon-btn ${cachedAssets().has(asset.id) ? "cached" : ""}`}
@@ -596,8 +907,8 @@ const AssetLibrary = () => {
                       e.stopPropagation();
                       handleDownload(asset.id, asset.name);
                     }}
-                    disabled={downloading() === asset.id}
-                    title={cachedAssets().has(asset.id) ? "Re-download" : "Download"}
+                    disabled={downloading() === asset.id || cachedAssets().has(asset.id)}
+                    title={cachedAssets().has(asset.id) ? "Downloaded" : "Download"}
                   >
                     {downloading() === asset.id ? (
                       <svg
@@ -831,7 +1142,7 @@ const AssetLibrary = () => {
             <div class="panel-title-wrapper">
               <h2>{selectedAsset()!.name}</h2>
               {selectedAsset()!.required && <span class="required-badge">Essential</span>}
-              {editedAssets().has(selectedAsset()!.id) && (
+              {isEditingAsset(selectedAsset()!.id) && (
                 <span class="edited-badge">Edited</span>
               )}
             </div>
@@ -852,41 +1163,91 @@ const AssetLibrary = () => {
           </div>
 
           <div class="panel-content">
-            <div class="panel-thumbnail">
-              <div class="placeholder-icon">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="96"
-                  height="96"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                  <circle cx="8.5" cy="8.5" r="1.5" />
-                  <polyline points="21 15 16 10 5 21" />
-                </svg>
+            <div class="panel-thumbnail-container">
+              <div class="panel-thumbnail">
+                {selectedAsset()!.thumbnail_url ? (
+                  <img
+                    src={convertToAssetPath(selectedAsset()!.thumbnail_url)}
+                    alt={selectedAsset()!.name}
+                    class="panel-thumbnail-image"
+                    onError={(e) => e.currentTarget.style.display = 'none'}
+                  />
+                ) : null}
+                <div class={`placeholder-icon ${selectedAsset()!.thumbnail_url ? 'hidden' : ''}`}>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="96"
+                    height="96"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <polyline points="21 15 16 10 5 21" />
+                  </svg>
+                </div>
               </div>
+              {isEditingAsset(selectedAsset()!.id) && (
+                <div class="thumbnail-actions">
+                  <button
+                    class="thumbnail-action-btn"
+                    onClick={() => handleCaptureScreenshot(selectedAsset()!.id)}
+                    title="Capture screenshot using Blender"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                      <circle cx="12" cy="13" r="4" />
+                    </svg>
+                    Screenshot
+                  </button>
+                  <button
+                    class="thumbnail-action-btn"
+                    onClick={() => {/* TODO: Upload image */}}
+                    title="Upload custom thumbnail image"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                    Upload
+                  </button>
+                </div>
+              )}
             </div>
 
-            {editedAssets().has(selectedAsset()!.id) && (
+            {isEditingAsset(selectedAsset()!.id) && (
               <div class="panel-section export-path-section">
-                <div class="workflow-step">
-                  <span class="step-number">1.</span>
+                <div class="workflow-instructions">
+                  <h4>Seamless Blender Workflow</h4>
+                  <ol class="workflow-list">
+                    <li>Click "Edit in Blender" to open the asset</li>
+                    <li>Make your changes in Blender</li>
+                    <li>Press Ctrl+S to save - the GLB auto-exports!</li>
+                    <li>BuildHuman will detect changes and show a notification</li>
+                  </ol>
                   <button
-                    class={`edit-in-blender-btn ${!defaultEditor() ? "disabled" : ""}`}
-                    onClick={() => {
-                      if (defaultEditor()) {
-                        handleOpenInEditor(selectedAsset()!.id);
-                      }
-                    }}
-                    disabled={!defaultEditor()}
-                    title={
-                      !defaultEditor()
-                        ? "Configure a default editor in Settings"
-                        : `Open in ${getEditorDisplayName()}`
-                    }
+                    class="edit-in-blender-btn"
+                    onClick={() => handleOpenInBlender(selectedAsset()!.id)}
+                    title="Open in Blender with auto-export"
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -900,46 +1261,8 @@ const AssetLibrary = () => {
                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                       <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                     </svg>
-                    Edit in {getEditorDisplayName()}
+                    Edit in Blender
                   </button>
-                </div>
-                <div class="workflow-step">
-                  <span class="step-number">2.</span>
-                  <button
-                    class="copy-path-btn-secondary"
-                    onClick={async () => {
-                      const editedAsset = editedAssets().get(selectedAsset()!.id);
-                      if (editedAsset) {
-                        try {
-                          await navigator.clipboard.writeText(editedAsset.file_path);
-                          showMetadataSaveToast("📋 Export path copied to clipboard!", 3000);
-                        } catch (error) {
-                          alert(`Path: ${editedAsset.file_path}`);
-                        }
-                      }
-                    }}
-                    title="Copy the file path where you need to export"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
-                    Copy Path for Export
-                  </button>
-                </div>
-                <div class="workflow-step">
-                  <span class="step-number">3.</span>
-                  <p class="path-hint">
-                    In {getEditorDisplayName()}, export GLB to the copied path when done editing
-                  </p>
                 </div>
               </div>
             )}
@@ -948,7 +1271,7 @@ const AssetLibrary = () => {
               <h3>Details</h3>
               <div class="detail-row">
                 <span class="detail-label">Name:</span>
-                {editedAssets().has(selectedAsset()!.id) ? (
+                {isEditingAsset(selectedAsset()!.id) ? (
                   <input
                     type="text"
                     class="detail-input"
@@ -967,7 +1290,7 @@ const AssetLibrary = () => {
                 <span class="detail-label">Author:</span>
                 <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem;">
                   <span class="detail-value">{selectedAsset()!.author}</span>
-                  {editedAssets().has(selectedAsset()!.id) && (
+                  {isEditingAsset(selectedAsset()!.id) && (
                     <span class="detail-hint">
                       Change in <span class="settings-link">Edit → Settings</span>
                     </span>
@@ -976,7 +1299,7 @@ const AssetLibrary = () => {
               </div>
               <div class="detail-row">
                 <span class="detail-label">Version:</span>
-                {editedAssets().has(selectedAsset()!.id) ? (
+                {isEditingAsset(selectedAsset()!.id) ? (
                   <input
                     type="text"
                     class="detail-input"
@@ -1011,7 +1334,7 @@ const AssetLibrary = () => {
               </div>
               <div class="detail-row">
                 <span class="detail-label">Type:</span>
-                {editedAssets().has(selectedAsset()!.id) ? (
+                {isEditingAsset(selectedAsset()!.id) ? (
                   <input
                     type="text"
                     class="detail-input"
@@ -1028,7 +1351,7 @@ const AssetLibrary = () => {
               </div>
               <div class="detail-row">
                 <span class="detail-label">Category:</span>
-                {editedAssets().has(selectedAsset()!.id) ? (
+                {isEditingAsset(selectedAsset()!.id) ? (
                   <input
                     type="text"
                     class="detail-input"
@@ -1069,7 +1392,7 @@ const AssetLibrary = () => {
 
             <div class="panel-section">
               <h3>Description</h3>
-              {editedAssets().has(selectedAsset()!.id) ? (
+              {isEditingAsset(selectedAsset()!.id) ? (
                 <textarea
                   class="description-input"
                   value={selectedAsset()!.description || ""}
@@ -1088,7 +1411,7 @@ const AssetLibrary = () => {
               )}
             </div>
 
-            {!editedAssets().has(selectedAsset()!.id) && (
+            {!isEditingAsset(selectedAsset()!.id) && (
               <div class="panel-section">
                 <h3>Rating</h3>
                 <div class="asset-rating">
@@ -1117,20 +1440,18 @@ const AssetLibrary = () => {
           </div>
 
           <div class="panel-footer">
-            {!editedAssets().has(selectedAsset()!.id) && (
+            {!isEditingAsset(selectedAsset()!.id) && !cachedAssets().has(selectedAsset()!.id) && (
               <button
-                class={`download-btn-full ${cachedAssets().has(selectedAsset()!.id) ? "cached" : ""}`}
+                class="download-btn-full"
                 onClick={() => handleDownload(selectedAsset()!.id, selectedAsset()!.name)}
                 disabled={downloading() === selectedAsset()!.id}
               >
                 {downloading() === selectedAsset()!.id
                   ? "Downloading..."
-                  : cachedAssets().has(selectedAsset()!.id)
-                    ? "Re-download Asset"
-                    : "Download Asset"}
+                  : "Download Asset"}
               </button>
             )}
-            {cachedAssets().has(selectedAsset()!.id) && !selectedAsset()!.required && !editedAssets().has(selectedAsset()!.id) && (
+            {cachedAssets().has(selectedAsset()!.id) && !selectedAsset()!.required && !isEditingAsset(selectedAsset()!.id) && (
               <button
                 class="edit-btn"
                 onClick={() => handleEditAsset(selectedAsset()!.id)}
@@ -1156,7 +1477,7 @@ const AssetLibrary = () => {
                 Edit
               </button>
             )}
-            {editedAssets().has(selectedAsset()!.id) && (
+            {isEditingAsset(selectedAsset()!.id) && (
               <button
                 class={hasMetadataChanges(selectedAsset()!.id) ? "save-metadata-btn" : "revert-btn"}
                 onClick={async () => {
@@ -1172,7 +1493,7 @@ const AssetLibrary = () => {
                 title={
                   hasMetadataChanges(selectedAsset()!.id)
                     ? "Save metadata changes"
-                    : "Cancel editing"
+                    : "Close panel"
                 }
               >
                 <svg
@@ -1197,10 +1518,10 @@ const AssetLibrary = () => {
                     </>
                   )}
                 </svg>
-                {hasMetadataChanges(selectedAsset()!.id) ? "Save" : "Cancel"}
+                {hasMetadataChanges(selectedAsset()!.id) ? "Save" : "Close"}
               </button>
             )}
-            {cachedAssets().has(selectedAsset()!.id) && !selectedAsset()!.required && !editedAssets().has(selectedAsset()!.id) && (
+            {cachedAssets().has(selectedAsset()!.id) && !selectedAsset()!.required && !isEditingAsset(selectedAsset()!.id) && (
               <button
                 class="delete-cached-btn"
                 onClick={() => handleDeleteCachedAsset(selectedAsset()!.id, selectedAsset()!.name)}
@@ -1220,7 +1541,7 @@ const AssetLibrary = () => {
                   <line x1="10" y1="11" x2="10" y2="17" />
                   <line x1="14" y1="11" x2="14" y2="17" />
                 </svg>
-                Delete from Cache
+                Delete from Downloads
               </button>
             )}
           </div>

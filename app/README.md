@@ -31,7 +31,7 @@ The desktop application for BuildHuman - a 3D human generator and character crea
 
 ## Tech Stack
 
-- **Frontend**: SolidJS + TypeScript
+- **Frontend**: SolidJS + TypeScript. The frontend is a modern web-based UI that requires a Node.js environment for the build process and development server.
 - **Window Manager**: Tauri (Rust)
 - **3D Rendering**:
   - Babylon.js (web renderer)
@@ -41,9 +41,9 @@ The desktop application for BuildHuman - a 3D human generator and character crea
 ## Development
 
 ### Prerequisites
-- Node.js 18+
-- Rust (latest stable)
-- Cargo
+- **Node.js 18+**: Required for the SolidJS frontend build process and development server.
+- **Rust (latest stable)**: Required for the Tauri backend.
+- **Cargo**: The Rust package manager, used for building the backend.
 
 ### Run Development Server
 

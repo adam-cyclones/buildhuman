@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::AppHandle;
+use std::process::Command;
+use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AssetMetadata {
@@ -130,61 +131,88 @@ pub async fn download_asset(
 pub fn list_cached_assets(app: AppHandle) -> Result<Vec<LocalAsset>, String> {
     let app_data = get_app_data_dir(&app)?;
     let cache_dir = app_data.join("cache");
+    let created_assets_dir = app_data.join("created-assets");
 
     let mut assets = Vec::new();
 
-    // Scan cache directories
-    for type_dir in &["models", "environment"] {
-        let dir_path = cache_dir.join(type_dir);
+    // Helper function to scan a directory for assets
+    let scan_directory = |dir_path: &std::path::Path, is_edited: bool| -> Result<Vec<LocalAsset>, String> {
+        let mut found_assets = Vec::new();
+
         if !dir_path.exists() {
-            continue;
+            return Ok(found_assets);
         }
 
-        let entries = fs::read_dir(&dir_path).map_err(|e| e.to_string())?;
+        let entries = fs::read_dir(dir_path).map_err(|e| e.to_string())?;
 
         for entry in entries {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
 
-            // Look for metadata files
-            if path.extension().and_then(|s| s.to_str()) == Some("json")
+            // Look for metadata.json files (created assets) or _metadata.json files (cached assets)
+            let is_metadata = path.extension().and_then(|s| s.to_str()) == Some("json")
                 && path
                     .file_name()
                     .and_then(|s| s.to_str())
-                    .map(|s| s.ends_with("_metadata.json"))
-                    .unwrap_or(false)
-            {
+                    .map(|s| s.ends_with("metadata.json"))
+                    .unwrap_or(false);
+
+            if is_metadata {
                 let metadata_json = fs::read_to_string(&path).map_err(|e| e.to_string())?;
                 let metadata: AssetMetadata =
                     serde_json::from_str(&metadata_json).map_err(|e| e.to_string())?;
 
                 // Find corresponding asset file
                 let asset_id = &metadata.id;
-                let asset_files: Vec<_> = fs::read_dir(&dir_path)
+                let asset_files: Vec<_> = fs::read_dir(dir_path)
                     .map_err(|e| e.to_string())?
                     .filter_map(|e| e.ok())
                     .filter(|e| {
                         e.path()
                             .file_name()
                             .and_then(|s| s.to_str())
-                            .map(|s| s.starts_with(asset_id) && !s.ends_with("_metadata.json"))
+                            .map(|s| s.starts_with(asset_id) && !s.ends_with("metadata.json") && s.ends_with(".glb"))
                             .unwrap_or(false)
                     })
                     .collect();
 
                 if let Some(asset_file) = asset_files.first() {
-                    assets.push(LocalAsset {
+                    let original_id = if is_edited {
+                        // Handle both _editing and _edited_timestamp patterns
+                        if asset_id.ends_with("_editing") {
+                            Some(asset_id.replace("_editing", ""))
+                        } else if asset_id.contains("_edited_") {
+                            Some(asset_id.split("_edited_").next().unwrap_or(asset_id).to_string())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    found_assets.push(LocalAsset {
                         metadata,
                         file_path: asset_file.path().to_string_lossy().to_string(),
-                        downloaded_at: "unknown".to_string(), // Could read from file metadata
+                        downloaded_at: "unknown".to_string(),
                         cached: true,
-                        is_edited: false,
-                        original_id: None,
+                        is_edited,
+                        original_id,
                     });
                 }
             }
         }
+
+        Ok(found_assets)
+    };
+
+    // Scan cache directories for downloaded assets
+    for type_dir in &["models", "environment"] {
+        let dir_path = cache_dir.join(type_dir);
+        assets.extend(scan_directory(&dir_path, false)?);
     }
+
+    // Scan created-assets directory for edited/forked assets
+    assets.extend(scan_directory(&created_assets_dir, true)?);
 
     Ok(assets)
 }
@@ -263,6 +291,35 @@ pub fn open_folder(path: String) -> Result<(), String> {
             .map_err(|e| format!("Failed to open folder: {}", e))?;
     }
 
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cleanup_blend_files(app: AppHandle) -> Result<(), String> {
+    let app_data = get_app_data_dir(&app)?;
+    let created_assets_dir = app_data.join("created-assets");
+
+    println!("Cleaning up orphaned files from previous session...");
+    let mut blend_count = 0;
+
+    if let Ok(entries) = fs::read_dir(&created_assets_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if let Some(ext) = path.extension() {
+                // Clean up .blend files (temporary working files)
+                if ext == "blend" {
+                    println!("  → Deleting .blend: {:?}", path.file_name().unwrap());
+                    if fs::remove_file(&path).is_ok() {
+                        blend_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    if blend_count > 0 {
+        println!("✓ Cleaned up {} temporary .blend files", blend_count);
+    }
     Ok(())
 }
 
@@ -452,6 +509,22 @@ pub fn create_editable_copy(app: AppHandle, asset_id: String) -> Result<LocalAss
         new_metadata.author = settings.author_name;
     }
 
+    // Auto-capture screenshot on first save
+    match capture_asset_screenshot(
+        app.clone(),
+        edited_id.clone(),
+        new_file_path.to_string_lossy().to_string(),
+    ) {
+        Ok(thumbnail_filename) => {
+            new_metadata.thumbnail_url = Some(thumbnail_filename);
+            println!("✓ Auto-captured screenshot for new editable copy");
+        }
+        Err(e) => {
+            eprintln!("⚠ Warning: Failed to auto-capture screenshot: {}", e);
+            // Continue without screenshot - not a critical error
+        }
+    }
+
     // Save metadata
     let metadata_path = created_assets_dir.join(format!("{}_metadata.json", edited_id));
     let metadata_json = serde_json::to_string_pretty(&new_metadata)
@@ -491,24 +564,79 @@ pub fn revert_to_original(app: AppHandle, edited_id: String) -> Result<(), Strin
     let app_data = get_app_data_dir(&app)?;
     let created_assets_dir = app_data.join("created-assets");
 
-    // Delete the edited asset file and metadata
+    println!("Cleaning up edited asset: {}", edited_id);
+
+    // Delete the edited asset files (.glb, .blend, and metadata)
     if let Ok(entries) = fs::read_dir(&created_assets_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let file_name = entry.file_name();
             if let Some(name_str) = file_name.to_str() {
                 if name_str.starts_with(&edited_id) {
-                    fs::remove_file(entry.path())
-                        .map_err(|e| format!("Failed to delete file: {}", e))?;
+                    let path = entry.path();
+                    println!("  → Deleting: {:?}", path);
+                    fs::remove_file(&path)
+                        .map_err(|e| format!("Failed to delete file {:?}: {}", path, e))?;
                 }
             }
         }
     }
 
+    println!("✓ Cleanup complete");
     Ok(())
 }
 
 #[tauri::command]
-pub fn open_in_editor(file_path: String, editor_path: String) -> Result<(), String> {
+pub fn open_in_blender(app: AppHandle, file_path: String, asset_id: String) -> Result<(), String> {
+    use std::process::Command;
+
+    let blender_path = "/Applications/Blender.app";
+    println!("Using Blender at: {}", blender_path);
+
+    // Create .blend file path (same location as GLB, but .blend extension)
+    let blend_path = file_path.replace(".glb", ".blend");
+
+    // Simple script: just import GLB and save as .blend
+    let import_script = format!(
+        "import bpy\nbpy.ops.wm.read_homefile(use_empty=True)\nbpy.ops.import_scene.gltf(filepath='{}')\nbpy.ops.wm.save_as_mainfile(filepath='{}')\nprint('BuildHuman: Ready to edit - changes will auto-save to GLB')",
+        file_path.replace("'", "\\'"),
+        blend_path.replace("'", "\\'")
+    );
+
+    println!("Opening Blender...");
+
+    #[cfg(target_os = "macos")]
+    {
+        let blender_bin = format!("{}/Contents/MacOS/Blender", blender_path);
+        Command::new(blender_bin)
+            .arg("--python-expr")
+            .arg(&import_script)
+            .spawn()
+            .map_err(|e| format!("Failed to open Blender: {}", e))?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Command::new(&blender_path)
+            .arg("--python-expr")
+            .arg(&import_script)
+            .spawn()
+            .map_err(|e| format!("Failed to open Blender: {}", e))?;
+    }
+
+    // Watch the .blend file (not the GLB) and export when it changes
+    println!("Starting file watcher for .blend file: {}", blend_path);
+    watch_blend_and_export(app, blend_path, file_path, asset_id)?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_in_editor(
+    app: AppHandle,
+    file_path: String,
+    editor_path: String,
+    asset_id: Option<String>,
+) -> Result<(), String> {
     use std::process::Command;
 
     // Check if this is Blender and the file is GLB/GLTF
@@ -517,10 +645,65 @@ pub fn open_in_editor(file_path: String, editor_path: String) -> Result<(), Stri
         || file_path.to_lowercase().ends_with(".gltf");
 
     if is_blender && is_gltf {
-        // For Blender with GLTF/GLB files, use import command
-        let python_script = format!(
-            "import bpy; bpy.ops.wm.read_homefile(use_empty=True); bpy.ops.import_scene.gltf(filepath='{}')",
-            file_path.replace("'", "\\'")
+        // For Blender with GLTF/GLB files, use import command + auto-export script
+
+        // Read the auto-export template
+        let template_path = std::env::current_exe()
+            .map_err(|e| format!("Failed to get exe path: {}", e))?
+            .parent()
+            .ok_or("Failed to get parent directory")?
+            .parent()
+            .ok_or("Failed to get Resources directory")?
+            .join("blender_auto_export.py");
+
+        let auto_export_script = std::fs::read_to_string(&template_path)
+            .unwrap_or_else(|_| {
+                // Fallback: inline the auto-export script if template not found
+                r#"
+import bpy
+from bpy.app.handlers import persistent
+
+EXPORT_PATH = "{export_path}"
+
+@persistent
+def auto_export_glb(dummy):
+    try:
+        print(f"BuildHuman: Auto-exporting GLB to {EXPORT_PATH}")
+        bpy.ops.export_scene.gltf(
+            filepath=EXPORT_PATH,
+            export_format='GLB',
+            export_keep_originals=False,
+            export_texcoords=True,
+            export_normals=True,
+            export_materials='EXPORT',
+            export_colors=True,
+            export_cameras=False,
+            export_lights=False,
+            export_apply=True
+        )
+        print("BuildHuman: GLB export complete!")
+    except Exception as e:
+        print(f"BuildHuman: Export failed: {e}")
+
+if auto_export_glb not in bpy.app.handlers.save_post:
+    bpy.app.handlers.save_post.append(auto_export_glb)
+    print(f"BuildHuman: Auto-export enabled for {EXPORT_PATH}")
+"#.to_string()
+            });
+
+        // Replace the {export_path} placeholder with actual path
+        let auto_export_with_path = auto_export_script.replace("{export_path}", &file_path.replace("\\", "\\\\"));
+
+        // Create .blend file path (same location as GLB, but .blend extension)
+        let blend_path = file_path.replace(".glb", ".blend");
+
+        // Combine import script + auto-export script + auto-save .blend file
+        let combined_script = format!(
+            "import bpy\nbpy.ops.wm.read_homefile(use_empty=True)\nbpy.ops.import_scene.gltf(filepath='{}')\nbpy.ops.wm.save_as_mainfile(filepath='{}')\nprint('BuildHuman: .blend file created at {}')\n\n{}",
+            file_path.replace("'", "\\'"),
+            blend_path.replace("'", "\\'"),
+            blend_path.replace("'", "\\'"),
+            auto_export_with_path
         );
 
         #[cfg(target_os = "macos")]
@@ -534,7 +717,7 @@ pub fn open_in_editor(file_path: String, editor_path: String) -> Result<(), Stri
 
             Command::new(blender_bin)
                 .arg("--python-expr")
-                .arg(&python_script)
+                .arg(&combined_script)
                 .spawn()
                 .map_err(|e| format!("Failed to open Blender: {}", e))?;
         }
@@ -543,9 +726,15 @@ pub fn open_in_editor(file_path: String, editor_path: String) -> Result<(), Stri
         {
             Command::new(&editor_path)
                 .arg("--python-expr")
-                .arg(&python_script)
+                .arg(&combined_script)
                 .spawn()
                 .map_err(|e| format!("Failed to open Blender: {}", e))?;
+        }
+
+        // Start watching the file for changes if asset_id is provided
+        if let Some(id) = asset_id {
+            println!("Starting file watcher for asset: {}", id);
+            watch_asset_file(app, file_path.clone(), id)?;
         }
     } else {
         // Regular file opening for other editors or file types
@@ -577,4 +766,275 @@ pub fn open_in_editor(file_path: String, editor_path: String) -> Result<(), Stri
     }
 
     Ok(())
+}
+
+fn watch_blend_and_export(
+    app: AppHandle,
+    blend_path: String,
+    glb_path: String,
+    asset_id: String,
+) -> Result<(), String> {
+    use notify::{Watcher, RecursiveMode};
+    use notify_debouncer_mini::new_debouncer;
+    use std::time::Duration;
+    use std::path::Path;
+    use std::process::Command;
+
+    println!("Setting up watcher for .blend file: {}", blend_path);
+
+    // Spawn a thread to handle the watching
+    std::thread::spawn(move || {
+        // Wait for .blend file to be created (up to 30 seconds)
+        println!("Waiting for .blend file to be created...");
+        let mut found = false;
+        for i in 0..300 {
+            if Path::new(&blend_path).exists() {
+                println!("✓ Found .blend file: {}", blend_path);
+                found = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            if i % 10 == 0 {
+                println!("Still waiting for .blend file... ({}s)", i / 10);
+            }
+        }
+
+        if !found {
+            eprintln!("✗ Timeout: .blend file was not created");
+            return;
+        }
+
+        // Now create the watcher
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let mut debouncer = match new_debouncer(Duration::from_millis(1000), tx) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("Failed to create debouncer: {}", e);
+                return;
+            }
+        };
+
+        // Start watching the .blend file
+        if let Err(e) = debouncer.watcher().watch(Path::new(&blend_path), RecursiveMode::NonRecursive) {
+            eprintln!("Failed to watch .blend file: {}", e);
+            return;
+        }
+
+        println!("✓ Now watching .blend file for changes");
+
+        // Listen for changes
+        loop {
+            match rx.recv() {
+                Ok(Ok(events)) => {
+                    for event in events {
+                        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                        println!("✓ .blend file changed: {:?}", event.path);
+                        println!("→ Exporting GLB in background...");
+
+                        let export_script = format!(
+                            "import bpy; bpy.ops.wm.open_mainfile(filepath='{}'); bpy.ops.export_scene.gltf(filepath='{}', export_format='GLB', export_apply=True); print('✓ Export complete')",
+                            blend_path.replace("'", "\\'"),
+                            glb_path.replace("'", "\\'")
+                        );
+
+                        let blender_bin = "/Applications/Blender.app/Contents/MacOS/Blender";
+                        match Command::new(blender_bin)
+                            .arg("--background")
+                            .arg("--python-expr")
+                            .arg(&export_script)
+                            .output()
+                        {
+                            Ok(output) => {
+                                if output.status.success() {
+                                    println!("✓ GLB export successful!");
+                                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
+                                    // Emit event to frontend
+                                    if let Err(e) = app.emit("asset-file-changed", asset_id.clone()) {
+                                        eprintln!("Failed to emit event: {}", e);
+                                    }
+                                } else {
+                                    eprintln!("✗ GLB export failed!");
+                                    eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("✗ Failed to run Blender: {}", e);
+                            }
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    eprintln!("File watch error: {:?}", e);
+                }
+                Err(e) => {
+                    eprintln!("Channel closed: {:?}", e);
+                    break;
+                }
+            }
+        }
+
+        // Keep debouncer alive until thread exits
+        drop(debouncer);
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn watch_asset_file(app: AppHandle, file_path: String, asset_id: String) -> Result<(), String> {
+    use notify::{Watcher, RecursiveMode};
+    use notify_debouncer_mini::new_debouncer;
+    use std::time::Duration;
+    use std::path::Path;
+
+    let path = Path::new(&file_path);
+    if !path.exists() {
+        return Err(format!("File does not exist: {}", file_path));
+    }
+
+    // Create a debounced watcher (prevents rapid-fire events)
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    let mut debouncer = new_debouncer(Duration::from_millis(500), tx)
+        .map_err(|e| format!("Failed to create file watcher: {}", e))?;
+
+    debouncer
+        .watcher()
+        .watch(path, RecursiveMode::NonRecursive)
+        .map_err(|e| format!("Failed to watch file: {}", e))?;
+
+    // Spawn a thread to listen for file changes
+    let app_clone = app.clone();
+    let asset_id_clone = asset_id.clone();
+
+    std::thread::spawn(move || {
+        loop {
+            match rx.recv() {
+                Ok(Ok(events)) => {
+                    // File was modified - emit event to frontend
+                    for event in events {
+                        println!("Asset file changed: {:?}", event.path);
+
+                        // Emit to frontend
+                        let _ = app_clone.emit("asset-file-changed", asset_id_clone.clone());
+                    }
+                }
+                Ok(Err(e)) => {
+                    eprintln!("File watch error: {:?}", e);
+                }
+                Err(e) => {
+                    eprintln!("Channel receive error: {:?}", e);
+                    break; // Exit thread if channel is closed
+                }
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_watching_asset(asset_id: String) -> Result<(), String> {
+    // Note: In a production app, you'd want to maintain a registry of watchers
+    // and stop them properly. For now, watchers will stop when the app closes.
+    println!("Stop watching asset: {}", asset_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn capture_asset_screenshot(
+    app: AppHandle,
+    asset_id: String,
+    glb_path: String,
+) -> Result<String, String> {
+    println!("📸 Capturing screenshot for asset: {}", asset_id);
+
+    let app_data = get_app_data_dir(&app)?;
+    let created_assets_dir = app_data.join("created-assets");
+    let thumbnail_filename = format!("{}_thumbnail.png", asset_id);
+    let thumbnail_path = created_assets_dir.join(&thumbnail_filename);
+
+    println!("  GLB path: {}", glb_path);
+    println!("  Thumbnail will be saved to: {:?}", thumbnail_path);
+
+    // Create Blender script to render thumbnail
+    let render_script = format!(
+        r#"import bpy
+import sys
+
+# Clear scene
+bpy.ops.wm.read_homefile(use_empty=True)
+
+# Import GLB
+print("Importing GLB: {}")
+try:
+    bpy.ops.import_scene.gltf(filepath='{}')
+except Exception as e:
+    print(f"Import failed: {{e}}")
+    sys.exit(1)
+
+# Set up camera to frame object
+bpy.ops.object.camera_add(location=(3, -3, 2))
+camera = bpy.context.object
+camera.rotation_euler = (1.1, 0, 0.785)
+
+# Add light
+bpy.ops.object.light_add(type='SUN', location=(5, 5, 5))
+light = bpy.context.object
+light.data.energy = 1.5
+
+# Set camera as active
+bpy.context.scene.camera = camera
+
+# Configure render settings
+bpy.context.scene.render.filepath = '{}'
+bpy.context.scene.render.resolution_x = 512
+bpy.context.scene.render.resolution_y = 512
+bpy.context.scene.render.image_settings.file_format = 'PNG'
+bpy.context.scene.render.film_transparent = False
+
+# Set background color
+bpy.context.scene.world.use_nodes = True
+bg = bpy.context.scene.world.node_tree.nodes['Background']
+bg.inputs[0].default_value = (0.1, 0.1, 0.1, 1.0)
+
+# Render
+print("Rendering...")
+bpy.ops.render.render(write_still=True)
+print("Render complete!")
+"#,
+        glb_path.replace("'", "\\'"),
+        glb_path.replace("'", "\\'"),
+        thumbnail_path.to_string_lossy().replace("'", "\\'")
+    );
+
+    // Execute Blender in background mode
+    let blender_bin = "/Applications/Blender.app/Contents/MacOS/Blender";
+    println!("  Executing Blender...");
+
+    let output = Command::new(blender_bin)
+        .arg("--background")
+        .arg("--python-expr")
+        .arg(&render_script)
+        .output()
+        .map_err(|e| format!("Failed to run Blender: {}", e))?;
+
+    // Check if successful
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("Blender stderr: {}", stderr);
+        return Err(format!("Blender render failed: {}", stderr));
+    }
+
+    // Verify thumbnail was created
+    if !thumbnail_path.exists() {
+        return Err("Screenshot file was not created".to_string());
+    }
+
+    println!("✓ Screenshot captured successfully: {}", thumbnail_filename);
+
+    // Return just the filename (not full path)
+    Ok(thumbnail_filename)
 }
