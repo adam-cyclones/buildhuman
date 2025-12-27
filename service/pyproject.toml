@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "buildhuman-asset-service"
+version = "0.1.0"
+description = "Asset library service for BuildHuman with LLM quality control"
+authors = ["BuildHuman <hello@buildhuman.com>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.32.1"}
+python-multipart = "^0.0.18"
+aiofiles = "^24.1.0"
+pillow = "^11.0.0"
+anthropic = "^0.39.0"
+httpx = "^0.28.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.4"
+black = "^24.10.0"
+ruff = "^0.8.4"
+poethepoet = "^0.31.1"
+
+[tool.poe.tasks]
+dev = "uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+serve = "uvicorn main:app --host 0.0.0.0 --port 8000"
+test = "pytest"
+format = "black ."
+lint = "ruff check ."
+init-db = { shell = "python -c 'from main import init_db; init_db()'" }
+seed = "python seed_assets.py"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
