@@ -2,6 +2,7 @@ import { createSignal, For, onMount, createResource, createEffect, on } from "so
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import "./AssetLibrary.css";
 
 interface Asset {
@@ -56,6 +57,7 @@ const AssetLibrary = () => {
   const [metadataToastMessage, setMetadataToastMessage] = createSignal("");
   const [originalEditedMetadata, setOriginalEditedMetadata] = createSignal<Map<string, Asset>>(new Map());
   const [changedAssetId, setChangedAssetId] = createSignal<string | null>(null);
+  const [appDataPath, setAppDataPath] = createSignal<string>("");
 
   // Fetch assets from API
   const fetchAssets = async () => {
@@ -188,6 +190,14 @@ const AssetLibrary = () => {
   };
 
   onMount(async () => {
+    // Get app data path for converting local file paths
+    try {
+      const path = await invoke<string>("get_app_data_path");
+      setAppDataPath(path);
+    } catch (error) {
+      console.error("Failed to get app data path:", error);
+    }
+
     // Fetch cached assets
     fetchCachedAssets();
 
@@ -470,9 +480,12 @@ const AssetLibrary = () => {
     if (thumbnailUrl.startsWith('http')) {
       return thumbnailUrl; // External URL
     }
-    // Convert local filename to file:// URL using the created-assets directory
-    const homeDir = '~/.buildhuman'; // Will be resolved by Tauri
-    return `file://${homeDir}/created-assets/${thumbnailUrl}`;
+    // Convert local filename to Tauri asset protocol URL
+    if (!appDataPath()) {
+      return ''; // App data path not loaded yet
+    }
+    const fullPath = `${appDataPath()}/created-assets/${thumbnailUrl}`;
+    return convertFileSrc(fullPath);
   };
 
   const handleSaveMetadata = async (assetId: string) => {
