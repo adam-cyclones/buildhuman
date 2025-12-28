@@ -944,6 +944,74 @@ pub fn stop_watching_asset(asset_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn set_asset_thumbnail(
+    app: AppHandle,
+    asset_id: String,
+    thumbnail_path: String,
+) -> Result<String, String> {
+    println!("🖼️  Setting custom thumbnail for asset: {}", asset_id);
+    println!("  Source: {}", thumbnail_path);
+
+    let app_data = get_app_data_dir(&app)?;
+    let created_assets_dir = app_data.join("created-assets");
+
+    // Determine file extension
+    let source_path = std::path::Path::new(&thumbnail_path);
+    let ext = source_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png");
+
+    let thumbnail_filename = format!("{}_thumbnail.{}", asset_id, ext);
+    let dest_path = created_assets_dir.join(&thumbnail_filename);
+
+    println!("  Destination: {:?}", dest_path);
+
+    // Copy the image file
+    fs::copy(&source_path, &dest_path)
+        .map_err(|e| format!("Failed to copy thumbnail: {}", e))?;
+
+    // Update metadata
+    let metadata_path = created_assets_dir.join(format!("{}_metadata.json", asset_id));
+    if metadata_path.exists() {
+        let metadata_content = fs::read_to_string(&metadata_path)
+            .map_err(|e| format!("Failed to read metadata: {}", e))?;
+        let mut metadata: AssetMetadata = serde_json::from_str(&metadata_content)
+            .map_err(|e| format!("Failed to parse metadata: {}", e))?;
+
+        metadata.thumbnail_url = Some(thumbnail_filename.clone());
+
+        let metadata_json = serde_json::to_string_pretty(&metadata)
+            .map_err(|e| format!("Failed to serialize metadata: {}", e))?;
+        fs::write(&metadata_path, metadata_json)
+            .map_err(|e| format!("Failed to write metadata: {}", e))?;
+
+        println!("✓ Thumbnail set successfully: {}", thumbnail_filename);
+        Ok(thumbnail_filename)
+    } else {
+        Err("Asset metadata not found".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn get_asset_thumbnail(app: AppHandle, asset_id: String) -> Result<String, String> {
+    let app_data = get_app_data_dir(&app)?;
+    let created_assets_dir = app_data.join("created-assets");
+
+    let metadata_path = created_assets_dir.join(format!("{}_metadata.json", asset_id));
+    if metadata_path.exists() {
+        let metadata_content = fs::read_to_string(&metadata_path)
+            .map_err(|e| format!("Failed to read metadata: {}", e))?;
+        let metadata: AssetMetadata = serde_json::from_str(&metadata_content)
+            .map_err(|e| format!("Failed to parse metadata: {}", e))?;
+
+        metadata.thumbnail_url.ok_or("No thumbnail set".to_string())
+    } else {
+        Err("Asset metadata not found".to_string())
+    }
+}
+
+#[tauri::command]
 pub fn capture_asset_screenshot(
     app: AppHandle,
     asset_id: String,

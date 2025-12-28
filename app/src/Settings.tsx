@@ -29,7 +29,7 @@ interface AppSettings {
   custom_assets_folder: string;
 }
 
-const Settings = (props: SettingsProps) => {
+const Settings = (_props: SettingsProps) => {
   const [cachedAssets, setCachedAssets] = createSignal<LocalAsset[]>([]);
   const [clearing, setClearing] = createSignal(false);
   const [activeCategory, setActiveCategory] = createSignal("general");

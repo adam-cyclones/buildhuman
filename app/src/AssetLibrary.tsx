@@ -1,6 +1,7 @@
 import { createSignal, For, onMount, createResource, createEffect, on } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import "./AssetLibrary.css";
 
 interface Asset {
@@ -55,7 +56,6 @@ const AssetLibrary = () => {
   const [metadataToastMessage, setMetadataToastMessage] = createSignal("");
   const [originalEditedMetadata, setOriginalEditedMetadata] = createSignal<Map<string, Asset>>(new Map());
   const [changedAssetId, setChangedAssetId] = createSignal<string | null>(null);
-  const [selectedVersions, setSelectedVersions] = createSignal<Map<string, 'original' | 'edited'>>(new Map());
 
   // Fetch assets from API
   const fetchAssets = async () => {
@@ -307,7 +307,7 @@ const AssetLibrary = () => {
     // If an edited version already exists, use that as the base
     const editedAsset: Asset = existingEdited
       ? {
-          ...existingEdited.metadata,
+          ...(existingEdited.metadata as Asset),
           id: assetId + "_editing",
         }
       : {
@@ -410,31 +410,6 @@ const AssetLibrary = () => {
     );
   };
 
-  const hasEditedVersion = (assetId: string) => {
-    return editedAssets().has(assetId + "_editing");
-  };
-
-  const getDisplayAsset = (asset: Asset): Asset => {
-    const editedVersionId = asset.id + "_editing";
-    const selectedVersion = selectedVersions().get(asset.id) || 'original';
-
-    if (selectedVersion === 'edited' && editedAssets().has(editedVersionId)) {
-      return editedAssets().get(editedVersionId)!.metadata;
-    }
-    return asset;
-  };
-
-  const toggleVersion = (assetId: string, e: MouseEvent) => {
-    e.stopPropagation();
-    const current = selectedVersions().get(assetId) || 'original';
-    const newVersion = current === 'original' ? 'edited' : 'original';
-
-    setSelectedVersions(prev => {
-      const newMap = new Map(prev);
-      newMap.set(assetId, newVersion);
-      return newMap;
-    });
-  };
 
   const handleOpenInBlender = async (assetId: string) => {
     try {
@@ -500,42 +475,6 @@ const AssetLibrary = () => {
     return `file://${homeDir}/created-assets/${thumbnailUrl}`;
   };
 
-  const handleCaptureScreenshot = async (assetId: string) => {
-    try {
-      const editedAsset = editedAssets().get(assetId);
-      if (!editedAsset) {
-        alert("Asset not found");
-        return;
-      }
-
-      showMetadataSaveToast("Capturing screenshot...", 30000); // Long timeout for Blender render
-
-      // Call backend to capture screenshot
-      const thumbnailPath = await invoke<string>("capture_asset_screenshot", {
-        assetId: editedAsset.metadata.id,
-        glbPath: editedAsset.file_path
-      });
-
-      // Update metadata with new thumbnail
-      const updatedMetadata = {
-        ...editedAsset.metadata,
-        thumbnail_url: thumbnailPath
-      };
-
-      await invoke("update_asset_metadata", {
-        assetId: editedAsset.metadata.id,
-        metadata: updatedMetadata
-      });
-
-      // Refresh UI
-      await fetchCachedAssets();
-      showMetadataSaveToast("Screenshot captured!", 2000);
-    } catch (error) {
-      console.error("Failed to capture screenshot:", error);
-      showMetadataSaveToast(`Screenshot failed: ${error}`, 3000);
-    }
-  };
-
   const handleSaveMetadata = async (assetId: string) => {
     try {
       const updatedAsset = selectedAsset();
@@ -593,6 +532,40 @@ const AssetLibrary = () => {
     } catch (error) {
       console.error("Failed to save metadata:", error);
       throw error;
+    }
+  };
+
+  const handleChangeThumbnail = async (assetId: string) => {
+    try {
+      const selected = await open({
+        title: "Select Thumbnail Image",
+        multiple: false,
+        directory: false,
+        filters: [{
+          name: "Images",
+          extensions: ["png", "jpg", "jpeg", "webp"]
+        }]
+      });
+
+      if (selected) {
+        // Call backend to set the thumbnail
+        await invoke("set_asset_thumbnail", {
+          assetId,
+          thumbnailPath: selected
+        });
+
+        // Update the selected asset to show the new thumbnail
+        const updatedAsset = { ...selectedAsset()! };
+        // The backend will return a relative path or filename
+        const thumbnailFilename = await invoke<string>("get_asset_thumbnail", { assetId });
+        updatedAsset.thumbnail_url = thumbnailFilename;
+        setSelectedAsset(updatedAsset);
+
+        showMetadataSaveToast("Thumbnail updated", 2000);
+      }
+    } catch (error) {
+      console.error("Failed to set thumbnail:", error);
+      showMetadataSaveToast(`Failed to set thumbnail: ${error}`, 3000);
     }
   };
 
@@ -861,47 +834,48 @@ const AssetLibrary = () => {
                     <polyline points="21 15 16 10 5 21" />
                   </svg>
                 </div>
+                {asset.required && (
+                  <span class="required-badge overlay-badge">Essential</span>
+                )}
+                {asset.id.includes("_edited_") && (() => {
+                  const originalId = asset.id.split("_edited_")[0];
+                  const originalAsset = assets()?.find((a: Asset) => a.id === originalId);
+                  return (
+                    <span
+                      class="unpublished-badge overlay-badge"
+                      title={`Based on "${originalAsset?.name || originalId}" - click to view original`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (originalAsset) {
+                          handleAssetClick(originalAsset);
+                        }
+                      }}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
+                        <circle cx="12" cy="18" r="3" />
+                        <circle cx="6" cy="6" r="3" />
+                        <circle cx="18" cy="6" r="3" />
+                        <path d="M18 9v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9" />
+                        <path d="M12 12v3" />
+                      </svg>
+                      Unpublished
+                    </span>
+                  );
+                })()}
               </div>
               <div class="asset-info">
                 <div class="asset-header">
-                  <div class="asset-name-wrapper">
+                  <div class="asset-title-row">
                     <h3 class="asset-name">{asset.name}</h3>
-                    {asset.required && <span class="required-badge">Essential</span>}
-                    {asset.id.includes("_edited_") && (() => {
-                      const originalId = asset.id.split("_edited_")[0];
-                      const originalAsset = assets()?.find((a: Asset) => a.id === originalId);
-                      return (
-                        <span
-                          class="forked-badge"
-                          title={`Forked from "${originalAsset?.name || originalId}" - click to view original`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (originalAsset) {
-                              handleAssetClick(originalAsset);
-                            }
-                          }}
-                        >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="12"
-                            height="12"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                          >
-                            <circle cx="12" cy="18" r="3" />
-                            <circle cx="6" cy="6" r="3" />
-                            <circle cx="18" cy="6" r="3" />
-                            <path d="M18 9v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9" />
-                            <path d="M12 12v3" />
-                          </svg>
-                          Forked
-                        </span>
-                      );
-                    })()}
-                  </div>
-                  <button
+                    <button
                     class={`download-icon-btn ${cachedAssets().has(asset.id) ? "cached" : ""}`}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -954,9 +928,10 @@ const AssetLibrary = () => {
                     )}
                   </button>
                 </div>
-                {asset.description && (
-                  <p class="asset-description">{asset.description}</p>
-                )}
+              </div>
+              {asset.description && (
+                <p class="asset-description">{asset.description}</p>
+              )}
                 <div class="asset-meta">
                   <span class="asset-type">{asset.type}</span>
                   <span class="asset-author">{asset.author}</span>
@@ -1141,10 +1116,6 @@ const AssetLibrary = () => {
           <div class="panel-header">
             <div class="panel-title-wrapper">
               <h2>{selectedAsset()!.name}</h2>
-              {selectedAsset()!.required && <span class="required-badge">Essential</span>}
-              {isEditingAsset(selectedAsset()!.id) && (
-                <span class="edited-badge">Edited</span>
-              )}
             </div>
             <button class="close-btn" onClick={handleClosePanel}>
               <svg
@@ -1167,7 +1138,7 @@ const AssetLibrary = () => {
               <div class="panel-thumbnail">
                 {selectedAsset()!.thumbnail_url ? (
                   <img
-                    src={convertToAssetPath(selectedAsset()!.thumbnail_url)}
+                    src={convertToAssetPath(selectedAsset()!.thumbnail_url!)}
                     alt={selectedAsset()!.name}
                     class="panel-thumbnail-image"
                     onError={(e) => e.currentTarget.style.display = 'none'}
@@ -1188,66 +1159,53 @@ const AssetLibrary = () => {
                     <polyline points="21 15 16 10 5 21" />
                   </svg>
                 </div>
+                {selectedAsset()!.required && (
+                  <span class="required-badge overlay-badge">Essential</span>
+                )}
+                {isEditingAsset(selectedAsset()!.id) && (
+                  <span class="editing-badge overlay-badge">Editing</span>
+                )}
               </div>
-              {isEditingAsset(selectedAsset()!.id) && (
-                <div class="thumbnail-actions">
-                  <button
-                    class="thumbnail-action-btn"
-                    onClick={() => handleCaptureScreenshot(selectedAsset()!.id)}
-                    title="Capture screenshot using Blender"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                      <circle cx="12" cy="13" r="4" />
-                    </svg>
-                    Screenshot
-                  </button>
-                  <button
-                    class="thumbnail-action-btn"
-                    onClick={() => {/* TODO: Upload image */}}
-                    title="Upload custom thumbnail image"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="17 8 12 3 7 8" />
-                      <line x1="12" y1="3" x2="12" y2="15" />
-                    </svg>
-                    Upload
-                  </button>
-                </div>
-              )}
             </div>
 
             {isEditingAsset(selectedAsset()!.id) && (
-              <div class="panel-section export-path-section">
-                <div class="workflow-instructions">
-                  <h4>Seamless Blender Workflow</h4>
-                  <ol class="workflow-list">
-                    <li>Click "Edit in Blender" to open the asset</li>
-                    <li>Make your changes in Blender</li>
-                    <li>Press Ctrl+S to save - the GLB auto-exports!</li>
-                    <li>BuildHuman will detect changes and show a notification</li>
-                  </ol>
+              <>
+                <h3 class="actions-heading">Actions</h3>
+
+                <div class="panel-section action-panel">
+                  <p class="action-help-text">
+                    Set a preview image for this asset.
+                  </p>
                   <button
-                    class="edit-in-blender-btn"
+                    class="action-btn"
+                    onClick={() => handleChangeThumbnail(selectedAsset()!.id)}
+                    title="Choose thumbnail image"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <polyline points="21 15 16 10 5 21" />
+                    </svg>
+                    Change Thumbnail
+                  </button>
+                </div>
+
+                <div class="panel-section action-panel">
+                  <p class="action-help-text">
+                    After saving, changes appear here automatically.
+                  </p>
+                  <button
+                    class="action-btn"
                     onClick={() => handleOpenInBlender(selectedAsset()!.id)}
-                    title="Open in Blender with auto-export"
+                    title="Open in Blender"
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -1264,7 +1222,7 @@ const AssetLibrary = () => {
                     Edit in Blender
                   </button>
                 </div>
-              </div>
+              </>
             )}
 
             <div class="panel-section">
@@ -1411,6 +1369,61 @@ const AssetLibrary = () => {
               )}
             </div>
 
+            {(cachedAssets().has(selectedAsset()!.id) && !selectedAsset()!.required && !isEditingAsset(selectedAsset()!.id)) && (
+              <div class="panel-section">
+                <button
+                  class="delete-cache-btn"
+                  onClick={() => handleDeleteCachedAsset(selectedAsset()!.id, selectedAsset()!.name)}
+                  title="Delete from downloads"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    <line x1="10" y1="11" x2="10" y2="17" />
+                    <line x1="14" y1="11" x2="14" y2="17" />
+                  </svg>
+                  Delete from downloads
+                </button>
+              </div>
+            )}
+
+            {isEditingAsset(selectedAsset()!.id) && selectedAsset()!.id.includes("_edited_") && (
+              <>
+                <hr class="panel-divider" />
+                <div class="panel-section">
+                  <button
+                    class="delete-cache-btn"
+                    onClick={() => handleRevertToOriginal(selectedAsset()!.id)}
+                    title="Delete this asset"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      <line x1="10" y1="11" x2="10" y2="17" />
+                      <line x1="14" y1="11" x2="14" y2="17" />
+                    </svg>
+                    Delete
+                  </button>
+                </div>
+              </>
+            )}
+
             {!isEditingAsset(selectedAsset()!.id) && (
               <div class="panel-section">
                 <h3>Rating</h3>
@@ -1437,6 +1450,7 @@ const AssetLibrary = () => {
                 </div>
               </div>
             )}
+
           </div>
 
           <div class="panel-footer">
@@ -1479,22 +1493,12 @@ const AssetLibrary = () => {
             )}
             {isEditingAsset(selectedAsset()!.id) && (
               <button
-                class={hasMetadataChanges(selectedAsset()!.id) ? "save-metadata-btn" : "revert-btn"}
+                class="save-metadata-btn"
                 onClick={async () => {
-                  if (hasMetadataChanges(selectedAsset()!.id)) {
-                    // Save the metadata changes
-                    await handleSaveMetadata(selectedAsset()!.id);
-                    showMetadataSaveToast("Metadata saved", 2000);
-                  } else {
-                    // Just cancel/close
-                    handleRevertToOriginal(selectedAsset()!.id);
-                  }
+                  await handleSaveMetadata(selectedAsset()!.id);
+                  showMetadataSaveToast("Metadata saved", 2000);
                 }}
-                title={
-                  hasMetadataChanges(selectedAsset()!.id)
-                    ? "Save metadata changes"
-                    : "Close panel"
-                }
+                title="Save metadata"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -1505,43 +1509,11 @@ const AssetLibrary = () => {
                   stroke="currentColor"
                   stroke-width="2"
                 >
-                  {hasMetadataChanges(selectedAsset()!.id) ? (
-                    <>
-                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-                      <polyline points="17 21 17 13 7 13 7 21" />
-                      <polyline points="7 3 7 8 15 8" />
-                    </>
-                  ) : (
-                    <>
-                      <line x1="18" y1="6" x2="6" y2="18" />
-                      <line x1="6" y1="6" x2="18" y2="18" />
-                    </>
-                  )}
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                  <polyline points="17 21 17 13 7 13 7 21" />
+                  <polyline points="7 3 7 8 15 8" />
                 </svg>
-                {hasMetadataChanges(selectedAsset()!.id) ? "Save" : "Close"}
-              </button>
-            )}
-            {cachedAssets().has(selectedAsset()!.id) && !selectedAsset()!.required && !isEditingAsset(selectedAsset()!.id) && (
-              <button
-                class="delete-cached-btn"
-                onClick={() => handleDeleteCachedAsset(selectedAsset()!.id, selectedAsset()!.name)}
-                title="Delete from cache"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  <line x1="10" y1="11" x2="10" y2="17" />
-                  <line x1="14" y1="11" x2="14" y2="17" />
-                </svg>
-                Delete from Downloads
+                Save
               </button>
             )}
           </div>
