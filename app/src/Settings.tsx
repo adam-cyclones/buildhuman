@@ -27,6 +27,8 @@ interface AppSettings {
   default_editor: string;
   default_editor_type: string;
   custom_assets_folder: string;
+  moderator_api_key: string;
+  moderator_mode: boolean;
 }
 
 const Settings = (_props: SettingsProps) => {
@@ -38,6 +40,8 @@ const Settings = (_props: SettingsProps) => {
     default_editor: "",
     default_editor_type: "",
     custom_assets_folder: "",
+    moderator_api_key: "",
+    moderator_mode: false,
   });
   const [showToast, setShowToast] = createSignal(false);
   const [toastMessage, setToastMessage] = createSignal("");
@@ -224,6 +228,25 @@ const Settings = (_props: SettingsProps) => {
             </svg>
             <span class="tree-label">Cache</span>
           </div>
+          <div
+            class={`tree-item ${activeCategory() === "moderation" ? "active" : ""}`}
+            onClick={() => setActiveCategory("moderation")}
+          >
+            <span class="tree-icon">•</span>
+            <svg
+              class="tree-icon-svg"
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <span class="tree-label">Moderation</span>
+          </div>
         </div>
       </div>
 
@@ -394,6 +417,74 @@ const Settings = (_props: SettingsProps) => {
                     </button>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {activeCategory() === "moderation" && (
+              <div class="settings-section">
+                <h3>Moderation Settings</h3>
+
+                <div class="setting-group">
+                  <label class="setting-label">Moderator Mode</label>
+                  <p class="setting-description">Enable moderation features to review submitted assets</p>
+                  <label class="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings().moderator_mode}
+                      onChange={(e) => {
+                        setSettings({ ...settings(), moderator_mode: e.currentTarget.checked });
+                        autoSaveSettings();
+                      }}
+                    />
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                {settings().moderator_mode && (
+                  <>
+                    <div class="setting-group">
+                      <label class="setting-label">API Key</label>
+                      <p class="setting-description">Enter your moderator API key to access moderation features</p>
+                      <input
+                        type="password"
+                        class="setting-input"
+                        value={settings().moderator_api_key}
+                        onInput={(e) => {
+                          setSettings({ ...settings(), moderator_api_key: e.currentTarget.value });
+                          autoSaveSettings();
+                        }}
+                        placeholder="Enter API key"
+                      />
+                    </div>
+
+                    <div class="setting-group">
+                      <button
+                        class="settings-btn"
+                        onClick={async () => {
+                          try {
+                            const response = await fetch("http://localhost:8000/api/auth/verify", {
+                              method: "POST",
+                              headers: {
+                                "X-API-Key": settings().moderator_api_key
+                              }
+                            });
+                            if (response.ok) {
+                              const data = await response.json();
+                              showSaveToast(`✓ Valid ${data.role} key for ${data.name}`);
+                            } else {
+                              showSaveToast("✗ Invalid API key");
+                            }
+                          } catch (error) {
+                            showSaveToast("✗ Failed to verify (service offline?)");
+                          }
+                        }}
+                        disabled={!settings().moderator_api_key}
+                      >
+                        Verify API Key
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
       </div>
