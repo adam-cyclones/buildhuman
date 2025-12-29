@@ -6,7 +6,10 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { config } from "./config";
 import ActivityTimeline from "./components/asset-library/ActivityTimeline";
+import AssetFilters from "./components/asset-library/AssetFilters";
 import { useAssetEvents } from "./components/asset-library/useAssetEvents";
+import { useAssetEditing } from "./machines/useAssetEditing";
+import { useAssetPublishing } from "./machines/useAssetPublishing";
 import "./AssetLibrary.css";
 
 interface Asset {
@@ -502,6 +505,29 @@ const AssetLibrary = (props: AssetLibraryProps) => {
 
   // Event logging system for undo/redo and activity tracking
   const { logEvent, getRecentEvents } = useAssetEvents(editedAssets, setEditedAssets);
+
+  // TODO: State Machines Integration
+  // Replace manual state tracking with XState machines:
+  //
+  // For each edited asset, maintain machine instances:
+  // const assetMachines = createMemo(() => {
+  //   const machines = new Map();
+  //   editedAssets().forEach((asset, id) => {
+  //     const context = createMachineContext(asset.metadata);
+  //     machines.set(id, {
+  //       editing: useAssetEditing(context.editing),
+  //       publishing: useAssetPublishing(context.publishing)
+  //     });
+  //   });
+  //   return machines;
+  // });
+  //
+  // Replace all submission_status checks with: machine.publishing.isPending()
+  // Replace last_edited_after_publish with: machine.publishing.hasEditedAfterSubmit()
+  // Wire save operations to: machine.editing.save() / saveSuccess() / saveFailure()
+  // Wire publish operations to: machine.publishing.send({ type: "SUBMIT", ... })
+  //
+  // See: src/machines/assetMachineSync.ts for state synchronization helpers
 
 
   const isLicenseEditable = (license: string) => {
