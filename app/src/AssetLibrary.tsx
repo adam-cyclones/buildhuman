@@ -58,6 +58,7 @@ const AssetLibrary = () => {
   const [originalEditedMetadata, setOriginalEditedMetadata] = createSignal<Map<string, Asset>>(new Map());
   const [changedAssetId, setChangedAssetId] = createSignal<string | null>(null);
   const [appDataPath, setAppDataPath] = createSignal<string>("");
+  const [thumbnailTimestamps, setThumbnailTimestamps] = createSignal<Map<string, number>>(new Map());
 
   // Fetch assets from API
   const fetchAssets = async () => {
@@ -476,7 +477,7 @@ const AssetLibrary = () => {
     setTimeout(() => setShowMetadataToast(false), duration);
   };
 
-  const convertToAssetPath = (thumbnailUrl: string) => {
+  const convertToAssetPath = (thumbnailUrl: string, bustCache = false) => {
     if (thumbnailUrl.startsWith('http')) {
       return thumbnailUrl; // External URL
     }
@@ -485,7 +486,9 @@ const AssetLibrary = () => {
       return ''; // App data path not loaded yet
     }
     const fullPath = `${appDataPath()}/created-assets/${thumbnailUrl}`;
-    return convertFileSrc(fullPath);
+    const url = convertFileSrc(fullPath);
+    // Add cache-busting timestamp if needed
+    return bustCache ? `${url}?t=${Date.now()}` : url;
   };
 
   const handleSaveMetadata = async (assetId: string) => {
@@ -587,6 +590,13 @@ const AssetLibrary = () => {
             return newMap;
           });
         }
+
+        // Track thumbnail update timestamp for cache-busting
+        setThumbnailTimestamps(prev => {
+          const newMap = new Map(prev);
+          newMap.set(assetId, Date.now());
+          return newMap;
+        });
 
         showMetadataSaveToast("Thumbnail updated", 2000);
       }
@@ -838,7 +848,7 @@ const AssetLibrary = () => {
               <div class="asset-thumbnail">
                 {asset.thumbnail_url ? (
                   <img
-                    src={convertToAssetPath(asset.thumbnail_url)}
+                    src={convertToAssetPath(asset.thumbnail_url, thumbnailTimestamps().has(asset.id))}
                     alt={asset.name}
                     class="asset-thumbnail-image"
                     onError={(e) => {
@@ -1165,7 +1175,7 @@ const AssetLibrary = () => {
               <div class="panel-thumbnail">
                 {selectedAsset()!.thumbnail_url ? (
                   <img
-                    src={convertToAssetPath(selectedAsset()!.thumbnail_url!)}
+                    src={convertToAssetPath(selectedAsset()!.thumbnail_url!, thumbnailTimestamps().has(selectedAsset()!.id))}
                     alt={selectedAsset()!.name}
                     class="panel-thumbnail-image"
                     onError={(e) => e.currentTarget.style.display = 'none'}
