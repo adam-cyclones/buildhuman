@@ -1,0 +1,9 @@
+/* 3D Editor View Styles */
+/* Note: Most styles currently inherited from App.css */
+/* This file will contain view-specific styles */
+
+.three-d-editor {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
