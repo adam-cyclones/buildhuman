@@ -80,6 +80,9 @@ service/*.db
 service/*.sqlite
 service/*.sqlite3
 
+# Storage (uploaded assets, submissions)
+service/storage/
+
 # Logs
 service/logs/
 service/*.log
