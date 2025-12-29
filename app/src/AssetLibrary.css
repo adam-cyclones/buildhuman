@@ -658,11 +658,20 @@
   margin-bottom: 0.75rem;
 }
 
-.detail-row {
+.panel-section:has(.detail-row) {
   display: grid;
   grid-template-columns: auto 1fr;
+  gap: 1rem 1rem;
   align-items: baseline;
-  gap: 1rem;
+}
+
+.panel-section:has(.detail-row) h3 {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+.detail-row {
+  display: contents;
 }
 
 .detail-row-split {
