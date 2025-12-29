@@ -45,7 +45,7 @@ export const metadataToPublishing = (metadata: AssetMetadata): Partial<AssetPubl
  * Convert editing machine context to metadata
  * (Currently metadata doesn't store editing state, but could be extended)
  */
-export const editingToMetadata = (context: AssetEditingContext): Partial<AssetMetadata> => {
+export const editingToMetadata = (_context: AssetEditingContext): Partial<AssetMetadata> => {
   // Could store unsaved_changes flag, last_saved_at, etc.
   return {};
 };

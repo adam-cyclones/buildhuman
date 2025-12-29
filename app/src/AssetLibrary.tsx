@@ -6,10 +6,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { config } from "./config";
 import ActivityTimeline from "./components/asset-library/ActivityTimeline";
-import AssetFilters from "./components/asset-library/AssetFilters";
 import { useAssetEvents } from "./components/asset-library/useAssetEvents";
-import { useAssetEditing } from "./machines/useAssetEditing";
-import { useAssetPublishing } from "./machines/useAssetPublishing";
 import "./AssetLibrary.css";
 
 interface Asset {
