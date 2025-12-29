@@ -1,7 +1,7 @@
 import { createSignal, For, createResource } from "solid-js";
-import { config } from "./config";
-import Icon from "./components/Icon";
-import "./ModerationPanel.css";
+import { config } from "../../config";
+import Icon from "../../components/Icon";
+import "./Moderation.css";
 
 interface Submission {
   id: string;

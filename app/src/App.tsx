@@ -1,12 +1,12 @@
 import { createSignal, onMount, onCleanup, Switch, Match } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
-import Tabs from "./Tabs";
+import Tabs from "./components/Tabs";
 import AssetLibrary from "./views/AssetLibrary/AssetLibrary";
 import Settings from "./views/Settings/Settings";
 import ThreeDEditor from "./views/3DEditor/3DEditor";
-import DropdownMenu from "./DropdownMenu";
-import NotificationsCenter from "./NotificationsCenter";
+import DropdownMenu from "./components/DropdownMenu";
+import NotificationsCenter from "./components/NotificationsCenter";
 import { IconSymbols } from "./components/Icon";
 import { config } from "./config";
 
@@ -131,7 +131,7 @@ function App() {
         </div>
       </div>
 
-      <div class={`main-container ${activeTab() === "Asset Library" || activeTab() === "Settings" ? "full-width" : ""}`}>
+      <div class={`main-container full-width`}>
         <Switch>
           <Match when={activeTab() === "Humans"}>
             <ThreeDEditor />

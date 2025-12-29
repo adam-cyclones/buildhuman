@@ -1,6 +1,6 @@
 import { createSignal, For, onMount, onCleanup } from "solid-js";
-import { config } from "./config";
-import Icon from "./components/Icon";
+import { config } from "../config";
+import Icon from "./Icon";
 import "./NotificationsCenter.css";
 
 interface Notification {
