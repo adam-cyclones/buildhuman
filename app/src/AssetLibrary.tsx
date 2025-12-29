@@ -1406,7 +1406,7 @@ const AssetLibrary = () => {
                   Submit for review. Approved assets will be added to the library for others to use.
                 </p>
                 <button
-                  class="action-btn primary"
+                  class="action-btn"
                   onClick={() => {/* TODO: Implement publish */}}
                   title="Submit asset for publication"
                 >
