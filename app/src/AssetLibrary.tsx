@@ -6,6 +6,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { config } from "./config";
 import ActivityTimeline from "./components/asset-library/ActivityTimeline";
+import AssetGrid from "./components/asset-library/AssetGrid";
 import { useAssetEvents } from "./components/asset-library/useAssetEvents";
 import "./AssetLibrary.css";
 
@@ -1159,188 +1160,22 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         )}
       </div>
 
-      <div class={`asset-grid ${viewMode() === "list" ? "list-view" : ""}`}>
-        {assets.loading && <div class="loading">Loading assets...</div>}
-        {assets.error && <div class="error">Failed to load assets. Make sure the asset service is running at {API_URL}</div>}
-        {allAssets().length === 0 && !assets.loading && selectedType() === "pending" && (
-          <div class="empty">
-            <h3>No Pending Submissions</h3>
-            <p>Submitted assets will appear here for review.</p>
-            <p style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.7;">
-              To test: Edit an asset and click "Publish Asset" to create a submission.
-            </p>
-          </div>
-        )}
-        {allAssets().length === 0 && !assets.loading && selectedType() !== "pending" && (
-          <div class="empty">No assets found. Try running: poetry poe seed</div>
-        )}
-        <For each={allAssets()}>
-          {(asset) => (
-            <div class="asset-card" onClick={() => handleAssetClick(asset)}>
-              <div class="asset-thumbnail">
-                {asset.thumbnail_url ? (
-                  <img
-                    src={convertToAssetPath(asset.thumbnail_url, thumbnailTimestamps().has(asset.id))}
-                    alt={asset.name}
-                    class="asset-thumbnail-image"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
-                  />
-                ) : null}
-                <div class={`placeholder-icon ${asset.thumbnail_url ? 'hidden' : ''}`}>
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="48"
-                    height="48"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                    <circle cx="8.5" cy="8.5" r="1.5" />
-                    <polyline points="21 15 16 10 5 21" />
-                  </svg>
-                </div>
-                {asset.required && (
-                  <span class="required-badge overlay-badge">Essential</span>
-                )}
-                {asset.id.includes("_edited_") &&
-                 editedAssets().get(asset.id)?.metadata.submission_status === "pending" && (
-                  <span class="pending-badge overlay-badge">Pending Review</span>
-                )}
-                {asset.id.includes("_edited_") && (() => {
-                  const originalId = asset.id.split("_edited_")[0];
-                  const originalAsset = assets()?.find((a: Asset) => a.id === originalId);
-                  return (
-                    <span
-                      class="unpublished-badge overlay-badge"
-                      title={`Based on "${originalAsset?.name || originalId}" - click to view original`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (originalAsset) {
-                          handleAssetClick(originalAsset);
-                        }
-                      }}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                      >
-                        <circle cx="12" cy="18" r="3" />
-                        <circle cx="6" cy="6" r="3" />
-                        <circle cx="18" cy="6" r="3" />
-                        <path d="M18 9v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9" />
-                        <path d="M12 12v3" />
-                      </svg>
-                      Unpublished
-                    </span>
-                  );
-                })()}
-              </div>
-              <div class="asset-info">
-                <div class="asset-header">
-                  <div class="asset-title-row">
-                    <h3 class="asset-name">{asset.name}</h3>
-                    <button
-                    class={`download-icon-btn ${cachedAssets().has(asset.id) ? "cached" : ""}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDownload(asset.id, asset.name);
-                    }}
-                    disabled={downloading() === asset.id || cachedAssets().has(asset.id)}
-                    title={cachedAssets().has(asset.id) ? "Downloaded" : "Download"}
-                  >
-                    {downloading() === asset.id ? (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="20"
-                        height="20"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        stroke-linecap="round"
-                        class="spinner"
-                      >
-                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" opacity="0.4" />
-                        <path d="M12 2v4" opacity="1" />
-                      </svg>
-                    ) : cachedAssets().has(asset.id) ? (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="20"
-                        height="20"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                      >
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    ) : (
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="20"
-                        height="20"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                      >
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                        <polyline points="7 10 12 15 17 10" />
-                        <line x1="12" y1="15" x2="12" y2="3" />
-                      </svg>
-                    )}
-                  </button>
-                </div>
-              </div>
-              {asset.description && (
-                <p class="asset-description">{asset.description}</p>
-              )}
-                <div class="asset-meta">
-                  <span class="asset-type">{asset.type}</span>
-                  <span class="asset-author">{asset.author}</span>
-                </div>
-                {!asset.id.includes("_edited_") && (
-                  <div class="asset-rating">
-                    <For each={[1, 2, 3, 4, 5]}>
-                      {(star) => (
-                        <svg
-                          class={`star ${star <= asset.rating ? "filled" : ""}`}
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="12"
-                          height="12"
-                          viewBox="0 0 24 24"
-                          fill={star <= asset.rating ? "currentColor" : "none"}
-                          stroke="currentColor"
-                          stroke-width="2"
-                        >
-                          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                        </svg>
-                      )}
-                    </For>
-                    {asset.rating_count > 0 && (
-                      <span class="rating-count">({asset.rating_count})</span>
-                    )}
-                    <span class="asset-downloads">↓ {asset.downloads}</span>
-                  </div>
-                )}
-                <div class="asset-stats">
-                  <span class="asset-license">{asset.license}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </For>
-      </div>
+      <AssetGrid
+        assets={allAssets}
+        loading={assets.loading}
+        error={assets.error}
+        viewMode={viewMode}
+        selectedType={selectedType}
+        apiUrl={API_URL}
+        onAssetClick={handleAssetClick}
+        convertToAssetPath={convertToAssetPath}
+        thumbnailTimestamps={thumbnailTimestamps}
+        cachedAssets={cachedAssets}
+        downloading={downloading}
+        onDownload={handleDownload}
+        editedAssets={editedAssets}
+        allAssets={() => assets() || []}
+      />
 
       <div class="asset-pagination">
         <div class="status-bar-buttons">
