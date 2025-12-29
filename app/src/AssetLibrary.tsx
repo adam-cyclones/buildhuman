@@ -37,9 +37,38 @@ interface Download {
   error?: string;
 }
 
+interface Submission {
+  id: string;
+  asset_name: string;
+  asset_description?: string;
+  asset_type: string;
+  asset_category: string;
+  author: string;
+  file_size?: number;
+  license: string;
+  version: string;
+  status: string;
+  submitted_at: string;
+  ai_moderation_result?: string;
+  thumbnail_path?: string;
+}
+
+interface AppSettings {
+  author_name: string;
+  default_editor: string;
+  default_editor_type: string;
+  custom_assets_folder: string;
+  moderator_api_key: string;
+  moderator_mode: boolean;
+}
+
+interface AssetLibraryProps {
+  appSettings: AppSettings | null;
+}
+
 const API_URL = "http://localhost:8000";
 
-const AssetLibrary = () => {
+const AssetLibrary = (props: AssetLibraryProps) => {
   const [searchQuery, setSearchQuery] = createSignal("");
   const [sortBy, setSortBy] = createSignal("recent");
   const [selectedType, setSelectedType] = createSignal("all");
@@ -59,6 +88,11 @@ const AssetLibrary = () => {
   const [changedAssetId, setChangedAssetId] = createSignal<string | null>(null);
   const [appDataPath, setAppDataPath] = createSignal<string>("");
   const [thumbnailTimestamps, setThumbnailTimestamps] = createSignal<Map<string, number>>(new Map());
+  const [pendingSubmissions, setPendingSubmissions] = createSignal<Submission[]>([]);
+  const [reviewAction, setReviewAction] = createSignal<"approve" | "reject" | null>(null);
+  const [rejectionReason, setRejectionReason] = createSignal("");
+  const [reviewNotes, setReviewNotes] = createSignal("");
+  const [submitting, setSubmitting] = createSignal(false);
 
   // Fetch assets from API
   const fetchAssets = async () => {
@@ -91,6 +125,32 @@ const AssetLibrary = () => {
     return response.json();
   };
 
+  // Fetch pending submissions (for moderators)
+  const fetchPendingSubmissions = async () => {
+    if (!props.appSettings?.moderator_mode || !props.appSettings?.moderator_api_key) {
+      return [];
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/submissions/pending`, {
+        headers: {
+          "X-API-Key": props.appSettings.moderator_api_key
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch pending submissions");
+      }
+
+      const submissions = await response.json();
+      setPendingSubmissions(submissions);
+      return submissions;
+    } catch (error) {
+      console.error("Failed to fetch pending submissions:", error);
+      return [];
+    }
+  };
+
   const [assets, { refetch }] = createResource(fetchAssets);
   const [categories] = createResource(fetchCategories);
 
@@ -118,6 +178,18 @@ const AssetLibrary = () => {
     )
   );
 
+  // Fetch pending submissions when type changes to "pending"
+  createEffect(
+    on(
+      selectedType,
+      (type) => {
+        if (type === "pending") {
+          fetchPendingSubmissions();
+        }
+      }
+    )
+  );
+
   // Refetch when filters change
   const handleSearch = () => {
     refetch();
@@ -125,6 +197,27 @@ const AssetLibrary = () => {
 
   // Merge API assets with local edited assets
   const allAssets = () => {
+    // If viewing pending submissions, return those instead
+    if (selectedType() === "pending") {
+      return pendingSubmissions().map(submission => ({
+        id: submission.id,
+        name: submission.asset_name,
+        description: submission.asset_description,
+        type: submission.asset_type,
+        category: submission.asset_category,
+        author: submission.author,
+        rating: 0,
+        rating_count: 0,
+        license: submission.license,
+        publish_date: submission.submitted_at,
+        downloads: 0,
+        file_size: submission.file_size,
+        version: submission.version,
+        required: false,
+        thumbnail_url: submission.thumbnail_path
+      } as Asset));
+    }
+
     const apiAssets = assets() || [];
     const localAssets = Array.from(editedAssets().values()).map(local => local.metadata);
 
@@ -684,6 +777,57 @@ const AssetLibrary = () => {
     }
   };
 
+  const handleReview = async (submissionId: string) => {
+    const action = reviewAction();
+
+    if (!action) return;
+    if (!props.appSettings?.moderator_api_key) {
+      alert("API key not configured. Please set it in Settings.");
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/submissions/${submissionId}/review`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": props.appSettings.moderator_api_key
+          },
+          body: JSON.stringify({
+            action,
+            notes: reviewNotes(),
+            rejection_reason: action === "reject" ? rejectionReason() : undefined
+          })
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to submit review");
+      }
+
+      alert(`Submission ${action === "approve" ? "approved" : "rejected"} successfully!`);
+
+      // Reset form
+      setReviewAction(null);
+      setRejectionReason("");
+      setReviewNotes("");
+      setIsPanelOpen(false);
+
+      // Refetch pending submissions
+      await fetchPendingSubmissions();
+
+    } catch (error) {
+      console.error("Review failed:", error);
+      alert(`Failed to submit review: ${error}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const formatTimeAgo = (timestamp: number) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
 
@@ -895,6 +1039,9 @@ const AssetLibrary = () => {
                 <option value="all">All</option>
                 <option value="models">Models</option>
                 <option value="environment">Environment</option>
+                {props.appSettings?.moderator_mode && props.appSettings?.moderator_api_key && (
+                  <option value="pending">Pending</option>
+                )}
               </select>
             </div>
             <div class="control-group">
@@ -1573,7 +1720,65 @@ const AssetLibrary = () => {
               </>
             )}
 
-            {!isEditingAsset(selectedAsset()!.id) && (
+            {selectedType() === "pending" && props.appSettings?.moderator_mode && (
+              <div class="panel-section">
+                <h3>Review Submission</h3>
+
+                <div class="review-actions">
+                  <button
+                    class={`action-btn approve ${reviewAction() === "approve" ? "selected" : ""}`}
+                    onClick={() => setReviewAction("approve")}
+                  >
+                    ✓ Approve
+                  </button>
+                  <button
+                    class={`action-btn reject ${reviewAction() === "reject" ? "selected" : ""}`}
+                    onClick={() => setReviewAction("reject")}
+                  >
+                    ✗ Reject
+                  </button>
+                </div>
+
+                {reviewAction() === "reject" && (
+                  <div class="form-group">
+                    <label>Rejection Reason</label>
+                    <select
+                      class="form-input"
+                      value={rejectionReason()}
+                      onChange={(e) => setRejectionReason(e.currentTarget.value)}
+                    >
+                      <option value="">Select reason...</option>
+                      <option value="quality">Low quality</option>
+                      <option value="inappropriate">Inappropriate content</option>
+                      <option value="copyright">Copyright violation</option>
+                      <option value="incomplete">Incomplete submission</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                )}
+
+                <div class="form-group">
+                  <label>Notes (optional)</label>
+                  <textarea
+                    class="form-textarea"
+                    value={reviewNotes()}
+                    onInput={(e) => setReviewNotes(e.currentTarget.value)}
+                    placeholder="Add any additional notes..."
+                    rows={3}
+                  />
+                </div>
+
+                <button
+                  class="submit-review-btn"
+                  onClick={() => handleReview(selectedAsset()!.id)}
+                  disabled={!reviewAction() || submitting() || (reviewAction() === "reject" && !rejectionReason())}
+                >
+                  {submitting() ? "Submitting..." : "Submit Review"}
+                </button>
+              </div>
+            )}
+
+            {!isEditingAsset(selectedAsset()!.id) && selectedType() !== "pending" && (
               <div class="panel-section">
                 <h3>Rating</h3>
                 <div class="asset-rating">

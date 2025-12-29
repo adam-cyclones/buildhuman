@@ -12,7 +12,6 @@ import AssetLibrary from "./AssetLibrary";
 import Settings from "./Settings";
 import DropdownMenu from "./DropdownMenu";
 import NotificationsCenter from "./NotificationsCenter";
-import ModerationPanel from "./ModerationPanel";
 
 interface Human {
   id: number;
@@ -238,11 +237,7 @@ function App() {
   const viewMenuItems = [{ label: "Toggle Fullscreen", onClick: () => {} }];
   const helpMenuItems = [{ label: "About", onClick: () => {} }];
 
-  const tabs = () => [
-    "Humans",
-    "Asset Library",
-    ...(appSettings()?.moderator_mode ? ["Moderation"] : [])
-  ];
+  const tabs = ["Humans", "Asset Library"];
   const [sceneTab, setSceneTab] = createSignal("Scene");
   const sceneTabs = ["Scene", "Properties"];
 
@@ -284,14 +279,14 @@ function App() {
           />
         </div>
         <div class="app-title">
-          <Tabs tabs={tabs()} onTabChange={setActiveTab} />
+          <Tabs tabs={tabs} onTabChange={setActiveTab} />
         </div>
         <div class="menu-right">
           <NotificationsCenter />
         </div>
       </div>
 
-      <div class={`main-container ${activeTab() === "Asset Library" || activeTab() === "Settings" || activeTab() === "Moderation" ? "full-width" : ""}`}>
+      <div class={`main-container ${activeTab() === "Asset Library" || activeTab() === "Settings" ? "full-width" : ""}`}>
         <Switch>
           <Match when={activeTab() === "Humans"}>
             <div class="viewport">
@@ -564,20 +559,7 @@ function App() {
             </div>
           </Match>
           <Match when={activeTab() === "Asset Library"}>
-            <AssetLibrary />
-          </Match>
-          <Match when={activeTab() === "Moderation"}>
-            {appSettings()?.moderator_mode && appSettings()?.moderator_api_key ? (
-              <ModerationPanel apiKey={appSettings()!.moderator_api_key} />
-            ) : (
-              <div class="empty-state">
-                <h2>Moderation Panel</h2>
-                <p>Configure your API key in Settings to access moderation features.</p>
-                <button class="primary-button" onClick={openSettings}>
-                  Open Settings
-                </button>
-              </div>
-            )}
+            <AssetLibrary appSettings={appSettings()} />
           </Match>
           <Match when={activeTab() === "Settings"}>
             <Settings onClose={() => setActiveTab(previousTab())} />
