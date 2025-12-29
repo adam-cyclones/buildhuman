@@ -1,4 +1,5 @@
 import { createSignal, For, onMount, onCleanup } from "solid-js";
+import { config } from "./config";
 import "./NotificationsCenter.css";
 
 interface Notification {
@@ -12,7 +13,7 @@ interface Notification {
   read: boolean;
 }
 
-const API_URL = "http://localhost:8000";
+const API_URL = config.apiUrl;
 
 const NotificationsCenter = () => {
   const [notifications, setNotifications] = createSignal<Notification[]>([]);

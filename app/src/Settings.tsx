@@ -1,6 +1,7 @@
 import { createSignal, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { config } from "./config";
 import "./Settings.css";
 
 interface LocalAsset {
@@ -464,7 +465,7 @@ const Settings = (_props: SettingsProps) => {
                         class="settings-btn"
                         onClick={async () => {
                           try {
-                            const response = await fetch("http://localhost:8000/api/auth/verify", {
+                            const response = await fetch(`${config.apiUrl}/api/auth/verify`, {
                               method: "POST",
                               headers: {
                                 "X-API-Key": settings().moderator_api_key

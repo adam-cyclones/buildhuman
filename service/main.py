@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Header, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Header, Depends
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -643,7 +643,7 @@ async def delete_asset(asset_id: str):
 async def create_submission(
     file: UploadFile = File(...),
     thumbnail: Optional[UploadFile] = File(None),
-    metadata: str = ""
+    metadata: str = Form(...)
 ):
     """Submit asset for moderation"""
     # Parse metadata from form data

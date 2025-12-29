@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
+import { config } from "./config";
 import "./AssetLibrary.css";
 
 interface Asset {
@@ -67,7 +68,7 @@ interface AssetLibraryProps {
   appSettings: AppSettings | null;
 }
 
-const API_URL = "http://localhost:8000";
+const API_URL = config.apiUrl;
 
 const AssetLibrary = (props: AssetLibraryProps) => {
   const [searchQuery, setSearchQuery] = createSignal("");
@@ -298,7 +299,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
       const stored = localStorage.getItem("thumbnailTimestamps");
       if (stored) {
         const parsed = JSON.parse(stored);
-        setThumbnailTimestamps(new Map(Object.entries(parsed)));
+        setThumbnailTimestamps(new Map(Object.entries(parsed).map(([k, v]) => [k, v as number])));
       }
     } catch (error) {
       console.error("Failed to load thumbnail timestamps:", error);
@@ -497,6 +498,121 @@ const AssetLibrary = (props: AssetLibraryProps) => {
     return editedAssets().has(assetId) || assetId.endsWith("_editing");
   };
 
+  // Event logging system for undo/redo and activity tracking
+  const logEvent = async (assetId: string, eventType: string, data?: any) => {
+    const event = {
+      type: eventType,
+      timestamp: Date.now(),
+      data: data || {}
+    };
+
+    // Update local state
+    setEditedAssets(prev => {
+      const newMap = new Map(prev);
+      const asset = newMap.get(assetId);
+      if (asset) {
+        if (!asset.metadata.events) {
+          asset.metadata.events = [];
+        }
+        asset.metadata.events.push(event);
+      }
+      return newMap;
+    });
+
+    // Persist to backend
+    try {
+      const asset = editedAssets().get(assetId);
+      if (asset) {
+        await invoke("update_asset_metadata", {
+          assetId,
+          metadata: {
+            ...asset.metadata,
+            events: asset.metadata.events
+          }
+        });
+      }
+    } catch (err) {
+      console.error("Failed to persist event:", err);
+    }
+  };
+
+  const getRecentEvents = (assetId: string, limit: number = 5) => {
+    const asset = editedAssets().get(assetId);
+    if (!asset?.metadata.events) return [];
+    return asset.metadata.events.slice(-limit).reverse();
+  };
+
+  const formatEvent = (event: any) => {
+    const timeAgo = formatTimeAgo(event.timestamp);
+
+    switch (event.type) {
+      case "forked":
+        return {
+          icon: "🔀",
+          title: "Asset Created",
+          desc: `Forked from ${event.data.original_name || "original"}`,
+          time: timeAgo
+        };
+      case "metadata_saved":
+        return {
+          icon: "💾",
+          title: "Changes Saved",
+          desc: "Metadata updated",
+          time: timeAgo
+        };
+      case "edited_after_publish":
+        return {
+          icon: "⚠️",
+          title: "Edited After Publishing",
+          desc: "Local changes not in submitted version",
+          time: timeAgo,
+          warning: true
+        };
+      case "published":
+        return {
+          icon: "⏳",
+          title: "Published for Review",
+          desc: `Submission ID: ${event.data.submission_id?.substring(0, 8)}...`,
+          time: timeAgo
+        };
+      case "thumbnail_changed":
+        return {
+          icon: "🖼️",
+          title: "Thumbnail Updated",
+          desc: "Preview image changed",
+          time: timeAgo
+        };
+      case "file_changed":
+        return {
+          icon: "📝",
+          title: "File Modified",
+          desc: "Blender saved changes",
+          time: timeAgo
+        };
+      case "approved":
+        return {
+          icon: "✅",
+          title: "Approved",
+          desc: `By ${event.data.moderator || "moderator"}`,
+          time: timeAgo
+        };
+      case "rejected":
+        return {
+          icon: "❌",
+          title: "Rejected",
+          desc: event.data.reason || "See moderator notes",
+          time: timeAgo
+        };
+      default:
+        return {
+          icon: "📌",
+          title: event.type,
+          desc: JSON.stringify(event.data),
+          time: timeAgo
+        };
+    }
+  };
+
   const isLicenseEditable = (license: string) => {
     const licenseUpper = license.toUpperCase();
     // Check for non-derivative licenses (ND = No Derivatives)
@@ -559,6 +675,12 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         }
 
         editedAsset = newCopy;
+
+        // Log fork event
+        await logEvent(newCopy.metadata.id, "forked", {
+          original_id: originalId,
+          original_name: asset?.name || "original asset"
+        });
       }
 
       if (editedAsset) {
@@ -630,7 +752,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
       }
 
       // Convert Asset to AssetMetadata format for backend
-      const metadata = {
+      const metadata: any = {
         id: assetId,
         name: updatedAsset.name,
         type: updatedAsset.type,
@@ -647,7 +769,28 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         publish_date: updatedAsset.publish_date,
         thumbnail_url: updatedAsset.thumbnail_url,
       };
+
+      // If asset is pending review and user edits, flag it
+      const isPending = editedAsset.metadata.submission_status === "pending";
+      if (isPending) {
+        metadata.last_edited_after_publish = true;
+        // Update local state
+        setEditedAssets(prev => {
+          const newMap = new Map(prev);
+          const asset = newMap.get(assetId);
+          if (asset) {
+            asset.metadata.last_edited_after_publish = true;
+          }
+          return newMap;
+        });
+      }
+
       await invoke("update_asset_metadata", { assetId, metadata });
+
+      // Log event
+      await logEvent(assetId, isPending ? "edited_after_publish" : "metadata_saved", {
+        fields: Object.keys(metadata).filter(k => k !== 'id')
+      });
 
       // Update the original metadata to reflect saved state
       setOriginalEditedMetadata(new Map(originalEditedMetadata().set(assetId, { ...updatedAsset })));
@@ -714,6 +857,11 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         });
 
         showMetadataSaveToast("Thumbnail updated", 2000);
+
+        // Log thumbnail change event
+        await logEvent(assetId, "thumbnail_changed", {
+          filename: thumbnailFilename
+        });
       }
     } catch (error) {
       console.error("Failed to set thumbnail:", error);
@@ -772,11 +920,41 @@ const AssetLibrary = (props: AssetLibraryProps) => {
 
       const result = await response.json();
 
-      alert(`Asset submitted successfully!\n\nSubmission ID: ${result.id}\nStatus: Pending review`);
+      // Update asset metadata to track submission
+      const updatedAssets = new Map(editedAssets());
+      const updatedAsset = updatedAssets.get(assetId);
+      if (updatedAsset) {
+        updatedAsset.metadata.submission_id = result.id;
+        updatedAsset.metadata.submission_status = "pending";
+        setEditedAssets(updatedAssets);
+
+        // Persist submission status to backend
+        try {
+          await invoke("update_asset_metadata", {
+            assetId: assetId,
+            metadata: {
+              ...updatedAsset.metadata,
+              submission_id: result.id,
+              submission_status: "pending"
+            }
+          });
+        } catch (err) {
+          console.error("Failed to persist submission status:", err);
+        }
+      }
+
+      // Log publish event
+      await logEvent(assetId, "published", {
+        submission_id: result.id,
+        asset_name: asset.metadata.name
+      });
+
+      // Show success toast
+      showMetadataSaveToast("Asset submitted successfully! Pending review.", 5000);
 
     } catch (error) {
       console.error("Failed to publish asset:", error);
-      alert(`Failed to publish asset: ${error}`);
+      showMetadataSaveToast(`Failed to publish: ${error}`, 5000);
     }
   };
 
@@ -812,7 +990,10 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         throw new Error("Failed to submit review");
       }
 
-      alert(`Submission ${action === "approve" ? "approved" : "rejected"} successfully!`);
+      showMetadataSaveToast(
+        `Submission ${action === "approve" ? "approved" : "rejected"} successfully!`,
+        4000
+      );
 
       // Reset form
       setReviewAction(null);
@@ -825,7 +1006,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
 
     } catch (error) {
       console.error("Review failed:", error);
-      alert(`Failed to submit review: ${error}`);
+      showMetadataSaveToast(`Failed to submit review: ${error}`, 5000);
     } finally {
       setSubmitting(false);
     }
@@ -1110,6 +1291,10 @@ const AssetLibrary = (props: AssetLibraryProps) => {
                 </div>
                 {asset.required && (
                   <span class="required-badge overlay-badge">Essential</span>
+                )}
+                {asset.id.includes("_edited_") &&
+                 editedAssets().get(asset.id)?.metadata.submission_status === "pending" && (
+                  <span class="pending-badge overlay-badge">Pending Review</span>
                 )}
                 {asset.id.includes("_edited_") && (() => {
                   const originalId = asset.id.split("_edited_")[0];
@@ -1441,6 +1626,10 @@ const AssetLibrary = (props: AssetLibraryProps) => {
                 {isEditingAsset(selectedAsset()!.id) && (
                   <span class="editing-badge overlay-badge">Editing</span>
                 )}
+                {isEditingAsset(selectedAsset()!.id) &&
+                 editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending" && (
+                  <span class="pending-badge overlay-badge">Pending Review</span>
+                )}
               </div>
             </div>
 
@@ -1649,15 +1838,47 @@ const AssetLibrary = (props: AssetLibraryProps) => {
               )}
             </div>
 
+            {isEditingAsset(selectedAsset()!.id) && getRecentEvents(selectedAsset()!.id).length > 0 && (
+              <div class="panel-section activity-timeline">
+                <h3>Activity Timeline</h3>
+                <div class="timeline-events">
+                  <For each={getRecentEvents(selectedAsset()!.id)}>
+                    {(event) => {
+                      const formatted = formatEvent(event);
+                      return (
+                        <div class={`timeline-event ${formatted.warning ? 'warning' : ''}`}>
+                          <div class="timeline-icon">{formatted.icon}</div>
+                          <div class="timeline-content">
+                            <div class="timeline-title">{formatted.title}</div>
+                            <div class="timeline-desc">{formatted.desc}</div>
+                            <div class="timeline-time">{formatted.time}</div>
+                          </div>
+                        </div>
+                      );
+                    }}
+                  </For>
+                </div>
+              </div>
+            )}
+
             {isEditingAsset(selectedAsset()!.id) && selectedAsset()!.id.includes("_edited_") && (
               <div class="panel-section action-panel">
                 <p class="action-help-text">
-                  Submit for review. Approved assets will be added to the library for others to use.
+                  {editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending"
+                    ? editedAssets().get(selectedAsset()!.id)?.metadata.last_edited_after_publish
+                      ? "Submit updated version (will replace pending submission)"
+                      : "Asset is pending review. You'll be notified when it's approved or rejected."
+                    : "Submit for review. Approved assets will be added to the library for others to use."}
                 </p>
                 <button
                   class="action-btn"
                   onClick={() => handlePublishAsset(selectedAsset()!.id)}
                   title="Submit asset for publication"
+                  disabled={editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending"}
+                  style={{
+                    opacity: editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending" ? "0.5" : "1",
+                    cursor: editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending" ? "not-allowed" : "pointer"
+                  }}
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -1672,7 +1893,9 @@ const AssetLibrary = (props: AssetLibraryProps) => {
                     <polyline points="16 16 12 12 8 16"/>
                     <line x1="12" y1="12" x2="12" y2="21"/>
                   </svg>
-                  Publish Asset
+                  {editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending"
+                    ? "Submitted for Review"
+                    : "Publish Asset"}
                 </button>
               </div>
             )}

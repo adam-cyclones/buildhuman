@@ -440,6 +440,14 @@
   z-index: 10;
 }
 
+.overlay-badge + .overlay-badge {
+  top: 2rem;
+}
+
+.overlay-badge + .overlay-badge + .overlay-badge {
+  top: 3.5rem;
+}
+
 .asset-name {
   font-size: 0.95rem;
   font-weight: 600;
@@ -452,7 +460,7 @@
 }
 
 .required-badge {
-  background: transparent;
+  background: var(--medium-gray);
   color: var(--text-secondary);
   border: 1px solid var(--border);
   font-size: 0.65rem;
@@ -462,7 +470,6 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   flex-shrink: 0;
-  opacity: 0.7;
 }
 
 .unpublished-badge {
@@ -1062,8 +1069,8 @@
 
 /* Edit feature styles */
 .editing-badge {
-  background: rgba(193, 164, 138, 0.2);
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--dark-gray);
   border: 1px solid var(--accent);
   font-size: 0.65rem;
   font-weight: 600;
@@ -1072,6 +1079,79 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   flex-shrink: 0;
+}
+
+.pending-badge {
+  background: #ffc107;
+  color: #000;
+  border: 1px solid #ffc107;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+/* Activity Timeline */
+.activity-timeline {
+  background: var(--lighter-gray);
+  border-radius: 6px;
+  padding: 1rem !important;
+}
+
+.activity-timeline h3 {
+  margin: 0 0 1rem 0;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.timeline-events {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.timeline-event {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.timeline-event.warning {
+  background: rgba(255, 193, 7, 0.1);
+  padding: 0.5rem;
+  border-radius: 4px;
+  border-left: 3px solid #ffc107;
+}
+
+.timeline-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.timeline-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.timeline-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.timeline-desc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
 }
 
 .edit-btn {

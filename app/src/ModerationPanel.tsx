@@ -1,4 +1,5 @@
 import { createSignal, For, createResource } from "solid-js";
+import { config } from "./config";
 import "./ModerationPanel.css";
 
 interface Submission {
@@ -16,7 +17,7 @@ interface Submission {
   ai_moderation_result?: string;
 }
 
-const API_URL = "http://localhost:8000";
+const API_URL = config.apiUrl;
 
 interface ModerationPanelProps {
   apiKey: string;

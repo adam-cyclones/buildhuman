@@ -12,6 +12,7 @@ import AssetLibrary from "./AssetLibrary";
 import Settings from "./Settings";
 import DropdownMenu from "./DropdownMenu";
 import NotificationsCenter from "./NotificationsCenter";
+import { config } from "./config";
 
 interface Human {
   id: number;
@@ -83,7 +84,7 @@ function App() {
     // Check and download required assets on startup
     try {
       const result = await invoke("check_required_assets", {
-        apiUrl: "http://localhost:8000",
+        apiUrl: config.apiUrl,
       });
       console.log("Required assets check:", result);
     } catch (error) {
