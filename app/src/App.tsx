@@ -4,7 +4,7 @@ import "./App.css";
 import Tabs from "./components/Tabs";
 import AssetLibrary from "./views/AssetLibrary/AssetLibrary";
 import Settings from "./views/Settings/Settings";
-import ThreeDEditor from "./views/3DEditor/3DEditor";
+import Humans from "./views/Humans/Humans";
 import DropdownMenu from "./components/DropdownMenu";
 import NotificationsCenter from "./components/NotificationsCenter";
 import { IconSymbols } from "./components/Icon";
@@ -134,7 +134,7 @@ function App() {
       <div class={`main-container full-width`}>
         <Switch>
           <Match when={activeTab() === "Humans"}>
-            <ThreeDEditor />
+            <Humans />
           </Match>
           <Match when={activeTab() === "Asset Library"}>
             <AssetLibrary appSettings={appSettings()} />

@@ -3,15 +3,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import type { Scene } from "@babylonjs/core";
-import BabylonScene from "./components/BabylonScene";
+import ThreeDViewport from "./components/3DViewport";
 import WeightForAgeChart from "./components/WeightForAgeChart";
 import HeightForAgeChart from "./components/HeightForAgeChart";
 import Tabs from "../../components/Tabs";
 import Icon from "../../components/Icon";
 import type { Human } from "./types";
-import "./3DEditor.css";
+import "./Humans.css";
 
-const ThreeDEditor = () => {
+const Humans = () => {
   const maleNames = [
     "Alex", "Ben", "Chris", "Daniel", "Ethan", "Felix", "Gabriel", "Henry",
     "Isaac", "Jack", "Kevin", "Liam", "Mason", "Nathan", "Oliver", "Patrick",
@@ -170,30 +170,7 @@ const ThreeDEditor = () => {
 
   return (
     <div class="three-d-editor">
-      <div class="viewport">
-        <div class="left-toolbar">
-          <button class="tool-btn" title="Add Human" onClick={addHuman}>
-            <Icon name="plus" size={24} />
-          </button>
-          <button class="tool-btn" title="Move">
-            <Icon name="move" size={24} />
-          </button>
-        </div>
-        <div class="viewport-header">
-          <div class="viewport-tabs">
-            <div class="viewport-tab active">3D View</div>
-            <div class="viewport-tab">UV Editor</div>
-          </div>
-          <div class="viewport-tools">
-            <button class="tool-btn">◎</button>
-            <button class="tool-btn">↻</button>
-            <button class="tool-btn">⊞</button>
-          </div>
-        </div>
-        <div class="viewport-content">
-          <BabylonScene onSceneReady={handleSceneReady} />
-        </div>
-      </div>
+      <ThreeDViewport onSceneReady={handleSceneReady} onAddHuman={addHuman} />
 
       <div class="inspector">
         <div class="inspector-header">
@@ -429,4 +406,4 @@ const ThreeDEditor = () => {
   );
 };
 
-export default ThreeDEditor;
+export default Humans;

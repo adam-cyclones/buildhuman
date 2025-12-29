@@ -131,14 +131,15 @@ views/
 │   │   └── AssetDetailPanel.tsx
 │   ├── types.ts               (TypeScript types)
 │   └── AssetLibrary.css       (styles)
-├── 3DEditor/
-│   ├── 3DEditor.tsx           432 lines  (Humans tab)
+├── Humans/
+│   ├── Humans.tsx             410 lines  (main component)
 │   ├── components/
+│   │   ├── 3DViewport.tsx     (viewport with toolbar and 3D scene)
 │   │   ├── BabylonScene.tsx
 │   │   ├── HeightForAgeChart.tsx
 │   │   └── WeightForAgeChart.tsx
 │   ├── types.ts
-│   └── 3DEditor.css
+│   └── Humans.css
 ├── Settings/
 │   ├── Settings.tsx           461 lines
 │   ├── Settings.css
