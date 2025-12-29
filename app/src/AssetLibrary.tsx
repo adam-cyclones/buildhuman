@@ -1018,30 +1018,6 @@ const AssetLibrary = () => {
                     <span class="asset-downloads">↓ {asset.downloads}</span>
                   </div>
                 )}
-                {asset.id.includes("_edited_") && (
-                  <button
-                    class="card-publish-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      // TODO: Implement publish
-                    }}
-                    title="Publish this asset"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <path d="M22 2L11 13" />
-                      <path d="M22 2L15 22L11 13L2 9L22 2Z" />
-                    </svg>
-                    Publish
-                  </button>
-                )}
                 <div class="asset-stats">
                   <span class="asset-license">{asset.license}</span>
                 </div>
