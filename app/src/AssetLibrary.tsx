@@ -199,6 +199,17 @@ const AssetLibrary = () => {
       console.error("Failed to get app data path:", error);
     }
 
+    // Load thumbnail timestamps from localStorage
+    try {
+      const stored = localStorage.getItem("thumbnailTimestamps");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setThumbnailTimestamps(new Map(Object.entries(parsed)));
+      }
+    } catch (error) {
+      console.error("Failed to load thumbnail timestamps:", error);
+    }
+
     // Fetch cached assets
     fetchCachedAssets();
 
@@ -540,6 +551,7 @@ const AssetLibrary = () => {
         rating_count: updatedAsset.rating_count,
         downloads: updatedAsset.downloads,
         publish_date: updatedAsset.publish_date,
+        thumbnail_url: updatedAsset.thumbnail_url,
       };
       await invoke("update_asset_metadata", { assetId, metadata });
 
@@ -584,8 +596,15 @@ const AssetLibrary = () => {
             const newMap = new Map(prev);
             const asset = newMap.get(assetId);
             if (asset) {
-              asset.metadata.thumbnail_url = thumbnailFilename;
-              newMap.set(assetId, asset);
+              // Create new asset object to trigger reactivity
+              const updatedLocalAsset = {
+                ...asset,
+                metadata: {
+                  ...asset.metadata,
+                  thumbnail_url: thumbnailFilename
+                }
+              };
+              newMap.set(assetId, updatedLocalAsset);
             }
             return newMap;
           });
@@ -595,6 +614,8 @@ const AssetLibrary = () => {
         setThumbnailTimestamps(prev => {
           const newMap = new Map(prev);
           newMap.set(assetId, Date.now());
+          // Save to localStorage for persistence
+          localStorage.setItem("thumbnailTimestamps", JSON.stringify(Object.fromEntries(newMap)));
           return newMap;
         });
 
