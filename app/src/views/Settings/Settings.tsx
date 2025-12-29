@@ -2,6 +2,7 @@ import { createSignal, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { config } from "../../config";
+import Icon from "../../components/Icon";
 import "./Settings.css";
 
 interface LocalAsset {
@@ -197,19 +198,7 @@ const Settings = (_props: SettingsProps) => {
             onClick={() => setActiveCategory("general")}
           >
             <span class="tree-icon">•</span>
-            <svg
-              class="tree-icon-svg"
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <circle cx="12" cy="12" r="3" />
-              <path d="M12 1v6m0 6v6m5.2-13.2l-4.2 4.2m0 6l4.2 4.2M23 12h-6m-6 0H1m13.2 5.2l-4.2-4.2m0-6l-4.2-4.2" />
-            </svg>
+            <Icon name="settings" size={16} class="tree-icon-svg" />
             <span class="tree-label">General</span>
           </div>
           <div
@@ -217,18 +206,7 @@ const Settings = (_props: SettingsProps) => {
             onClick={() => setActiveCategory("cache")}
           >
             <span class="tree-icon">•</span>
-            <svg
-              class="tree-icon-svg"
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
+            <Icon name="folder" size={16} class="tree-icon-svg" />
             <span class="tree-label">Cache</span>
           </div>
           <div
@@ -236,18 +214,7 @@ const Settings = (_props: SettingsProps) => {
             onClick={() => setActiveCategory("moderation")}
           >
             <span class="tree-icon">•</span>
-            <svg
-              class="tree-icon-svg"
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            </svg>
+            <Icon name="shield" size={16} class="tree-icon-svg" />
             <span class="tree-label">Moderation</span>
           </div>
         </div>
@@ -275,17 +242,7 @@ const Settings = (_props: SettingsProps) => {
                 onClick={handleOpenCacheFolder}
                 title="Open cache folder"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                </svg>
+                <Icon name="folder" size={16} />
                 Open Cache Folder
               </button>
               <button
@@ -411,12 +368,7 @@ const Settings = (_props: SettingsProps) => {
                       Browse
                     </button>
                     <button class="settings-btn" onClick={handleResetAssetsFolder} title="Reset to default">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-                        <path d="M21 3v5h-5"/>
-                        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                        <path d="M3 21v-5h5"/>
-                      </svg>
+                      <Icon name="rotate-ccw" size={16} />
                     </button>
                   </div>
                 </div>
@@ -495,15 +447,9 @@ const Settings = (_props: SettingsProps) => {
       {showToast() && (
         <div class={`settings-toast ${toastType()}`}>
           {toastType() === "success" ? (
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M20 6L9 17l-5-5"/>
-            </svg>
+            <Icon name="check" size={16} />
           ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="15" y1="9" x2="9" y2="15"/>
-              <line x1="9" y1="9" x2="15" y2="15"/>
-            </svg>
+            <Icon name="x-circle" size={16} />
           )}
           <span>{toastMessage()}</span>
         </div>
