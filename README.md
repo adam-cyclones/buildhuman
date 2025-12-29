@@ -12,9 +12,9 @@ Create realistic human characters with customizable morphs, body types, clothing
 
 ```
 BuildHuman/
-├── app/              # Desktop application (SolidJS + Tauri + Bevy)
+├── app/              # Desktop application (SolidJS + Tauri)
 │   ├── src/          # SolidJS frontend
-│   ├── src-tauri/    # Rust backend with Bevy 3D engine
+│   ├── src-tauri/    # Rust backend
 │   └── dist/         # Build output
 │
 ├── service/          # Python FastAPI asset service
@@ -40,7 +40,6 @@ BuildHuman/
 - **Format Support**: GLB/GLTF for maximum compatibility
 
 ### Advanced Features
-- **Bevy Integration**: High-performance 3D rendering backend
 - **Scene Creation**: Pose and light your characters
 - **Batch Generation**: Create variations automatically
 - **Export Options**: Export to GLB, FBX, and other formats
@@ -91,7 +90,7 @@ This is a monorepo containing both the desktop application and the asset service
 ### Tech Stack
 
 - **Frontend**: SolidJS, TypeScript, Babylon.js
-- **Backend**: Rust, Tauri, Bevy 3D engine
+- **Backend**: Rust, Tauri
 - **Service**: Python, FastAPI
 - **3D Formats**: GLB, GLTF
 

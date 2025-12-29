@@ -1,28 +1,10 @@
 import { createSignal, For, createResource } from "solid-js";
 import { config } from "../../config";
 import Icon from "../../components/Icon";
+import type { Submission, ModerationPanelProps } from "./types";
 import "./Moderation.css";
 
-interface Submission {
-  id: string;
-  asset_name: string;
-  asset_description?: string;
-  asset_type: string;
-  asset_category: string;
-  author: string;
-  file_size?: number;
-  license: string;
-  version: string;
-  status: string;
-  submitted_at: string;
-  ai_moderation_result?: string;
-}
-
 const API_URL = config.apiUrl;
-
-interface ModerationPanelProps {
-  apiKey: string;
-}
 
 const ModerationPanel = (props: ModerationPanelProps) => {
   const [selectedSubmission, setSelectedSubmission] = createSignal<Submission | null>(null);

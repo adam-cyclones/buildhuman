@@ -69,12 +69,12 @@ npm run tauri -- --help    # Access Tauri CLI directly
            │ Tauri IPC (invoke/listen)
 ┌──────────▼──────────────┐
 │  Rust Backend           │  Tauri 2.0, file I/O, Blender integration
-│  (app/src-tauri/src/)   │  Bevy 0.15.1 for native 3D rendering
+│  (app/src-tauri/src/)   │  
 └──────────┬──────────────┘
            │ HTTP REST
 ┌──────────▼──────────────┐
 │  Python Asset Service   │  FastAPI, SQLite metadata storage
-│  (service/main.py)      │  http://localhost:8000
+│  (service/main.py)      │  http://localhost:8000 set from .env
 └─────────────────────────┘
 ```
 
@@ -129,7 +129,7 @@ views/
 │   │   ├── AssetGrid.tsx
 │   │   ├── AssetFilters.tsx
 │   │   └── AssetDetailPanel.tsx
-│   ├── types.ts               (TypeScript types)
+│   ├── types.ts               (TypeScript types) !never use interfaces, use types!
 │   └── AssetLibrary.css       (styles)
 ├── Humans/
 │   ├── Humans.tsx             410 lines  (main component)
@@ -163,7 +163,6 @@ views/
 - `main.rs` - Entry point, Tauri setup, command registration
 - `asset_manager.rs` - Core backend (1108 lines): download, cache, Blender integration
 - `settings.rs` - Settings persistence
-- `bevy.rs` - Native 3D rendering integration
 - `mesh/` - 3D mesh utilities
 
 **Service (service/)**:
@@ -302,7 +301,6 @@ import Icon from "../../components/Icon";
 | Frontend framework | SolidJS | 1.9.10 |
 | Frontend language | TypeScript | 5.6.2 |
 | 3D web rendering | Babylon.js | 7.38.0 |
-| 3D native rendering | Bevy | 0.15.1 |
 | Backend language | Rust | 2021 edition |
 | Asset service | Python FastAPI | - |
 | Python dependencies | Poetry | - |

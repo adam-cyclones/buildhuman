@@ -20,8 +20,6 @@ The desktop application for BuildHuman - a 3D human generator and character crea
 
 ### Real-time Rendering
 - **Babylon.js Renderer**: Fast web-based 3D preview
-- **Bevy Integration**: High-performance native 3D rendering
-- Switch between renderers for different workflows
 
 ### Scene & Posing
 - Position and pose characters
@@ -35,7 +33,6 @@ The desktop application for BuildHuman - a 3D human generator and character crea
 - **Window Manager**: Tauri (Rust)
 - **3D Rendering**:
   - Babylon.js (web renderer)
-  - Bevy (native renderer)
   - WGPU for GPU acceleration
 
 ## Development
@@ -74,7 +71,6 @@ app/
 │   ├── src/
 │   │   ├── asset_manager.rs  # Asset download & caching
 │   │   ├── settings.rs       # App settings
-│   │   ├── bevy.rs          # Bevy 3D integration
 │   │   ├── mesh/            # Mesh generation
 │   │   └── main.rs
 │   └── Cargo.toml
@@ -89,12 +85,6 @@ Web-based 3D renderer integrated into the UI. Best for:
 - Quick previews
 - Asset browsing
 - General workflow
-
-### Bevy (Native)
-High-performance Rust-based renderer. Best for:
-- Complex scenes
-- High polygon counts
-- Advanced lighting
 
 ### WGPU (Experimental)
 Direct GPU rendering for maximum performance.
@@ -141,7 +131,6 @@ Settings are stored locally:
 - Verify export path has write permissions
 
 ### Rendering Issues
-- Try switching between Babylon.js and Bevy renderers
 - Check GPU drivers are up to date
 - For WGPU issues, fall back to default renderer
 
