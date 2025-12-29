@@ -1,24 +1,6 @@
 import { For, Accessor, Setter } from "solid-js";
-import type { Asset } from "../../types/asset";
+import type { Asset, LocalAsset, AssetMachines } from "../types";
 import ActivityTimeline from "./ActivityTimeline";
-
-interface LocalAsset {
-  metadata: {
-    id: string;
-    name: string;
-    [key: string]: any;
-  };
-  file_path: string;
-  downloaded_at: string;
-  cached: boolean;
-  is_edited: boolean;
-  original_id?: string;
-}
-
-interface AssetMachines {
-  editing: any;
-  publishing: any;
-}
 
 interface AssetDetailPanelProps {
   selectedAsset: Accessor<Asset | null>;

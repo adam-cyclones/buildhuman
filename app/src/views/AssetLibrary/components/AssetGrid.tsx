@@ -1,5 +1,5 @@
 import { For, Accessor } from "solid-js";
-import type { Asset } from "../../types/asset";
+import type { Asset } from "../types";
 import AssetCard from "./AssetCard";
 
 interface AssetGridProps {

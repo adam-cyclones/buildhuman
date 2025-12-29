@@ -4,75 +4,15 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
-import { config } from "../config";
-import AssetGrid from "../components/asset-library/AssetGrid";
-import AssetFilters from "../components/asset-library/AssetFilters";
-import AssetDetailPanel from "../components/asset-library/AssetDetailPanel";
-import { useAssetEvents } from "../components/asset-library/useAssetEvents";
-import { useAssetEditing } from "../machines/useAssetEditing";
-import { useAssetPublishing } from "../machines/useAssetPublishing";
+import { config } from "../../config";
+import AssetGrid from "./components/AssetGrid";
+import AssetFilters from "./components/AssetFilters";
+import AssetDetailPanel from "./components/AssetDetailPanel";
+import { useAssetEvents } from "./components/useAssetEvents";
+import { useAssetEditing } from "../../machines/useAssetEditing";
+import { useAssetPublishing } from "../../machines/useAssetPublishing";
+import type { Asset, LocalAsset, Category, Download, Submission, AssetLibraryProps, AssetMachines } from "./types";
 import "./AssetLibrary.css";
-
-interface Asset {
-  id: string;
-  name: string;
-  description?: string;
-  type: string;
-  category: string;
-  author: string;
-  rating: number;
-  rating_count: number;
-  license: string;
-  publish_date: string;
-  downloads: number;
-  file_size?: number;
-  version: string;
-  required: boolean;
-  thumbnail_url?: string;
-}
-
-interface Category {
-  id: string;
-  name: string;
-  type_id: string;
-}
-
-interface Download {
-  id: string;
-  name: string;
-  status: "downloading" | "completed" | "failed";
-  timestamp: number;
-  error?: string;
-}
-
-interface Submission {
-  id: string;
-  asset_name: string;
-  asset_description?: string;
-  asset_type: string;
-  asset_category: string;
-  author: string;
-  file_size?: number;
-  license: string;
-  version: string;
-  status: string;
-  submitted_at: string;
-  ai_moderation_result?: string;
-  thumbnail_path?: string;
-}
-
-interface AppSettings {
-  author_name: string;
-  default_editor: string;
-  default_editor_type: string;
-  custom_assets_folder: string;
-  moderator_api_key: string;
-  moderator_mode: boolean;
-}
-
-interface AssetLibraryProps {
-  appSettings: AppSettings | null;
-}
 
 const API_URL = config.apiUrl;
 
@@ -102,11 +42,6 @@ const AssetLibrary = (props: AssetLibraryProps) => {
   const [submitting, setSubmitting] = createSignal(false);
 
   // XState machines for each edited asset
-  interface AssetMachines {
-    editing: ReturnType<typeof useAssetEditing>;
-    publishing: ReturnType<typeof useAssetPublishing>;
-  }
-
   const [assetMachines, setAssetMachines] = createSignal<Map<string, AssetMachines>>(new Map());
 
   // Initialize or get machine for an asset
@@ -297,19 +232,6 @@ const AssetLibrary = (props: AssetLibraryProps) => {
 
     return combined;
   };
-
-  interface LocalAsset {
-    metadata: {
-      id: string;
-      name: string;
-      [key: string]: any;
-    };
-    file_path: string;
-    downloaded_at: string;
-    cached: boolean;
-    is_edited: boolean;
-    original_id?: string;
-  }
 
   const fetchCachedAssets = async () => {
     try {
