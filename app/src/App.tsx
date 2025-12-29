@@ -11,6 +11,8 @@ import Tabs from "./Tabs";
 import AssetLibrary from "./AssetLibrary";
 import Settings from "./Settings";
 import DropdownMenu from "./DropdownMenu";
+import NotificationsCenter from "./NotificationsCenter";
+import ModerationPanel from "./ModerationPanel";
 
 interface Human {
   id: number;
@@ -19,6 +21,15 @@ interface Human {
   ageGroup: string;
   height: number;
   weight: number;
+}
+
+interface AppSettings {
+  author_name: string;
+  default_editor: string;
+  default_editor_type: string;
+  custom_assets_folder: string;
+  moderator_api_key: string;
+  moderator_mode: boolean;
 }
 
 function App() {
@@ -47,6 +58,7 @@ function App() {
   const [renamingId, setRenamingId] = createSignal<number | null>(null);
   const [activeMenu, setActiveMenu] = createSignal<string | null>(null);
   const [menuBarActive, setMenuBarActive] = createSignal(false);
+  const [appSettings, setAppSettings] = createSignal<AppSettings | null>(null);
 
   const selectedHuman = () => humans().find((h) => h.id === selectedHumanId());
 
@@ -60,6 +72,14 @@ function App() {
 
   onMount(async () => {
     document.addEventListener("mousedown", handleMenuClickOutside);
+
+    // Load app settings
+    try {
+      const settings = await invoke<AppSettings>("get_app_settings");
+      setAppSettings(settings);
+    } catch (error) {
+      console.error("Failed to load app settings:", error);
+    }
 
     // Check and download required assets on startup
     try {
@@ -218,7 +238,11 @@ function App() {
   const viewMenuItems = [{ label: "Toggle Fullscreen", onClick: () => {} }];
   const helpMenuItems = [{ label: "About", onClick: () => {} }];
 
-  const tabs = ["Humans", "Asset Library"];
+  const tabs = () => [
+    "Humans",
+    "Asset Library",
+    ...(appSettings()?.moderator_mode ? ["Moderation"] : [])
+  ];
   const [sceneTab, setSceneTab] = createSignal("Scene");
   const sceneTabs = ["Scene", "Properties"];
 
@@ -260,13 +284,14 @@ function App() {
           />
         </div>
         <div class="app-title">
-          <Tabs tabs={tabs} onTabChange={setActiveTab} />
+          <Tabs tabs={tabs()} onTabChange={setActiveTab} />
         </div>
         <div class="menu-right">
+          <NotificationsCenter />
         </div>
       </div>
 
-      <div class={`main-container ${activeTab() === "Asset Library" || activeTab() === "Settings" ? "full-width" : ""}`}>
+      <div class={`main-container ${activeTab() === "Asset Library" || activeTab() === "Settings" || activeTab() === "Moderation" ? "full-width" : ""}`}>
         <Switch>
           <Match when={activeTab() === "Humans"}>
             <div class="viewport">
@@ -540,6 +565,19 @@ function App() {
           </Match>
           <Match when={activeTab() === "Asset Library"}>
             <AssetLibrary />
+          </Match>
+          <Match when={activeTab() === "Moderation"}>
+            {appSettings()?.moderator_mode && appSettings()?.moderator_api_key ? (
+              <ModerationPanel apiKey={appSettings()!.moderator_api_key} />
+            ) : (
+              <div class="empty-state">
+                <h2>Moderation Panel</h2>
+                <p>Configure your API key in Settings to access moderation features.</p>
+                <button class="primary-button" onClick={openSettings}>
+                  Open Settings
+                </button>
+              </div>
+            )}
           </Match>
           <Match when={activeTab() === "Settings"}>
             <Settings onClose={() => setActiveTab(previousTab())} />
