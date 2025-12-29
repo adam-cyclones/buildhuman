@@ -1400,6 +1400,34 @@ const AssetLibrary = () => {
               )}
             </div>
 
+            {isEditingAsset(selectedAsset()!.id) && selectedAsset()!.id.includes("_edited_") && (
+              <div class="panel-section action-panel">
+                <p class="action-help-text">
+                  Submit for review. Approved assets will be added to the library for others to use.
+                </p>
+                <button
+                  class="action-btn primary"
+                  onClick={() => {/* TODO: Implement publish */}}
+                  title="Submit asset for publication"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M20 16.5c1.7 0 3-1.3 3-3s-1.3-3-3-3c-.4 0-.8.1-1.2.3-.6-2.3-2.7-4-5.2-4-2 0-3.8 1.1-4.7 2.8C7.6 9.2 6.4 10 5.5 11c-1.4.9-2.3 2.5-2.3 4.2 0 2.8 2.2 5 5 5h11.8"/>
+                    <polyline points="16 16 12 12 8 16"/>
+                    <line x1="12" y1="12" x2="12" y2="21"/>
+                  </svg>
+                  Publish Asset
+                </button>
+              </div>
+            )}
+
             {(cachedAssets().has(selectedAsset()!.id) && !selectedAsset()!.required && !isEditingAsset(selectedAsset()!.id)) && (
               <div class="panel-section">
                 <button
