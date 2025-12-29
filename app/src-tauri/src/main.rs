@@ -18,6 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3D rendering is handled by Babylon.js in the frontend
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             // Clean up stale .blend files from previous session
             println!("BuildHuman starting up...");
