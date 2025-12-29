@@ -110,28 +110,118 @@ library/                                # Custom user assets
 settings.json                           # App settings
 ```
 
-### Key Modules
+### Frontend Structure
 
-**Frontend (app/src/)**:
-- `App.tsx` - Main shell, startup sequence, required assets check
-- `AssetLibrary.tsx` - Core feature (1600 lines): browse, download, edit assets
-- `Settings.tsx` - User preferences UI
-- `BabylonScene.tsx` - 3D rendering wrapper
-- `Charts.tsx` - Height/weight visualization
+**View-Based Architecture** (`app/src/views/`):
+Each view follows a consistent pattern with dedicated folders:
+
+```
+views/
+├── AssetLibrary/
+│   ├── AssetLibrary.tsx       418 lines  (main component)
+│   ├── client.ts              144 lines  (API calls)
+│   ├── handlers.ts            678 lines  (event handlers)
+│   ├── utils.ts               194 lines  (utilities)
+│   ├── hooks/
+│   │   └── useAssetState.ts   136 lines  (state management)
+│   ├── components/            (view-specific components)
+│   │   ├── AssetCard.tsx
+│   │   ├── AssetGrid.tsx
+│   │   ├── AssetFilters.tsx
+│   │   └── AssetDetailPanel.tsx
+│   ├── types.ts               (TypeScript types)
+│   └── AssetLibrary.css       (styles)
+├── 3DEditor/
+│   ├── 3DEditor.tsx           432 lines  (Humans tab)
+│   ├── components/
+│   │   ├── BabylonScene.tsx
+│   │   ├── HeightForAgeChart.tsx
+│   │   └── WeightForAgeChart.tsx
+│   ├── types.ts
+│   └── 3DEditor.css
+├── Settings/
+│   ├── Settings.tsx           461 lines
+│   ├── Settings.css
+│   └── types.ts
+└── Moderation/
+    ├── Moderation.tsx         252 lines
+    └── Moderation.css
+```
+
+**Shared Components** (`app/src/components/`):
+- `Icon.tsx` - SVG icon system (31 icons via symbols)
+- `Tabs.tsx` - Reusable tab component
+- `DropdownMenu.tsx` - Menu bar dropdowns
+- `NotificationsCenter.tsx` - Notification bell
+
+**Main App** (`app/src/`):
+- `App.tsx` - Application shell, routing, menu bar
+- `App.css` - Global styles
 
 **Backend (app/src-tauri/src/)**:
 - `main.rs` - Entry point, Tauri setup, command registration
-- `asset_manager.rs` - Core backend (1042 lines): download, cache, Blender integration
+- `asset_manager.rs` - Core backend (1108 lines): download, cache, Blender integration
 - `settings.rs` - Settings persistence
 - `bevy.rs` - Native 3D rendering integration
 - `mesh/` - 3D mesh utilities
 
 **Service (service/)**:
-- `main.py` - FastAPI app with all asset API endpoints
+- `main.py` - FastAPI app with all asset API endpoints (900 lines)
 - `seed_assets.py` - Sample data generator
 - `assets.db` - SQLite database
 
 ## Important Conventions
+
+### View Module Pattern
+
+Each view follows a modular pattern for maintainability:
+
+**Structure**:
+```
+views/ViewName/
+├── ViewName.tsx          # Main component (composition only)
+├── client.ts             # API calls and data fetching
+├── handlers.ts           # Event handlers (factory functions)
+├── utils.ts              # Pure utility functions
+├── hooks/                # Custom hooks
+│   └── useViewState.ts   # State management
+├── components/           # View-specific components
+├── types.ts              # TypeScript type definitions
+└── ViewName.css          # Styles
+```
+
+**Separation of Concerns**:
+- **client.ts**: All external API calls, no side effects
+- **utils.ts**: Pure functions, no state, deterministic
+- **handlers.ts**: Event handlers as factory functions receiving dependencies
+- **hooks/**: State management using SolidJS createSignal
+- **ViewName.tsx**: Composition layer, wires everything together
+
+**Benefits**:
+- Testable modules (each file can be tested independently)
+- Clear responsibilities (data, logic, state, handlers, UI)
+- Easier maintenance (find and fix issues faster)
+- Reusable code (utilities can be used elsewhere)
+
+### Icon System
+
+Centralized SVG icon management via `components/Icon.tsx`:
+
+**Usage**:
+```tsx
+import Icon from "../../components/Icon";
+
+<Icon name="plus" size={24} />
+<Icon name="download" size={16} class="custom-class" />
+```
+
+**Available Icons** (31 total):
+`close`, `grid`, `list`, `filter`, `edit`, `image`, `trash`, `save`, `upload`,
+`star`, `check`, `download`, `fork`, `settings`, `search`, `arrow-down`, `bell`,
+`eye`, `folder`, `link`, `blender`, `reload`, `x-circle`, `shield`, `rotate-ccw`,
+`rotate-cw`, `plus`, `move`, `user`, `dice`
+
+**Implementation**: Uses SVG `<symbol>` definitions with `<use>` references for optimal performance and DRY code.
 
 ### Asset ID Schemes
 - **Original assets**: UUID from API (e.g., `abc123-def456`)
