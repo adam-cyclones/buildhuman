@@ -627,6 +627,63 @@ const AssetLibrary = () => {
     }
   };
 
+  const handlePublishAsset = async (assetId: string) => {
+    const asset = editedAssets().get(assetId);
+    if (!asset) {
+      alert("Asset not found");
+      return;
+    }
+
+    try {
+      // Create FormData for multipart upload
+      const formData = new FormData();
+
+      // Read the GLB file
+      const glbFile = await fetch(convertFileSrc(asset.file_path)).then(r => r.blob());
+      formData.append("file", glbFile, `${asset.metadata.name}.glb`);
+
+      // Read thumbnail if exists
+      if (asset.metadata.thumbnail_url) {
+        const thumbnailPath = `${appDataPath()}/created-assets/${asset.metadata.thumbnail_url}`;
+        const thumbnailBlob = await fetch(convertFileSrc(thumbnailPath)).then(r => r.blob());
+        formData.append("thumbnail", thumbnailBlob, asset.metadata.thumbnail_url);
+      }
+
+      // Prepare metadata
+      const metadata = {
+        asset_name: asset.metadata.name,
+        asset_description: asset.metadata.description || "",
+        asset_type: asset.metadata.type,
+        asset_category: asset.metadata.category,
+        author: asset.metadata.author,
+        license: asset.metadata.license,
+        version: asset.metadata.version,
+        submitter_id: asset.metadata.author
+      };
+
+      // Send metadata as JSON string
+      formData.append("metadata", JSON.stringify(metadata));
+
+      // Submit to service
+      const response = await fetch(`${API_URL}/api/submissions`, {
+        method: "POST",
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to submit asset");
+      }
+
+      const result = await response.json();
+
+      alert(`Asset submitted successfully!\n\nSubmission ID: ${result.id}\nStatus: Pending review`);
+
+    } catch (error) {
+      console.error("Failed to publish asset:", error);
+      alert(`Failed to publish asset: ${error}`);
+    }
+  };
+
   const formatTimeAgo = (timestamp: number) => {
     const seconds = Math.floor((Date.now() - timestamp) / 1000);
 
@@ -1440,7 +1497,7 @@ const AssetLibrary = () => {
                 </p>
                 <button
                   class="action-btn"
-                  onClick={() => {/* TODO: Implement publish */}}
+                  onClick={() => handlePublishAsset(selectedAsset()!.id)}
                   title="Submit asset for publication"
                 >
                   <svg
