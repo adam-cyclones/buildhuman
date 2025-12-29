@@ -1,23 +1,6 @@
-import { For, Accessor } from "solid-js";
-import type { Asset } from "../types";
+import { For } from "solid-js";
+import type { AssetGridProps } from "../types";
 import AssetCard from "./AssetCard";
-
-interface AssetGridProps {
-  assets: Accessor<Asset[]>;
-  loading: boolean;
-  error: any;
-  viewMode: Accessor<string>;
-  selectedType: Accessor<string>;
-  apiUrl: string;
-  onAssetClick: (asset: Asset) => void;
-  convertToAssetPath: (url: string, cacheBust: boolean) => string;
-  thumbnailTimestamps: Accessor<Map<string, number>>;
-  cachedAssets: Accessor<Set<string>>;
-  downloading: Accessor<string | null>;
-  onDownload: (id: string, name: string) => void;
-  editedAssets?: Accessor<Map<string, any>>;
-  allAssets?: Accessor<Asset[]>;
-}
 
 const AssetGrid = (props: AssetGridProps) => {
   return (

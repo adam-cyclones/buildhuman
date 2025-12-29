@@ -1,27 +1,5 @@
-import { createSignal, For, Accessor, Setter } from "solid-js";
-
-interface Category {
-  id: string;
-  name: string;
-  type_id: string;
-}
-
-interface AssetFiltersProps {
-  searchQuery: Accessor<string>;
-  setSearchQuery: Setter<string>;
-  sortBy: Accessor<string>;
-  setSortBy: Setter<string>;
-  selectedType: Accessor<string>;
-  setSelectedType: Setter<string>;
-  selectedCategory: Accessor<string>;
-  setSelectedCategory: Setter<string>;
-  filteredCategories: Accessor<Category[]>;
-  assetCount: number;
-  onSearch: () => void;
-  showModeratorOptions?: boolean;
-  viewMode: Accessor<string>;
-  setViewMode: Setter<string>;
-}
+import { createSignal, For } from "solid-js";
+import type { AssetFiltersProps } from "../types";
 
 /**
  * Asset Library Filters Component

@@ -1,41 +1,6 @@
-import { For, Accessor, Setter } from "solid-js";
-import type { Asset, LocalAsset, AssetMachines } from "../types";
+import { For } from "solid-js";
+import type { AssetDetailPanelProps } from "../types";
 import ActivityTimeline from "./ActivityTimeline";
-
-interface AssetDetailPanelProps {
-  selectedAsset: Accessor<Asset | null>;
-  setSelectedAsset: Setter<Asset | null>;
-  isEditingAsset: (id: string) => boolean;
-  editedAssets: Accessor<Map<string, LocalAsset>>;
-  cachedAssets: Accessor<Set<string>>;
-  getMachine: (assetId: string, metadata?: any) => AssetMachines;
-  originalEditedMetadata: Accessor<Map<string, Asset>>;
-  convertToAssetPath: (thumbnailUrl: string, bustCache: boolean) => string;
-  thumbnailTimestamps: Accessor<Map<string, number>>;
-  getRecentEvents: (assetId: string, limit?: number) => any[];
-  selectedType: Accessor<string>;
-  downloading: Accessor<string | null>;
-  reviewAction: Accessor<"approve" | "reject" | null>;
-  setReviewAction: Setter<"approve" | "reject" | null>;
-  rejectionReason: Accessor<string>;
-  setRejectionReason: Setter<string>;
-  reviewNotes: Accessor<string>;
-  setReviewNotes: Setter<string>;
-  submitting: Accessor<boolean>;
-  appSettings: any;
-  onClose: () => void;
-  onChangeThumbnail: (assetId: string) => void;
-  onOpenInBlender: (assetId: string) => void;
-  onSaveMetadata: (assetId: string) => Promise<void>;
-  onPublishAsset: (assetId: string) => void;
-  onDeleteCached: (assetId: string, name: string) => void;
-  onRevertToOriginal: (assetId: string) => void;
-  onReview: (assetId: string) => void;
-  onDownload: (assetId: string, name: string) => void;
-  onEditAsset: (assetId: string) => void;
-  isLicenseEditable: (license: string) => boolean;
-  showMetadataSaveToast: (message: string, duration: number) => void;
-}
 
 const AssetDetailPanel = (props: AssetDetailPanelProps) => {
   const asset = () => props.selectedAsset()!;

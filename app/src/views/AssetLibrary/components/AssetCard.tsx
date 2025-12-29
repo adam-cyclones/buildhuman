@@ -1,18 +1,5 @@
-import { Accessor, For } from "solid-js";
-import type { Asset } from "../types";
-
-interface AssetCardProps {
-  asset: Asset;
-  onClick: (asset: Asset) => void;
-  convertToAssetPath: (url: string, cacheBust: boolean) => string;
-  thumbnailHasCacheBust: boolean;
-  cachedAssets: Accessor<Set<string>>;
-  downloading: Accessor<string | null>;
-  onDownload: (id: string, name: string) => void;
-  editedAssets?: Accessor<Map<string, any>>;
-  allAssets?: Accessor<Asset[]>;
-  onAssetClick?: (asset: Asset) => void;
-}
+import { For } from "solid-js";
+import type { Asset, AssetCardProps } from "../types";
 
 const AssetCard = (props: AssetCardProps) => {
   const isEdited = () => props.asset.id.includes("_edited_");

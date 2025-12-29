@@ -1,22 +1,5 @@
 import { For } from "solid-js";
-
-interface AssetEvent {
-  type: string;
-  timestamp: number;
-  data?: any;
-}
-
-interface ActivityTimelineProps {
-  events: AssetEvent[];
-}
-
-interface FormattedEvent {
-  icon: string;
-  title: string;
-  desc: string;
-  time: string;
-  warning?: boolean;
-}
+import type { ActivityTimelineProps, AssetEvent, FormattedEvent } from "../types";
 
 const formatTimeAgo = (timestamp: number): string => {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
