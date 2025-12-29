@@ -567,12 +567,26 @@ const AssetLibrary = () => {
           thumbnailPath: selected
         });
 
-        // Update the selected asset to show the new thumbnail
-        const updatedAsset = { ...selectedAsset()! };
         // The backend will return a relative path or filename
         const thumbnailFilename = await invoke<string>("get_asset_thumbnail", { assetId });
+
+        // Update the selected asset to show the new thumbnail
+        const updatedAsset = { ...selectedAsset()! };
         updatedAsset.thumbnail_url = thumbnailFilename;
         setSelectedAsset(updatedAsset);
+
+        // Also update the editedAssets map to persist the change
+        if (editedAssets().has(assetId)) {
+          setEditedAssets(prev => {
+            const newMap = new Map(prev);
+            const asset = newMap.get(assetId);
+            if (asset) {
+              asset.metadata.thumbnail_url = thumbnailFilename;
+              newMap.set(assetId, asset);
+            }
+            return newMap;
+          });
+        }
 
         showMetadataSaveToast("Thumbnail updated", 2000);
       }
@@ -1211,7 +1225,7 @@ const AssetLibrary = () => {
                   </button>
                 </div>
 
-                <div class="panel-section action-panel">
+                <div class="panel-section action-panel blender-panel">
                   <p class="action-help-text">
                     After saving, changes appear here automatically.
                   </p>
@@ -1341,16 +1355,20 @@ const AssetLibrary = () => {
                 <span class="detail-label">License:</span>
                 <span class="detail-value">{selectedAsset()!.license}</span>
               </div>
-              <div class="detail-row">
-                <span class="detail-label">Published:</span>
-                <span class="detail-value">
-                  {new Date(selectedAsset()!.publish_date).toLocaleDateString()}
-                </span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">Downloads:</span>
-                <span class="detail-value">{selectedAsset()!.downloads}</span>
-              </div>
+              {!isEditingAsset(selectedAsset()!.id) && (
+                <>
+                  <div class="detail-row">
+                    <span class="detail-label">Published:</span>
+                    <span class="detail-value">
+                      {new Date(selectedAsset()!.publish_date).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="detail-label">Downloads:</span>
+                    <span class="detail-value">{selectedAsset()!.downloads}</span>
+                  </div>
+                </>
+              )}
               {selectedAsset()!.file_size && (
                 <div class="detail-row">
                   <span class="detail-label">Size:</span>
