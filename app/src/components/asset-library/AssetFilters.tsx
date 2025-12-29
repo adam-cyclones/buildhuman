@@ -19,6 +19,8 @@ interface AssetFiltersProps {
   assetCount: number;
   onSearch: () => void;
   showModeratorOptions?: boolean;
+  viewMode: Accessor<string>;
+  setViewMode: Setter<string>;
 }
 
 /**
@@ -30,19 +32,30 @@ const AssetFilters = (props: AssetFiltersProps) => {
 
   return (
     <>
-      <div class="library-header">
-        <div class="header-controls">
-          <div class="menu-trigger">
-            <button class="header-btn menu-btn">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
+      <div class="asset-library-header">
+        <div class="search-bar">
+          <div class="view-toggle">
+            <button
+              class={`view-btn ${props.viewMode() === "grid" ? "active" : ""}`}
+              onClick={() => props.setViewMode("grid")}
+              title="Grid view"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+              </svg>
+            </button>
+            <button
+              class={`view-btn ${props.viewMode() === "list" ? "active" : ""}`}
+              onClick={() => props.setViewMode("list")}
+              title="List view"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="8" y1="6" x2="21" y2="6" />
+                <line x1="8" y1="12" x2="21" y2="12" />
+                <line x1="8" y1="18" x2="21" y2="18" />
                 <line x1="3" y1="6" x2="3.01" y2="6" />
                 <line x1="3" y1="12" x2="3.01" y2="12" />
                 <line x1="3" y1="18" x2="3.01" y2="18" />

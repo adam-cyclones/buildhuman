@@ -7,6 +7,7 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import { config } from "./config";
 import ActivityTimeline from "./components/asset-library/ActivityTimeline";
 import AssetGrid from "./components/asset-library/AssetGrid";
+import AssetFilters from "./components/asset-library/AssetFilters";
 import { useAssetEvents } from "./components/asset-library/useAssetEvents";
 import "./AssetLibrary.css";
 
@@ -83,8 +84,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
   const [isPanelOpen, setIsPanelOpen] = createSignal(false);
   const [downloadQueue, setDownloadQueue] = createSignal<Download[]>([]);
   const [isDownloadsPanelOpen, setIsDownloadsPanelOpen] = createSignal(false);
-  const [showFilters, setShowFilters] = createSignal(false);
-  const [viewMode, setViewMode] = createSignal<"grid" | "list">("grid");
+  const [viewMode, setViewMode] = createSignal<string>("grid");
   const [cachedAssets, setCachedAssets] = createSignal<Set<string>>(new Set());
   const [editedAssets, setEditedAssets] = createSignal<Map<string, LocalAsset>>(new Map());
   const [showMetadataToast, setShowMetadataToast] = createSignal(false);
@@ -1031,134 +1031,23 @@ const AssetLibrary = (props: AssetLibraryProps) => {
           </div>
         </div>
       )}
-      <div class="asset-library-header">
-        <div class="search-bar">
-          <div class="view-toggle">
-            <button
-              class={`view-btn ${viewMode() === "grid" ? "active" : ""}`}
-              onClick={() => setViewMode("grid")}
-              title="Grid view"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-              </svg>
-            </button>
-            <button
-              class={`view-btn ${viewMode() === "list" ? "active" : ""}`}
-              onClick={() => setViewMode("list")}
-              title="List view"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <line x1="8" y1="6" x2="21" y2="6" />
-                <line x1="8" y1="12" x2="21" y2="12" />
-                <line x1="8" y1="18" x2="21" y2="18" />
-                <line x1="3" y1="6" x2="3.01" y2="6" />
-                <line x1="3" y1="12" x2="3.01" y2="12" />
-                <line x1="3" y1="18" x2="3.01" y2="18" />
-              </svg>
-            </button>
-          </div>
-          <input
-            type="text"
-            class="search-input"
-            placeholder="Search assets..."
-            value={searchQuery()}
-            onInput={(e) => setSearchQuery(e.currentTarget.value)}
-            onKeyPress={(e) => e.key === "Enter" && handleSearch()}
-          />
-          <button class="header-btn" onClick={handleSearch}>
-            Search
-          </button>
-          <button
-            class={`filter-toggle-btn ${showFilters() ? "active" : ""}`}
-            onClick={() => setShowFilters(!showFilters())}
-            title="Toggle filters"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-            </svg>
-            Filters
-          </button>
-          <span class="page-info">
-            {assets() && `${assets().length} assets`}
-          </span>
-        </div>
-        {showFilters() && (
-          <div class="filters-panel">
-            <div class="control-group">
-              <label>Sort:</label>
-              <select
-                class="select-input"
-                value={sortBy()}
-                onChange={(e) => setSortBy(e.currentTarget.value)}
-              >
-                <option value="recent">Recent</option>
-                <option value="rating">Rating</option>
-                <option value="name">Name</option>
-                <option value="downloads">Downloads</option>
-              </select>
-            </div>
-            <div class="control-group">
-              <label>Type:</label>
-              <select
-                class="select-input"
-                value={selectedType()}
-                onChange={(e) => {
-                  setSelectedType(e.currentTarget.value);
-                  setSelectedCategory("all");
-                }}
-              >
-                <option value="all">All</option>
-                <option value="models">Models</option>
-                <option value="environment">Environment</option>
-                {props.appSettings?.moderator_mode && props.appSettings?.moderator_api_key && (
-                  <option value="pending">Pending</option>
-                )}
-              </select>
-            </div>
-            <div class="control-group">
-              <label>Category:</label>
-              <select
-                class="select-input"
-                value={selectedCategory()}
-                onChange={(e) => setSelectedCategory(e.currentTarget.value)}
-              >
-                <option value="all">All</option>
-                <For each={filteredCategories()}>
-                  {(cat) => <option value={cat.id}>{cat.name}</option>}
-                </For>
-              </select>
-            </div>
-          </div>
-        )}
-      </div>
+
+      <AssetFilters
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        sortBy={sortBy}
+        setSortBy={setSortBy}
+        selectedType={selectedType}
+        setSelectedType={setSelectedType}
+        selectedCategory={selectedCategory}
+        setSelectedCategory={setSelectedCategory}
+        filteredCategories={filteredCategories}
+        assetCount={assets()?.length || 0}
+        onSearch={handleSearch}
+        showModeratorOptions={props.appSettings?.moderator_mode && !!props.appSettings?.moderator_api_key}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+      />
 
       <AssetGrid
         assets={allAssets}
