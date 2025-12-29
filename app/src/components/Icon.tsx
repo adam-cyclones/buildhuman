@@ -201,6 +201,40 @@ export const IconSymbols = () => (
       <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
       <path d="M3 21v-5h5"/>
     </symbol>
+
+    {/* Rotate CW (refresh) */}
+    <symbol id="icon-rotate-cw" viewBox="0 0 24 24">
+      <path d="M21 2v6h-6"/>
+      <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+      <path d="M3 22v-6h6"/>
+      <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+    </symbol>
+
+    {/* Plus */}
+    <symbol id="icon-plus" viewBox="0 0 24 24">
+      <path d="M12 5v14m-7-7h14"/>
+    </symbol>
+
+    {/* Move (arrows) */}
+    <symbol id="icon-move" viewBox="0 0 24 24">
+      <path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>
+    </symbol>
+
+    {/* User */}
+    <symbol id="icon-user" viewBox="0 0 24 24">
+      <circle cx="12" cy="8" r="4"/>
+      <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
+    </symbol>
+
+    {/* Dice (randomize) */}
+    <symbol id="icon-dice" viewBox="0 0 24 24">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+      <circle cx="8.5" cy="8.5" r="1.5"/>
+      <circle cx="15.5" cy="8.5" r="1.5"/>
+      <circle cx="8.5" cy="15.5" r="1.5"/>
+      <circle cx="15.5" cy="15.5" r="1.5"/>
+      <circle cx="12" cy="12" r="1.5"/>
+    </symbol>
   </svg>
 );
 

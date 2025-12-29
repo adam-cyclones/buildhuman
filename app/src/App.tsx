@@ -12,7 +12,7 @@ import AssetLibrary from "./views/AssetLibrary/AssetLibrary";
 import Settings from "./views/Settings/Settings";
 import DropdownMenu from "./DropdownMenu";
 import NotificationsCenter from "./NotificationsCenter";
-import { IconSymbols } from "./components/Icon";
+import Icon, { IconSymbols } from "./components/Icon";
 import { config } from "./config";
 
 interface Human {
@@ -296,10 +296,10 @@ function App() {
             <div class="viewport">
               <div class="left-toolbar">
                 <button class="tool-btn" title="Add Human" onClick={addHuman}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14m-7-7h14"/></svg>
+                  <Icon name="plus" size={24} />
                 </button>
                 <button class="tool-btn" title="Move">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/></svg>
+                  <Icon name="move" size={24} />
                 </button>
               </div>
               <div class="viewport-header">
@@ -344,10 +344,7 @@ function App() {
                             >
                               ▶
                             </span>
-                            <svg class="tree-icon-svg" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                              <circle cx="12" cy="8" r="4"/>
-                              <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
-                            </svg>
+                            <Icon name="user" size={16} class="tree-icon-svg" />
                             <span class="tree-label">Humans</span>
                           </div>
                           {expandedNodes().has("humans") && (
@@ -380,10 +377,7 @@ function App() {
                                     onDblClick={startRename}
                                   >
                                     <span class="tree-icon">•</span>
-                                    <svg class="tree-icon-svg" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                      <circle cx="12" cy="8" r="4"/>
-                                      <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
-                                    </svg>
+                                    <Icon name="user" size={16} class="tree-icon-svg" />
                                     {renamingId() === human.id ? (
                                       <input
                                         type="text"
@@ -432,14 +426,7 @@ function App() {
                                 onClick={randomizeName}
                                 title="Randomize name"
                               >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                                  <circle cx="8.5" cy="8.5" r="1.5"/>
-                                  <circle cx="15.5" cy="8.5" r="1.5"/>
-                                  <circle cx="8.5" cy="15.5" r="1.5"/>
-                                  <circle cx="15.5" cy="15.5" r="1.5"/>
-                                  <circle cx="12" cy="12" r="1.5"/>
-                                </svg>
+                                <Icon name="dice" size={16} />
                               </button>
                             </div>
                           </div>

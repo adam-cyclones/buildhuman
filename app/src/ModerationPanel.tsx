@@ -1,5 +1,6 @@
 import { createSignal, For, createResource } from "solid-js";
 import { config } from "./config";
+import Icon from "./components/Icon";
 import "./ModerationPanel.css";
 
 interface Submission {
@@ -95,12 +96,7 @@ const ModerationPanel = (props: ModerationPanelProps) => {
       <div class="moderation-header">
         <h2>Pending Submissions</h2>
         <button class="refresh-btn" onClick={() => refetch()}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 2v6h-6"/>
-            <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
-            <path d="M3 22v-6h6"/>
-            <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
-          </svg>
+          <Icon name="rotate-cw" size={16} />
           Refresh
         </button>
       </div>
