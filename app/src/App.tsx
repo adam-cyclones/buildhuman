@@ -12,6 +12,7 @@ import AssetLibrary from "./views/AssetLibrary/AssetLibrary";
 import Settings from "./views/Settings/Settings";
 import DropdownMenu from "./DropdownMenu";
 import NotificationsCenter from "./NotificationsCenter";
+import { IconSymbols } from "./components/Icon";
 import { config } from "./config";
 
 interface Human {
@@ -243,8 +244,10 @@ function App() {
   const sceneTabs = ["Scene", "Properties"];
 
   return (
-    <div class="app">
-      <div class="menu-bar">
+    <>
+      <IconSymbols />
+      <div class="app">
+        <div class="menu-bar">
         <div class="menu-items">
           <DropdownMenu
             label="File"
@@ -577,6 +580,7 @@ function App() {
         </Switch>
       </div>
     </div>
+    </>
   );
 }
 

@@ -11,6 +11,7 @@ import AssetDetailPanel from "./components/AssetDetailPanel";
 import { useAssetEvents } from "./components/useAssetEvents";
 import { useAssetEditing } from "../../machines/useAssetEditing";
 import { useAssetPublishing } from "../../machines/useAssetPublishing";
+import Icon from "../../components/Icon";
 import type { Asset, LocalAsset, Category, Download, Submission, AssetLibraryProps, AssetMachines } from "./types";
 import "./AssetLibrary.css";
 
@@ -969,52 +970,18 @@ const AssetLibrary = (props: AssetLibraryProps) => {
       {changedAssetId() && (
         <div class="asset-changed-banner">
           <div class="banner-content">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
+            <Icon name="eye" size={20} />
             <span>
               Asset "{editedAssets().get(changedAssetId()!)?.metadata.name || changedAssetId()}" has been updated externally.
             </span>
           </div>
           <div class="banner-actions">
             <button class="reload-btn" onClick={handleReloadChangedAsset}>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <polyline points="23 4 23 10 17 10" />
-                <polyline points="1 20 1 14 7 14" />
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-              </svg>
+              <Icon name="reload" size={16} />
               Reload
             </button>
             <button class="dismiss-btn" onClick={() => setChangedAssetId(null)}>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
+              <Icon name="close" size={16} />
             </button>
           </div>
         </div>
@@ -1057,11 +1024,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
       <div class="asset-pagination">
         <div class="status-bar-buttons">
           <button class="publish-btn" title="Publish to community">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M20 16.5c1.7 0 3-1.3 3-3s-1.3-3-3-3c-.4 0-.8.1-1.2.3-.6-2.3-2.7-4-5.2-4-2 0-3.8 1.1-4.7 2.8C7.6 9.2 6.4 10 5.5 11c-1.4.9-2.3 2.5-2.3 4.2 0 2.8 2.2 5 5 5h11.8"/>
-              <polyline points="16 16 12 12 8 16"/>
-              <line x1="12" y1="12" x2="12" y2="21"/>
-            </svg>
+            <Icon name="upload" size={16} />
             Publish
           </button>
           <div class="downloads-wrapper">
@@ -1069,19 +1032,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
               class="downloads-btn"
               onClick={() => setIsDownloadsPanelOpen(!isDownloadsPanelOpen())}
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
+              <Icon name="download" size={16} />
               <span>Downloads</span>
               {downloadQueue().filter((d) => d.status === "downloading").length > 0 && (
                 <span class="downloads-badge">
@@ -1099,17 +1050,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
                       onClick={handleOpenDownloadsFolder}
                       title="Open downloads folder"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                      >
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                      </svg>
+                      <Icon name="folder" size={14} />
                     </button>
                     {downloadQueue().length > 0 && (
                       <button
@@ -1152,32 +1093,10 @@ const AssetLibrary = (props: AssetLibraryProps) => {
                               </svg>
                             )}
                             {download.status === "completed" && (
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                              >
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
+                              <Icon name="check" size={16} />
                             )}
                             {download.status === "failed" && (
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="16"
-                                height="16"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                              >
-                                <circle cx="12" cy="12" r="10" />
-                                <line x1="15" y1="9" x2="9" y2="15" />
-                                <line x1="9" y1="9" x2="15" y2="15" />
-                              </svg>
+                              <Icon name="x-circle" size={16} />
                             )}
                           </div>
                           <div class="download-info">
@@ -1237,9 +1156,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
 
       {showMetadataToast() && (
         <div class="settings-toast">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 6L9 17l-5-5"/>
-          </svg>
+          <Icon name="check" size={16} />
           <span>{metadataToastMessage()}</span>
         </div>
       )}

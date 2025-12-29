@@ -1,5 +1,6 @@
 import { createSignal, For } from "solid-js";
 import type { AssetFiltersProps } from "../types";
+import Icon from "../../../components/Icon";
 
 /**
  * Asset Library Filters Component
@@ -18,26 +19,14 @@ const AssetFilters = (props: AssetFiltersProps) => {
               onClick={() => props.setViewMode("grid")}
               title="Grid view"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-              </svg>
+              <Icon name="grid" size={16} />
             </button>
             <button
               class={`view-btn ${props.viewMode() === "list" ? "active" : ""}`}
               onClick={() => props.setViewMode("list")}
               title="List view"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="8" y1="6" x2="21" y2="6" />
-                <line x1="8" y1="12" x2="21" y2="12" />
-                <line x1="8" y1="18" x2="21" y2="18" />
-                <line x1="3" y1="6" x2="3.01" y2="6" />
-                <line x1="3" y1="12" x2="3.01" y2="12" />
-                <line x1="3" y1="18" x2="3.01" y2="18" />
-              </svg>
+              <Icon name="list" size={16} />
             </button>
           </div>
           <input
@@ -56,17 +45,7 @@ const AssetFilters = (props: AssetFiltersProps) => {
             onClick={() => setShowFilters(!showFilters())}
             title="Toggle filters"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-            </svg>
+            <Icon name="filter" size={16} />
             Filters
           </button>
           <span class="page-info">

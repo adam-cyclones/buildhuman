@@ -1,5 +1,6 @@
 import { For } from "solid-js";
 import type { Asset, AssetCardProps } from "../types";
+import Icon from "../../../components/Icon";
 
 const AssetCard = (props: AssetCardProps) => {
   const isEdited = () => props.asset.id.includes("_edited_");
@@ -25,19 +26,7 @@ const AssetCard = (props: AssetCardProps) => {
           />
         ) : null}
         <div class={`placeholder-icon ${props.asset.thumbnail_url ? 'hidden' : ''}`}>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="48"
-            height="48"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <polyline points="21 15 16 10 5 21" />
-          </svg>
+          <Icon name="image" size={48} />
         </div>
 
         {/* Badges */}
@@ -60,13 +49,7 @@ const AssetCard = (props: AssetCardProps) => {
                 }
               }}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="18" r="3" />
-                <circle cx="6" cy="6" r="3" />
-                <circle cx="18" cy="6" r="3" />
-                <path d="M18 9v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9" />
-                <path d="M12 12v3" />
-              </svg>
+              <Icon name="fork" size={12} />
               Unpublished
             </span>
           );
@@ -92,15 +75,9 @@ const AssetCard = (props: AssetCardProps) => {
                   <path d="M12 2v4" opacity="1" />
                 </svg>
               ) : props.cachedAssets().has(props.asset.id) ? (
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
+                <Icon name="check" size={20} />
               ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
+                <Icon name="download" size={20} />
               )}
             </button>
           </div>
@@ -116,18 +93,12 @@ const AssetCard = (props: AssetCardProps) => {
           <div class="asset-rating">
             <For each={[1, 2, 3, 4, 5]}>
               {(star) => (
-                <svg
+                <Icon
+                  name="star"
+                  size={12}
                   class={`star ${star <= props.asset.rating ? "filled" : ""}`}
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill={star <= props.asset.rating ? "currentColor" : "none"}
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                </svg>
+                  style={{ fill: star <= props.asset.rating ? "currentColor" : "none" }}
+                />
               )}
             </For>
             {props.asset.rating_count > 0 && (
