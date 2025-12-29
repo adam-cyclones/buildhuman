@@ -9,6 +9,8 @@ pub struct AppSettings {
     pub default_editor: String,
     pub default_editor_type: String,  // "blender", "maya", etc.
     pub custom_assets_folder: String,
+    pub moderator_api_key: String,
+    pub moderator_mode: bool,
 }
 
 impl Default for AppSettings {
@@ -18,6 +20,8 @@ impl Default for AppSettings {
             default_editor: String::new(),
             default_editor_type: String::new(),
             custom_assets_folder: String::new(),
+            moderator_api_key: String::new(),
+            moderator_mode: false,
         }
     }
 }
