@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { readFile } from "@tauri-apps/plugin-fs";
 import "./AssetLibrary.css";
 
 interface Asset {
@@ -731,14 +732,16 @@ const AssetLibrary = (props: AssetLibraryProps) => {
       // Create FormData for multipart upload
       const formData = new FormData();
 
-      // Read the GLB file
-      const glbFile = await fetch(convertFileSrc(asset.file_path)).then(r => r.blob());
-      formData.append("file", glbFile, `${asset.metadata.name}.glb`);
+      // Read the GLB file using Tauri FS
+      const glbBytes = await readFile(asset.file_path);
+      const glbBlob = new Blob([glbBytes], { type: "model/gltf-binary" });
+      formData.append("file", glbBlob, `${asset.metadata.name}.glb`);
 
       // Read thumbnail if exists
       if (asset.metadata.thumbnail_url) {
         const thumbnailPath = `${appDataPath()}/created-assets/${asset.metadata.thumbnail_url}`;
-        const thumbnailBlob = await fetch(convertFileSrc(thumbnailPath)).then(r => r.blob());
+        const thumbnailBytes = await readFile(thumbnailPath);
+        const thumbnailBlob = new Blob([thumbnailBytes], { type: "image/png" });
         formData.append("thumbnail", thumbnailBlob, asset.metadata.thumbnail_url);
       }
 

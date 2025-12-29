@@ -562,7 +562,16 @@ function App() {
             <AssetLibrary appSettings={appSettings()} />
           </Match>
           <Match when={activeTab() === "Settings"}>
-            <Settings onClose={() => setActiveTab(previousTab())} />
+            <Settings onClose={async () => {
+              // Reload settings to pick up changes (especially moderator mode)
+              try {
+                const settings = await invoke<AppSettings>("get_app_settings");
+                setAppSettings(settings);
+              } catch (error) {
+                console.error("Failed to reload settings:", error);
+              }
+              setActiveTab(previousTab());
+            }} />
           </Match>
         </Switch>
       </div>
