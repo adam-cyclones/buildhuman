@@ -472,12 +472,12 @@ const Settings = (_props: SettingsProps) => {
                             });
                             if (response.ok) {
                               const data = await response.json();
-                              showSaveToast(`✓ Valid ${data.role} key for ${data.name}`, "success");
+                              showSaveToast(`Verified as ${data.name} (${data.role})`, "success");
                             } else {
-                              showSaveToast("✗ Invalid API key", "error");
+                              showSaveToast("Invalid API key", "error");
                             }
                           } catch (error) {
-                            showSaveToast("✗ Failed to verify (service offline?)", "error");
+                            showSaveToast("Failed to verify - service offline?", "error");
                           }
                         }}
                         disabled={!settings().moderator_api_key}
