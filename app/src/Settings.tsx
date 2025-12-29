@@ -45,6 +45,7 @@ const Settings = (_props: SettingsProps) => {
   });
   const [showToast, setShowToast] = createSignal(false);
   const [toastMessage, setToastMessage] = createSignal("");
+  const [toastType, setToastType] = createSignal<"success" | "error">("success");
 
   const loadCachedAssets = async () => {
     try {
@@ -64,8 +65,9 @@ const Settings = (_props: SettingsProps) => {
     }
   };
 
-  const showSaveToast = (message: string) => {
+  const showSaveToast = (message: string, type: "success" | "error" = "success") => {
     setToastMessage(message);
+    setToastType(type);
     setShowToast(true);
     setTimeout(() => setShowToast(false), 3000);
   };
@@ -470,12 +472,12 @@ const Settings = (_props: SettingsProps) => {
                             });
                             if (response.ok) {
                               const data = await response.json();
-                              showSaveToast(`✓ Valid ${data.role} key for ${data.name}`);
+                              showSaveToast(`✓ Valid ${data.role} key for ${data.name}`, "success");
                             } else {
-                              showSaveToast("✗ Invalid API key");
+                              showSaveToast("✗ Invalid API key", "error");
                             }
                           } catch (error) {
-                            showSaveToast("✗ Failed to verify (service offline?)");
+                            showSaveToast("✗ Failed to verify (service offline?)", "error");
                           }
                         }}
                         disabled={!settings().moderator_api_key}
@@ -490,10 +492,18 @@ const Settings = (_props: SettingsProps) => {
       </div>
 
       {showToast() && (
-        <div class="settings-toast">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 6L9 17l-5-5"/>
-          </svg>
+        <div class={`settings-toast ${toastType()}`}>
+          {toastType() === "success" ? (
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 6L9 17l-5-5"/>
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="15" y1="9" x2="9" y2="15"/>
+              <line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+          )}
           <span>{toastMessage()}</span>
         </div>
       )}

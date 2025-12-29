@@ -431,8 +431,20 @@
 }
 
 .settings-toast svg {
-  color: #4ade80;
   flex-shrink: 0;
+}
+
+.settings-toast.success svg {
+  color: #4ade80;
+}
+
+.settings-toast.error {
+  border-color: #f44336;
+  background: rgba(244, 67, 54, 0.1);
+}
+
+.settings-toast.error svg {
+  color: #f44336;
 }
 
 @keyframes slideInUp {
@@ -556,11 +568,12 @@
 }
 
 input:checked + .slider {
-  background-color: var(--accent);
+  background-color: #c1a48a; /* Tan/beige color that's visible */
 }
 
 input:checked + .slider:before {
   transform: translateX(26px);
+  background-color: white; /* Keep knob white for contrast */
 }
 
 input:disabled + .slider {
