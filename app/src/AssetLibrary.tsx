@@ -5,6 +5,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { config } from "./config";
+import ActivityTimeline from "./components/asset-library/ActivityTimeline";
+import { useAssetEvents } from "./components/asset-library/useAssetEvents";
 import "./AssetLibrary.css";
 
 interface Asset {
@@ -499,119 +501,8 @@ const AssetLibrary = (props: AssetLibraryProps) => {
   };
 
   // Event logging system for undo/redo and activity tracking
-  const logEvent = async (assetId: string, eventType: string, data?: any) => {
-    const event = {
-      type: eventType,
-      timestamp: Date.now(),
-      data: data || {}
-    };
+  const { logEvent, getRecentEvents } = useAssetEvents(editedAssets, setEditedAssets);
 
-    // Update local state
-    setEditedAssets(prev => {
-      const newMap = new Map(prev);
-      const asset = newMap.get(assetId);
-      if (asset) {
-        if (!asset.metadata.events) {
-          asset.metadata.events = [];
-        }
-        asset.metadata.events.push(event);
-      }
-      return newMap;
-    });
-
-    // Persist to backend
-    try {
-      const asset = editedAssets().get(assetId);
-      if (asset) {
-        await invoke("update_asset_metadata", {
-          assetId,
-          metadata: {
-            ...asset.metadata,
-            events: asset.metadata.events
-          }
-        });
-      }
-    } catch (err) {
-      console.error("Failed to persist event:", err);
-    }
-  };
-
-  const getRecentEvents = (assetId: string, limit: number = 5) => {
-    const asset = editedAssets().get(assetId);
-    if (!asset?.metadata.events) return [];
-    return asset.metadata.events.slice(-limit).reverse();
-  };
-
-  const formatEvent = (event: any) => {
-    const timeAgo = formatTimeAgo(event.timestamp);
-
-    switch (event.type) {
-      case "forked":
-        return {
-          icon: "🔀",
-          title: "Asset Created",
-          desc: `Forked from ${event.data.original_name || "original"}`,
-          time: timeAgo
-        };
-      case "metadata_saved":
-        return {
-          icon: "💾",
-          title: "Changes Saved",
-          desc: "Metadata updated",
-          time: timeAgo
-        };
-      case "edited_after_publish":
-        return {
-          icon: "⚠️",
-          title: "Edited After Publishing",
-          desc: "Local changes not in submitted version",
-          time: timeAgo,
-          warning: true
-        };
-      case "published":
-        return {
-          icon: "⏳",
-          title: "Published for Review",
-          desc: `Submission ID: ${event.data.submission_id?.substring(0, 8)}...`,
-          time: timeAgo
-        };
-      case "thumbnail_changed":
-        return {
-          icon: "🖼️",
-          title: "Thumbnail Updated",
-          desc: "Preview image changed",
-          time: timeAgo
-        };
-      case "file_changed":
-        return {
-          icon: "📝",
-          title: "File Modified",
-          desc: "Blender saved changes",
-          time: timeAgo
-        };
-      case "approved":
-        return {
-          icon: "✅",
-          title: "Approved",
-          desc: `By ${event.data.moderator || "moderator"}`,
-          time: timeAgo
-        };
-      case "rejected":
-        return {
-          icon: "❌",
-          title: "Rejected",
-          desc: event.data.reason || "See moderator notes",
-          time: timeAgo
-        };
-      default:
-        return {
-          icon: "📌",
-          title: event.type,
-          desc: JSON.stringify(event.data),
-          time: timeAgo
-        };
-    }
-  };
 
   const isLicenseEditable = (license: string) => {
     const licenseUpper = license.toUpperCase();
@@ -1839,26 +1730,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
             </div>
 
             {isEditingAsset(selectedAsset()!.id) && getRecentEvents(selectedAsset()!.id).length > 0 && (
-              <div class="panel-section activity-timeline">
-                <h3>Activity Timeline</h3>
-                <div class="timeline-events">
-                  <For each={getRecentEvents(selectedAsset()!.id)}>
-                    {(event) => {
-                      const formatted = formatEvent(event);
-                      return (
-                        <div class={`timeline-event ${formatted.warning ? 'warning' : ''}`}>
-                          <div class="timeline-icon">{formatted.icon}</div>
-                          <div class="timeline-content">
-                            <div class="timeline-title">{formatted.title}</div>
-                            <div class="timeline-desc">{formatted.desc}</div>
-                            <div class="timeline-time">{formatted.time}</div>
-                          </div>
-                        </div>
-                      );
-                    }}
-                  </For>
-                </div>
-              </div>
+              <ActivityTimeline events={getRecentEvents(selectedAsset()!.id)} />
             )}
 
             {isEditingAsset(selectedAsset()!.id) && selectedAsset()!.id.includes("_edited_") && (
