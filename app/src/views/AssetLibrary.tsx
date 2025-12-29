@@ -4,11 +4,11 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { readFile } from "@tauri-apps/plugin-fs";
-import { config } from "./config";
-import ActivityTimeline from "./components/asset-library/ActivityTimeline";
-import AssetGrid from "./components/asset-library/AssetGrid";
-import AssetFilters from "./components/asset-library/AssetFilters";
-import { useAssetEvents } from "./components/asset-library/useAssetEvents";
+import { config } from "../config";
+import ActivityTimeline from "../components/asset-library/ActivityTimeline";
+import AssetGrid from "../components/asset-library/AssetGrid";
+import AssetFilters from "../components/asset-library/AssetFilters";
+import { useAssetEvents } from "../components/asset-library/useAssetEvents";
 import "./AssetLibrary.css";
 
 interface Asset {

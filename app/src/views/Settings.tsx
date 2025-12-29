@@ -1,7 +1,7 @@
 import { createSignal, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { config } from "./config";
+import { config } from "../config";
 import "./Settings.css";
 
 interface LocalAsset {
