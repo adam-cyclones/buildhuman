@@ -16,7 +16,7 @@ export interface AssetPublishingContext {
 }
 
 export type AssetPublishingEvent =
-  | { type: "SUBMIT"; submissionId: string }
+  | { type: "SUBMIT" }
   | { type: "SUBMIT_SUCCESS"; submissionId: string }
   | { type: "SUBMIT_FAILURE"; error: string }
   | { type: "EDIT" }
@@ -33,7 +33,7 @@ export const assetPublishingMachine = setup({
   actions: {
     setSubmissionId: assign({
       submissionId: ({ event }) => {
-        if (event.type === "SUBMIT" || event.type === "SUBMIT_SUCCESS") {
+        if (event.type === "SUBMIT_SUCCESS") {
           return event.submissionId;
         }
         return undefined;
@@ -96,7 +96,6 @@ export const assetPublishingMachine = setup({
       on: {
         SUBMIT: {
           target: "submitting",
-          actions: ["setSubmissionId"],
         },
       },
     },

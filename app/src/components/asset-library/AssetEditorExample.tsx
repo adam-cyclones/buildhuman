@@ -91,10 +91,16 @@ const AssetEditorExample = (props: { assetId: string; assetName: string }) => {
       {/* Publishing Controls */}
       <div class="publishing-controls">
         <button
-          onClick={() => publishing.send({
-            type: "SUBMIT",
-            submissionId: crypto.randomUUID()
-          })}
+          onClick={() => {
+            publishing.send({ type: "SUBMIT" });
+            // Simulate successful submission after a delay
+            setTimeout(() => {
+              publishing.send({
+                type: "SUBMIT_SUCCESS",
+                submissionId: crypto.randomUUID()
+              });
+            }, 1000);
+          }}
           disabled={!publishing.canSubmit() || editing.hasUnsavedChanges()}
           title={editing.hasUnsavedChanges() ? "Save changes before submitting" : ""}
         >

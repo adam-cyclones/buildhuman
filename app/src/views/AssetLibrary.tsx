@@ -9,6 +9,8 @@ import ActivityTimeline from "../components/asset-library/ActivityTimeline";
 import AssetGrid from "../components/asset-library/AssetGrid";
 import AssetFilters from "../components/asset-library/AssetFilters";
 import { useAssetEvents } from "../components/asset-library/useAssetEvents";
+import { useAssetEditing } from "../machines/useAssetEditing";
+import { useAssetPublishing } from "../machines/useAssetPublishing";
 import "./AssetLibrary.css";
 
 interface Asset {
@@ -98,6 +100,54 @@ const AssetLibrary = (props: AssetLibraryProps) => {
   const [rejectionReason, setRejectionReason] = createSignal("");
   const [reviewNotes, setReviewNotes] = createSignal("");
   const [submitting, setSubmitting] = createSignal(false);
+
+  // XState machines for each edited asset
+  interface AssetMachines {
+    editing: ReturnType<typeof useAssetEditing>;
+    publishing: ReturnType<typeof useAssetPublishing>;
+  }
+
+  const [assetMachines, setAssetMachines] = createSignal<Map<string, AssetMachines>>(new Map());
+
+  // Initialize or get machine for an asset
+  const getMachine = (assetId: string, metadata?: any): AssetMachines => {
+    let machines = assetMachines().get(assetId);
+    if (!machines) {
+      // Initialize machines from metadata if available
+      machines = {
+        editing: useAssetEditing({
+          assetId,
+          hasUnsavedChanges: false,
+          changes: { metadata: false, file: false, thumbnail: false }
+        }),
+        publishing: useAssetPublishing({
+          assetId,
+          assetName: metadata?.name || "",
+          submissionId: metadata?.submission_id,
+          editedAfterSubmit: metadata?.last_edited_after_publish || false
+        })
+      };
+
+      setAssetMachines(prev => {
+        const newMap = new Map(prev);
+        newMap.set(assetId, machines!);
+        return newMap;
+      });
+
+      // Move machine to correct state based on metadata
+      if (metadata?.submission_status === "pending") {
+        // Transition to pending state
+        machines.publishing.send({ type: "SUBMIT" });
+        machines.publishing.send({ type: "SUBMIT_SUCCESS", submissionId: metadata.submission_id });
+
+        // If edited after publish, transition to pendingWithEdits
+        if (metadata.last_edited_after_publish) {
+          machines.publishing.send({ type: "EDIT" });
+        }
+      }
+    }
+    return machines;
+  };
 
   // Fetch assets from API
   const fetchAssets = async () => {
@@ -504,30 +554,6 @@ const AssetLibrary = (props: AssetLibraryProps) => {
   // Event logging system for undo/redo and activity tracking
   const { logEvent, getRecentEvents } = useAssetEvents(editedAssets, setEditedAssets);
 
-  // TODO: State Machines Integration
-  // Replace manual state tracking with XState machines:
-  //
-  // For each edited asset, maintain machine instances:
-  // const assetMachines = createMemo(() => {
-  //   const machines = new Map();
-  //   editedAssets().forEach((asset, id) => {
-  //     const context = createMachineContext(asset.metadata);
-  //     machines.set(id, {
-  //       editing: useAssetEditing(context.editing),
-  //       publishing: useAssetPublishing(context.publishing)
-  //     });
-  //   });
-  //   return machines;
-  // });
-  //
-  // Replace all submission_status checks with: machine.publishing.isPending()
-  // Replace last_edited_after_publish with: machine.publishing.hasEditedAfterSubmit()
-  // Wire save operations to: machine.editing.save() / saveSuccess() / saveFailure()
-  // Wire publish operations to: machine.publishing.send({ type: "SUBMIT", ... })
-  //
-  // See: src/machines/assetMachineSync.ts for state synchronization helpers
-
-
   const isLicenseEditable = (license: string) => {
     const licenseUpper = license.toUpperCase();
     // Check for non-derivative licenses (ND = No Derivatives)
@@ -634,6 +660,12 @@ const AssetLibrary = (props: AssetLibraryProps) => {
   };
 
   const handleSaveMetadata = async (assetId: string) => {
+    // Get or create machine for this asset
+    let machines = getMachine(assetId);
+
+    // Send SAVE event to editing machine
+    machines.editing.send({ type: "SAVE" });
+
     try {
       const updatedAsset = selectedAsset();
       if (!updatedAsset) return;
@@ -664,6 +696,9 @@ const AssetLibrary = (props: AssetLibraryProps) => {
 
         editedAsset = newCopy;
         assetId = newCopy.metadata.id; // Use real ID for saving
+
+        // Get new machine for the real asset ID
+        machines = getMachine(assetId, editedAsset.metadata);
       }
 
       // Convert Asset to AssetMetadata format for backend
@@ -685,10 +720,13 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         thumbnail_url: updatedAsset.thumbnail_url,
       };
 
-      // If asset is pending review and user edits, flag it
-      const isPending = editedAsset.metadata.submission_status === "pending";
+      // Check publishing machine state instead of manual flag
+      const isPending = machines.publishing.isPending();
       if (isPending) {
+        // Notify publishing machine that asset was edited while pending
+        machines.publishing.send({ type: "EDIT" });
         metadata.last_edited_after_publish = true;
+
         // Update local state
         setEditedAssets(prev => {
           const newMap = new Map(prev);
@@ -702,6 +740,9 @@ const AssetLibrary = (props: AssetLibraryProps) => {
 
       await invoke("update_asset_metadata", { assetId, metadata });
 
+      // Send SAVE_SUCCESS to editing machine
+      machines.editing.send({ type: "SAVE_SUCCESS" });
+
       // Log event
       await logEvent(assetId, isPending ? "edited_after_publish" : "metadata_saved", {
         fields: Object.keys(metadata).filter(k => k !== 'id')
@@ -711,6 +752,10 @@ const AssetLibrary = (props: AssetLibraryProps) => {
       setOriginalEditedMetadata(new Map(originalEditedMetadata().set(assetId, { ...updatedAsset })));
     } catch (error) {
       console.error("Failed to save metadata:", error);
+
+      // Send SAVE_FAILURE to editing machine
+      machines.editing.send({ type: "SAVE_FAILURE", error: String(error) });
+
       throw error;
     }
   };
@@ -791,6 +836,12 @@ const AssetLibrary = (props: AssetLibraryProps) => {
       return;
     }
 
+    // Get or create machine for this asset
+    const machines = getMachine(assetId, asset.metadata);
+
+    // Send SUBMIT event to publishing machine (starts the submission process)
+    machines.publishing.send({ type: "SUBMIT" });
+
     try {
       // Create FormData for multipart upload
       const formData = new FormData();
@@ -835,12 +886,19 @@ const AssetLibrary = (props: AssetLibraryProps) => {
 
       const result = await response.json();
 
+      // Send SUBMIT_SUCCESS to publishing machine
+      machines.publishing.send({
+        type: "SUBMIT_SUCCESS",
+        submissionId: result.id
+      });
+
       // Update asset metadata to track submission
       const updatedAssets = new Map(editedAssets());
       const updatedAsset = updatedAssets.get(assetId);
       if (updatedAsset) {
         updatedAsset.metadata.submission_id = result.id;
         updatedAsset.metadata.submission_status = "pending";
+        updatedAsset.metadata.last_edited_after_publish = false; // Reset flag on fresh submission
         setEditedAssets(updatedAssets);
 
         // Persist submission status to backend
@@ -850,7 +908,8 @@ const AssetLibrary = (props: AssetLibraryProps) => {
             metadata: {
               ...updatedAsset.metadata,
               submission_id: result.id,
-              submission_status: "pending"
+              submission_status: "pending",
+              last_edited_after_publish: false
             }
           });
         } catch (err) {
@@ -869,6 +928,13 @@ const AssetLibrary = (props: AssetLibraryProps) => {
 
     } catch (error) {
       console.error("Failed to publish asset:", error);
+
+      // Send SUBMIT_FAILURE to publishing machine
+      machines.publishing.send({
+        type: "SUBMIT_FAILURE",
+        error: String(error)
+      });
+
       showMetadataSaveToast(`Failed to publish: ${error}`, 5000);
     }
   };
@@ -1265,7 +1331,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
                   <span class="editing-badge overlay-badge">Editing</span>
                 )}
                 {isEditingAsset(selectedAsset()!.id) &&
-                 editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending" && (
+                 getMachine(selectedAsset()!.id, editedAssets().get(selectedAsset()!.id)?.metadata).publishing.isPending() && (
                   <span class="pending-badge overlay-badge">Pending Review</span>
                 )}
               </div>
@@ -1480,44 +1546,52 @@ const AssetLibrary = (props: AssetLibraryProps) => {
               <ActivityTimeline events={getRecentEvents(selectedAsset()!.id)} />
             )}
 
-            {isEditingAsset(selectedAsset()!.id) && selectedAsset()!.id.includes("_edited_") && (
-              <div class="panel-section action-panel">
-                <p class="action-help-text">
-                  {editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending"
-                    ? editedAssets().get(selectedAsset()!.id)?.metadata.last_edited_after_publish
-                      ? "Submit updated version (will replace pending submission)"
-                      : "Asset is pending review. You'll be notified when it's approved or rejected."
-                    : "Submit for review. Approved assets will be added to the library for others to use."}
-                </p>
-                <button
-                  class="action-btn"
-                  onClick={() => handlePublishAsset(selectedAsset()!.id)}
-                  title="Submit asset for publication"
-                  disabled={editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending"}
-                  style={{
-                    opacity: editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending" ? "0.5" : "1",
-                    cursor: editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending" ? "not-allowed" : "pointer"
-                  }}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
+            {isEditingAsset(selectedAsset()!.id) && selectedAsset()!.id.includes("_edited_") && (() => {
+              const assetMachine = getMachine(selectedAsset()!.id, editedAssets().get(selectedAsset()!.id)?.metadata);
+              const isPending = assetMachine.publishing.isPending();
+              const hasEditedAfterSubmit = assetMachine.publishing.hasEditedAfterSubmit();
+
+              return (
+                <div class="panel-section action-panel">
+                  <p class="action-help-text">
+                    {isPending
+                      ? hasEditedAfterSubmit
+                        ? "Submit updated version (will replace pending submission)"
+                        : "Asset is pending review. You'll be notified when it's approved or rejected."
+                      : "Submit for review. Approved assets will be added to the library for others to use."}
+                  </p>
+                  <button
+                    class="action-btn"
+                    onClick={() => handlePublishAsset(selectedAsset()!.id)}
+                    title="Submit asset for publication"
+                    disabled={isPending && !hasEditedAfterSubmit}
+                    style={{
+                      opacity: (isPending && !hasEditedAfterSubmit) ? "0.5" : "1",
+                      cursor: (isPending && !hasEditedAfterSubmit) ? "not-allowed" : "pointer"
+                    }}
                   >
-                    <path d="M20 16.5c1.7 0 3-1.3 3-3s-1.3-3-3-3c-.4 0-.8.1-1.2.3-.6-2.3-2.7-4-5.2-4-2 0-3.8 1.1-4.7 2.8C7.6 9.2 6.4 10 5.5 11c-1.4.9-2.3 2.5-2.3 4.2 0 2.8 2.2 5 5 5h11.8"/>
-                    <polyline points="16 16 12 12 8 16"/>
-                    <line x1="12" y1="12" x2="12" y2="21"/>
-                  </svg>
-                  {editedAssets().get(selectedAsset()!.id)?.metadata.submission_status === "pending"
-                    ? "Submitted for Review"
-                    : "Publish Asset"}
-                </button>
-              </div>
-            )}
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path d="M20 16.5c1.7 0 3-1.3 3-3s-1.3-3-3-3c-.4 0-.8.1-1.2.3-.6-2.3-2.7-4-5.2-4-2 0-3.8 1.1-4.7 2.8C7.6 9.2 6.4 10 5.5 11c-1.4.9-2.3 2.5-2.3 4.2 0 2.8 2.2 5 5 5h11.8"/>
+                      <polyline points="16 16 12 12 8 16"/>
+                      <line x1="12" y1="12" x2="12" y2="21"/>
+                    </svg>
+                    {isPending && !hasEditedAfterSubmit
+                      ? "Submitted for Review"
+                      : hasEditedAfterSubmit
+                      ? "Resubmit Asset"
+                      : "Publish Asset"}
+                  </button>
+                </div>
+              );
+            })()}
 
             {(cachedAssets().has(selectedAsset()!.id) && !selectedAsset()!.required && !isEditingAsset(selectedAsset()!.id)) && (
               <div class="panel-section">

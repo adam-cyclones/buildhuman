@@ -34,7 +34,13 @@ const AssetPublishingExample = (props: { assetId: string; assetName: string }) =
 
       <div class="actions">
         {canSubmit() && (
-          <button onClick={() => send({ type: "SUBMIT", submissionId: crypto.randomUUID() })}>
+          <button onClick={() => {
+            send({ type: "SUBMIT" });
+            // Simulate successful submission
+            setTimeout(() => {
+              send({ type: "SUBMIT_SUCCESS", submissionId: crypto.randomUUID() });
+            }, 500);
+          }}>
             Submit for Review
           </button>
         )}
