@@ -76,11 +76,3 @@
   cursor: pointer;
   border-radius: 50%;
 }
-
-.property-slider::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  background: #c7a78a;
-  cursor: pointer;
-  border-radius: 50%;
-}

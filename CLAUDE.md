@@ -174,7 +174,7 @@ views/
 
 ### View Module Pattern
 
-Each view follows a modular pattern for maintainability:
+**Feature-Based Architecture**: Each view represents a distinct feature domain with complete encapsulation of its logic, state, and UI. This provides clear domain separation and prevents cross-feature coupling.
 
 **Structure**:
 ```
@@ -185,23 +185,36 @@ views/ViewName/
 ├── utils.ts              # Pure utility functions
 ├── hooks/                # Custom hooks
 │   └── useViewState.ts   # State management
+├── machines/             # XState state machines (if needed)
+│   ├── useFeatureMachine.ts       # SolidJS hook wrapper
+│   └── featureMachine.ts          # XState machine definition
 ├── components/           # View-specific components
 ├── types.ts              # TypeScript type definitions
 └── ViewName.css          # Styles
 ```
+
+**Domain Separation Principles** (for Developer Experience):
+- Each view owns its complete feature domain (data, logic, state, UI)
+- View-specific code stays within the view folder for easier navigation
+- Only truly shared components live in `app/src/components/`
+- Global state/processes that span multiple views use XState machines
+- Domain separation is about organization and maintainability, not strict isolation
 
 **Separation of Concerns**:
 - **client.ts**: All external API calls, no side effects
 - **utils.ts**: Pure functions, no state, deterministic
 - **handlers.ts**: Event handlers as factory functions receiving dependencies
 - **hooks/**: State management using SolidJS createSignal
+- **machines/**: Complex state logic using XState (when simple signals aren't enough)
 - **ViewName.tsx**: Composition layer, wires everything together
 
 **Benefits**:
-- Testable modules (each file can be tested independently)
-- Clear responsibilities (data, logic, state, handlers, UI)
-- Easier maintenance (find and fix issues faster)
-- Reusable code (utilities can be used elsewhere)
+- **Domain isolation**: Each feature is self-contained and independent
+- **Testable modules**: Each file can be tested independently
+- **Clear ownership**: All code for a feature lives in one place
+- **Easier maintenance**: Find and fix issues within a single domain
+- **Scalable architecture**: Add new features without affecting existing ones
+- **Reusable patterns**: Consistent structure across all features
 
 ### Icon System
 
@@ -294,6 +307,12 @@ import Icon from "../../components/Icon";
 | Python dependencies | Poetry | - |
 | Build tool | Vite | 6.0.3 |
 | GPU abstraction | WGPU | 23.0.1 |
+
+**IMPORTANT**: This is a **desktop application only** (Tauri). It will **never run in a browser**.
+- No need for browser compatibility prefixes (-webkit-, -moz-, etc.)
+- No need for polyfills or cross-browser workarounds
+- Target modern Chromium engine only (bundled with Tauri)
+- Can use latest web APIs without fallbacks
 
 ### File Formats
 - 3D models: GLB/GLTF (standard)

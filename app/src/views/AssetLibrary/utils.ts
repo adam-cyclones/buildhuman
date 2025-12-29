@@ -4,8 +4,8 @@
  */
 
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { useAssetEditing } from "../../machines/useAssetEditing";
-import { useAssetPublishing } from "../../machines/useAssetPublishing";
+import { useAssetEditing } from "./machines/useAssetEditing";
+import { useAssetPublishing } from "./machines/useAssetPublishing";
 import type { Asset, AssetMachines, LocalAsset, Submission } from "./types";
 
 /**
