@@ -1067,7 +1067,16 @@ const AssetLibrary = (props: AssetLibraryProps) => {
       <div class={`asset-grid ${viewMode() === "list" ? "list-view" : ""}`}>
         {assets.loading && <div class="loading">Loading assets...</div>}
         {assets.error && <div class="error">Failed to load assets. Make sure the asset service is running at {API_URL}</div>}
-        {allAssets().length === 0 && !assets.loading && (
+        {allAssets().length === 0 && !assets.loading && selectedType() === "pending" && (
+          <div class="empty">
+            <h3>No Pending Submissions</h3>
+            <p>Submitted assets will appear here for review.</p>
+            <p style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.7;">
+              To test: Edit an asset and click "Publish Asset" to create a submission.
+            </p>
+          </div>
+        )}
+        {allAssets().length === 0 && !assets.loading && selectedType() !== "pending" && (
           <div class="empty">No assets found. Try running: poetry poe seed</div>
         )}
         <For each={allAssets()}>
