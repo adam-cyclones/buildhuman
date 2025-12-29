@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Database path - relative to this script
-DB_PATH = Path(__file__).parent / "buildhuman.db"
+DB_PATH = Path(__file__).parent / "assets.db"
 
 
 def create_key(name: str, role: str = "moderator"):
@@ -140,6 +140,7 @@ if __name__ == "__main__":
         print(f"\n✗ Error: Database not found at {DB_PATH}")
         print("  Make sure you're running this from the service/ directory")
         print("  and that the service has been initialized (run main.py first)")
+        print("  The database will be created automatically when you start the service.")
         sys.exit(1)
 
     # Parse command
