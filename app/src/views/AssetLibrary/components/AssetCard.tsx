@@ -6,7 +6,7 @@ import { getEditingActor } from "../machines/assetEditingService";
 
 const AssetCard = (props: AssetCardProps) => {
   const isEdited = () => props.asset.id.includes("_edited_");
-  const isPending = () => isEdited() && props.editedAssets?.().get(props.asset.id)?.metadata.submission_status === "pending";
+  const isPending = () => isEdited() && props.asset.submission_status === "pending";
 
   const getOriginalAsset = () => {
     if (!isEdited()) return null;
