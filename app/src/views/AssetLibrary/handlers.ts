@@ -147,6 +147,10 @@ export const createEditAssetHandler = (deps: HandlerDependencies) => {
           name: asset.name + " (copy)",
           author: deps.appSettings?.author_name || asset.author,
           file_size: undefined, // No file yet for new copy
+          publish_date: "", // Not published yet, will be set when approved
+          rating: 0, // Reset rating for new copy
+          rating_count: 0,
+          downloads: 0,
         };
 
     deps.setSelectedAsset(editedAsset);

@@ -7,6 +7,8 @@ use tauri::{AppHandle};
 pub struct AssetMetadata {
     pub id: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub author: String,
     pub publish_date: String,
     pub rating: f32,
