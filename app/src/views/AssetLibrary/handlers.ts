@@ -300,10 +300,10 @@ export const createSaveMetadataHandler = (deps: HandlerDependencies) => {
       const updatedAsset = deps.selectedAsset();
       if (!updatedAsset) return;
 
-      // Create editable copy if it doesn't exist yet
+      // Create editable copy if it doesn't exist yet OR if it's just a minimal preview entry
       let editedAsset = deps.editedAssets().get(assetId);
 
-      if (!editedAsset) {
+      if (!editedAsset || !editedAsset.file_path) {
         // Extract original asset ID (remove "_editing" suffix if present)
         const originalId = assetId.replace("_editing", "");
 
@@ -474,24 +474,39 @@ export const createChangeThumbnailHandler = (deps: HandlerDependencies) => {
         updatedAsset.thumbnail_url = pendingUrl;
         deps.setSelectedAsset(updatedAsset);
 
-        // Update the editedAssets map for preview
-        if (deps.editedAssets().has(assetId)) {
-          deps.setEditedAssets(prev => {
-            const newMap = new Map(prev);
-            const asset = newMap.get(assetId);
-            if (asset) {
-              const updatedLocalAsset = {
-                ...asset,
-                metadata: {
-                  ...asset.metadata,
-                  thumbnail_url: pendingUrl
-                }
-              };
-              newMap.set(assetId, updatedLocalAsset);
-            }
-            return newMap;
-          });
-        }
+        // Update the editedAssets map for preview (so card updates immediately)
+        deps.setEditedAssets(prev => {
+          const newMap = new Map(prev);
+          const existingAsset = newMap.get(assetId);
+
+          if (existingAsset) {
+            // Asset already in editedAssets, update it
+            const updatedLocalAsset = {
+              ...existingAsset,
+              metadata: {
+                ...existingAsset.metadata,
+                thumbnail_url: pendingUrl
+              }
+            };
+            newMap.set(assetId, updatedLocalAsset);
+          } else {
+            // Asset not in editedAssets yet, create minimal entry for preview
+            // (no files on disk yet, just metadata for display)
+            const minimalAsset: LocalAsset = {
+              metadata: {
+                ...updatedAsset,
+                thumbnail_url: pendingUrl
+              },
+              file_path: "", // No file on disk yet
+              downloaded_at: new Date().toISOString(),
+              cached: false,
+              is_edited: false, // Not truly edited yet, just has pending thumbnail
+            };
+            newMap.set(assetId, minimalAsset);
+          }
+
+          return newMap;
+        });
 
         // Note: Thumbnail will be saved when user clicks Save button
 
