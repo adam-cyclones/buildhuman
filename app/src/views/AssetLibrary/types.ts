@@ -18,6 +18,9 @@ export type Asset = {
   version: string;
   required: boolean;
   thumbnail_url?: string;
+  submission_id?: string;
+  submission_status?: string;
+  last_edited_after_publish?: boolean;
 };
 
 export type LocalAsset = {
