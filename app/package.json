@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:run": "vitest run"
   },
   "dependencies": {
     "@babylonjs/core": "^7.38.0",
@@ -24,7 +27,9 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.0.0",
+    "@vitest/ui": "^4.0.16",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^4.0.16"
   }
 }

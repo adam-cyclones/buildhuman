@@ -282,6 +282,57 @@ import type { MyData } from "./types";
 - Maintainability: State machines make complex logic explicit and testable
 - Documentation: Tests and state machines document behavior better than examples
 
+### Testing
+
+**Test Framework**: Vitest (installed, minimal config for fast iteration)
+
+**What to Test** (priority order for solo alpha development):
+1. **State Machines** ⭐ - Highest value, pure logic, easy to test
+2. **Utility Functions** - Pure functions in `utils.ts` files
+3. **Client Functions** - API calls (with mocking when needed)
+4. **Handlers** - Event handlers (when complexity warrants it)
+5. **UI Components** - Only when stable (alpha = UI changes frequently)
+
+**Running Tests**:
+```bash
+npm test              # Watch mode (interactive)
+npm run test:ui       # Vitest UI (visual test runner)
+npm run test:run      # Run once (CI mode)
+```
+
+**Test File Naming**:
+- Place test files next to the code: `featureMachine.test.ts` next to `featureMachine.ts`
+- Use `.test.ts` suffix (not `.spec.ts`)
+
+**Example State Machine Test** (see `assetEditingMachine.test.ts`):
+```typescript
+import { describe, it, expect } from 'vitest';
+import { createActor } from 'xstate';
+import { myMachine } from './myMachine';
+
+describe('MyMachine', () => {
+  it('transitions to next state on EVENT', () => {
+    const actor = createActor(myMachine).start();
+
+    actor.send({ type: 'EVENT' });
+
+    expect(actor.getSnapshot().value).toBe('nextState');
+  });
+});
+```
+
+**Why This Approach**:
+- **State machines**: Pure logic, deterministic, high value
+- **No UI tests yet**: UI changes too frequently in alpha
+- **Fast feedback**: Vitest is fast, tests run in milliseconds
+- **Low overhead**: Only test what matters for stability
+
+**Coverage Philosophy** (for solo alpha):
+- Don't aim for % coverage
+- Test **critical flows** (editing, saving, publishing state transitions)
+- Test **edge cases** (what happens on failure, cancel, etc.)
+- Skip **obvious code** (getters, simple utilities)
+
 ### Asset ID Schemes
 - **Original assets**: UUID from API (e.g., `abc123-def456`)
 - **Edited assets**: `{original_uuid}_edited_{timestamp}`
