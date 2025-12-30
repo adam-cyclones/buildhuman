@@ -9,6 +9,7 @@ import Icon from "../../components/Icon";
 import { useAssetState } from "./hooks/useAssetState";
 import { fetchAssets, fetchCategories, fetchPendingSubmissions, fetchCachedAssets } from "./client";
 import { getEditingActor } from "./machines/assetEditingService";
+import { config } from "../../config";
 import {
   isEditingAsset,
   isLicenseEditable,
@@ -266,7 +267,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         error={assets.error}
         viewMode={state.viewMode}
         selectedType={state.selectedType}
-        apiUrl="http://localhost:8000"
+        apiUrl={config.apiUrl}
         onAssetClick={handleAssetClick}
         convertToAssetPath={convertPath}
         thumbnailTimestamps={state.thumbnailTimestamps}
@@ -275,6 +276,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         onDownload={handleDownload}
         editedAssets={state.editedAssets}
         allAssets={() => assets() || []}
+        onPublishAsset={handlePublishAsset}
       />
 
       <div class="asset-pagination">

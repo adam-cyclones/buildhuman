@@ -146,6 +146,7 @@ export const createEditAssetHandler = (deps: HandlerDependencies) => {
           id: assetId + "_editing",
           name: asset.name + " (copy)",
           author: deps.appSettings?.author_name || asset.author,
+          file_size: undefined, // No file yet for new copy
         };
 
     deps.setSelectedAsset(editedAsset);
@@ -162,6 +163,8 @@ export const createEditAssetHandler = (deps: HandlerDependencies) => {
       });
 
       // Machine will auto-start editing state for _editing assets
+      // Mark metadata as changed since we changed the name
+      getEditingActor(editedAsset.id).send({ type: "CHANGE_METADATA" });
     }
   };
 };
@@ -432,6 +435,16 @@ export const createSaveMetadataHandler = (deps: HandlerDependencies) => {
       }
 
       await invoke("update_asset_metadata", { assetId, metadata });
+
+      // Update editedAssets map with the saved metadata
+      deps.setEditedAssets(prev => {
+        const newMap = new Map(prev);
+        const asset = newMap.get(assetId);
+        if (asset) {
+          asset.metadata = { ...asset.metadata, ...metadata };
+        }
+        return newMap;
+      });
 
       console.log("Save completed successfully for asset:", assetId);
 

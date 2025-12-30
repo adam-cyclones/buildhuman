@@ -1,6 +1,8 @@
 import { For } from "solid-js";
 import type { Asset, AssetCardProps } from "../types";
 import Icon from "../../../components/Icon";
+import { getPublishingActor } from "../machines/assetPublishingService";
+import { getEditingActor } from "../machines/assetEditingService";
 
 const AssetCard = (props: AssetCardProps) => {
   const isEdited = () => props.asset.id.includes("_edited_");
@@ -10,6 +12,23 @@ const AssetCard = (props: AssetCardProps) => {
     if (!isEdited()) return null;
     const originalId = props.asset.id.split("_edited_")[0];
     return props.allAssets?.()?.find((a: Asset) => a.id === originalId);
+  };
+
+  const canPublish = () => {
+    if (!isEdited()) return false;
+
+    const editedAsset = props.editedAssets?.().get(props.asset.id);
+    if (!editedAsset || !editedAsset.file_path) return false; // No file saved yet
+
+    const pubSnapshot = getPublishingActor(props.asset.id, editedAsset.metadata).getSnapshot();
+    const editSnapshot = getEditingActor(props.asset.id).getSnapshot();
+
+    // Can publish if in editing state and no unsaved changes, OR if pending with edits
+    const isPendingState = pubSnapshot.matches("pending");
+    const hasEditedAfterSubmit = pubSnapshot.context.editedAfterSubmit;
+    const hasUnsaved = editSnapshot.context.hasUnsavedChanges;
+
+    return (!isPendingState && !hasUnsaved) || (isPendingState && hasEditedAfterSubmit && !hasUnsaved);
   };
 
 
@@ -30,14 +49,13 @@ const AssetCard = (props: AssetCardProps) => {
           <Icon name="image" size={48} />
         </div>
 
-        {/* Badges */}
+        {/* Badges - Pending Review takes precedence over Editing */}
         {props.asset.required && (
           <span class="required-badge overlay-badge">Essential</span>
         )}
-        {isPending() && (
+        {isPending() ? (
           <span class="pending-badge overlay-badge">Pending Review</span>
-        )}
-        {isEdited() && !isPending() && (() => {
+        ) : isEdited() ? (() => {
           const originalAsset = getOriginalAsset();
           return (
             <span
@@ -54,7 +72,7 @@ const AssetCard = (props: AssetCardProps) => {
               Editing
             </span>
           );
-        })()}
+        })() : null}
       </div>
 
       <div class="asset-info">
@@ -82,6 +100,19 @@ const AssetCard = (props: AssetCardProps) => {
                 ) : (
                   <Icon name="download" size={20} />
                 )}
+              </button>
+            )}
+            {isEdited() && canPublish() && props.onPublishAsset && (
+              // Edited assets: show publish button (when ready)
+              <button
+                class="publish-icon-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onPublishAsset!(props.asset.id);
+                }}
+                title="Publish asset"
+              >
+                <Icon name="upload" size={20} />
               </button>
             )}
           </div>

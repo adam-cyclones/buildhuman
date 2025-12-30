@@ -65,12 +65,11 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
             {asset().required && (
               <span class="required-badge overlay-badge">Essential</span>
             )}
-            {props.isEditingAsset(asset().id) && (
-              <span class="editing-badge overlay-badge">Editing</span>
-            )}
-            {props.isEditingAsset(asset().id) && isPending() && (
+            {props.isEditingAsset(asset().id) && isPending() ? (
               <span class="pending-badge overlay-badge">Pending Review</span>
-            )}
+            ) : props.isEditingAsset(asset().id) ? (
+              <span class="editing-badge overlay-badge">Editing</span>
+            ) : null}
           </div>
         </div>
 
@@ -452,7 +451,8 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
               await props.onSaveMetadata(asset().id);
               props.showMetadataSaveToast("Metadata saved", 2000);
             }}
-            title="Save metadata"
+            disabled={!hasUnsavedChanges()}
+            title={hasUnsavedChanges() ? "Save metadata" : "No changes to save"}
           >
             <Icon name="save" size={16} />
             Save

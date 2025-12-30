@@ -40,6 +40,7 @@ const AssetGrid = (props: AssetGridProps) => {
             editedAssets={props.editedAssets}
             allAssets={props.allAssets}
             onAssetClick={props.onAssetClick}
+            onPublishAsset={props.onPublishAsset}
           />
         )}
       </For>

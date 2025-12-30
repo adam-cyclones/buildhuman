@@ -19,6 +19,12 @@ pub struct AssetMetadata {
     pub thumbnail_url: Option<String>,
     pub version: String,
     pub required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub submission_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub submission_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_edited_after_publish: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

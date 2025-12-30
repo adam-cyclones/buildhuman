@@ -100,6 +100,7 @@ export type AssetCardProps = {
   editedAssets?: import("solid-js").Accessor<Map<string, any>>;
   allAssets?: import("solid-js").Accessor<Asset[]>;
   onAssetClick?: (asset: Asset) => void;
+  onPublishAsset?: (id: string) => void;
 };
 
 export type AssetGridProps = {
@@ -117,6 +118,7 @@ export type AssetGridProps = {
   onDownload: (id: string, name: string) => void;
   editedAssets?: import("solid-js").Accessor<Map<string, any>>;
   allAssets?: import("solid-js").Accessor<Asset[]>;
+  onPublishAsset: (id: string) => void;
 };
 
 export type AssetFiltersProps = {
