@@ -4,7 +4,7 @@
  */
 
 import { createSignal, Accessor, Setter } from "solid-js";
-import type { Asset, LocalAsset, Download, Submission, AssetMachines } from "../types";
+import type { Asset, LocalAsset, Download, Submission } from "../types";
 
 export interface AssetLibraryState {
   // Search and filters
@@ -76,10 +76,6 @@ export interface AssetLibraryState {
   setReviewNotes: Setter<string>;
   submitting: Accessor<boolean>;
   setSubmitting: Setter<boolean>;
-
-  // XState machines
-  assetMachines: Accessor<Map<string, AssetMachines>>;
-  setAssetMachines: Setter<Map<string, AssetMachines>>;
 }
 
 export const useAssetState = (): AssetLibraryState => {
@@ -108,7 +104,6 @@ export const useAssetState = (): AssetLibraryState => {
   const [rejectionReason, setRejectionReason] = createSignal("");
   const [reviewNotes, setReviewNotes] = createSignal("");
   const [submitting, setSubmitting] = createSignal(false);
-  const [assetMachines, setAssetMachines] = createSignal<Map<string, AssetMachines>>(new Map());
 
   return {
     searchQuery,
@@ -161,7 +156,5 @@ export const useAssetState = (): AssetLibraryState => {
     setReviewNotes,
     submitting,
     setSubmitting,
-    assetMachines,
-    setAssetMachines,
   };
 };

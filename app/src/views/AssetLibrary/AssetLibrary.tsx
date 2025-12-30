@@ -8,8 +8,8 @@ import { useAssetEvents } from "./components/useAssetEvents";
 import Icon from "../../components/Icon";
 import { useAssetState } from "./hooks/useAssetState";
 import { fetchAssets, fetchCategories, fetchPendingSubmissions, fetchCachedAssets } from "./client";
+import { getEditingActor } from "./machines/assetEditingService";
 import {
-  createAssetMachine,
   isEditingAsset,
   isLicenseEditable,
   convertToAssetPath,
@@ -93,30 +93,12 @@ const AssetLibrary = (props: AssetLibraryProps) => {
     state.setPendingSubmissions(submissions);
   };
 
-  // Machine management
-  const getMachine = (assetId: string, metadata?: any) => {
-    let machines = state.assetMachines().get(assetId);
-
-    if (!machines) {
-      machines = createAssetMachine(assetId, metadata, state.assetMachines());
-
-      state.setAssetMachines(prev => {
-        const newMap = new Map(prev);
-        newMap.set(assetId, machines!);
-        return newMap;
-      });
-    }
-
-    return machines;
-  };
-
   // Create all event handlers
   const handlerDeps = {
     ...state,
     fetchCachedAssets: loadCachedAssets,
     showMetadataSaveToast,
     logEvent,
-    getMachine,
     fetchPendingSubmissions: loadPendingSubmissions,
     appSettings: props.appSettings
   };
@@ -139,10 +121,9 @@ const AssetLibrary = (props: AssetLibraryProps) => {
     // Check if current asset is being edited (even without changes)
     const currentAsset = state.selectedAsset();
     if (currentAsset && isEditingAsset(currentAsset.id, state.editingAssetIds())) {
-      const metadata = state.editedAssets().get(currentAsset.id)?.metadata || currentAsset;
-      const machine = getMachine(currentAsset.id, metadata);
+      const snapshot = getEditingActor(currentAsset.id).getSnapshot();
       // Warn if in editing mode (includes newly created copies)
-      if (machine.editing.isEditing() || machine.editing.hasUnsavedChanges()) {
+      if (snapshot.matches("editing") || snapshot.context.hasUnsavedChanges) {
         const confirmed = confirm(
           "You have an asset open for editing. Progress will be lost if you navigate away. Do you want to continue?"
         );
@@ -399,7 +380,6 @@ const AssetLibrary = (props: AssetLibraryProps) => {
           isEditingAsset={(id) => isEditingAsset(id, state.editingAssetIds())}
           editedAssets={state.editedAssets}
           cachedAssets={state.cachedAssets}
-          getMachine={getMachine}
           originalEditedMetadata={state.originalEditedMetadata}
           convertToAssetPath={convertPath}
           thumbnailTimestamps={state.thumbnailTimestamps}

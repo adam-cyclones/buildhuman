@@ -1,16 +1,38 @@
-import { For } from "solid-js";
+import { For, createMemo, createSignal, onCleanup } from "solid-js";
 import type { AssetDetailPanelProps } from "../types";
 import ActivityTimeline from "./ActivityTimeline";
 import Icon from "../../../components/Icon";
+import { getEditingActor } from "../machines/assetEditingService";
+import { getPublishingActor } from "../machines/assetPublishingService";
 
 const AssetDetailPanel = (props: AssetDetailPanelProps) => {
   const asset = () => props.selectedAsset()!;
 
-  const hasUnsavedChanges = () => {
-    if (!props.isEditingAsset(asset().id)) return false;
-    const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
-    return machine.editing.hasUnsavedChanges();
-  };
+  // Subscribe to editing actor for reactive updates
+  const [editingSnapshot, setEditingSnapshot] = createSignal<any>(null);
+  const [publishingSnapshot, setPublishingSnapshot] = createSignal<any>(null);
+
+  createMemo(() => {
+    if (props.isEditingAsset(asset().id)) {
+      const editActor = getEditingActor(asset().id);
+      const pubActor = getPublishingActor(asset().id, props.editedAssets().get(asset().id)?.metadata);
+
+      setEditingSnapshot(editActor.getSnapshot());
+      setPublishingSnapshot(pubActor.getSnapshot());
+
+      const editSub = editActor.subscribe(s => setEditingSnapshot(s));
+      const pubSub = pubActor.subscribe(s => setPublishingSnapshot(s));
+
+      onCleanup(() => {
+        editSub.unsubscribe();
+        pubSub.unsubscribe();
+      });
+    }
+  });
+
+  // Computed values from snapshots
+  const hasUnsavedChanges = () => editingSnapshot()?.context.hasUnsavedChanges || false;
+  const isPending = () => publishingSnapshot()?.matches("pending") || false;
 
   return (
     <div class="asset-detail-panel">
@@ -46,8 +68,7 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
             {props.isEditingAsset(asset().id) && (
               <span class="editing-badge overlay-badge">Editing</span>
             )}
-            {props.isEditingAsset(asset().id) &&
-             props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata).publishing.isPending() && (
+            {props.isEditingAsset(asset().id) && isPending() && (
               <span class="pending-badge overlay-badge">Pending Review</span>
             )}
           </div>
@@ -100,8 +121,7 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                 onInput={(e) => {
                   const updated = { ...asset(), name: e.currentTarget.value };
                   props.setSelectedAsset(updated);
-                  const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
-                  machine.editing.changeMetadata();
+                  getEditingActor(asset().id).send({ type: "CHANGE_METADATA" });
                 }}
               />
             ) : (
@@ -136,8 +156,7 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                   const value = e.currentTarget.value;
                   const updated = { ...asset(), version: value };
                   props.setSelectedAsset(updated);
-                  const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
-                  machine.editing.changeMetadata();
+                  getEditingActor(asset().id).send({ type: "CHANGE_METADATA" });
                 }}
                 onBlur={(e) => {
                   const value = e.currentTarget.value;
@@ -165,8 +184,7 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                 onInput={(e) => {
                   const updated = { ...asset(), type: e.currentTarget.value };
                   props.setSelectedAsset(updated);
-                  const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
-                  machine.editing.changeMetadata();
+                  getEditingActor(asset().id).send({ type: "CHANGE_METADATA" });
                 }}
               />
             ) : (
@@ -183,8 +201,7 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                 onInput={(e) => {
                   const updated = { ...asset(), category: e.currentTarget.value };
                   props.setSelectedAsset(updated);
-                  const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
-                  machine.editing.changeMetadata();
+                  getEditingActor(asset().id).send({ type: "CHANGE_METADATA" });
                 }}
               />
             ) : (
@@ -228,8 +245,7 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
               onInput={(e) => {
                 const updated = { ...asset(), description: e.currentTarget.value };
                 props.setSelectedAsset(updated);
-                const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
-                machine.editing.changeMetadata();
+                getEditingActor(asset().id).send({ type: "CHANGE_METADATA" });
               }}
               rows={4}
               placeholder="Edit description (metadata only - GLB changes must be exported from Blender)"
@@ -254,10 +270,11 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
             return null;
           }
 
-          const assetMachine = props.getMachine(asset().id, editedAsset.metadata);
-          const isPending = assetMachine.publishing.isPending();
-          const hasEditedAfterSubmit = assetMachine.publishing.hasEditedAfterSubmit();
-          const hasUnsaved = assetMachine.editing.hasUnsavedChanges();
+          const pubSnapshot = getPublishingActor(asset().id, editedAsset.metadata).getSnapshot();
+          const editSnapshot = getEditingActor(asset().id).getSnapshot();
+          const isPending = pubSnapshot.matches("pending");
+          const hasEditedAfterSubmit = pubSnapshot.context.editedAfterSubmit;
+          const hasUnsaved = editSnapshot.context.hasUnsavedChanges;
 
           return (
             <div class="panel-section action-panel">

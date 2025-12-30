@@ -9,7 +9,9 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import { config } from "../../config";
 import { publishAssetToService, submitReview } from "./client";
 import { hasMetadataChanges } from "./utils";
-import type { Asset, LocalAsset, Download, AssetMachines, AppSettings } from "./types";
+import { getEditingActor } from "./machines/assetEditingService";
+import { getPublishingActor } from "./machines/assetPublishingService";
+import type { Asset, LocalAsset, Download, AppSettings } from "./types";
 import type { AssetLibraryState } from "./hooks/useAssetState";
 
 const API_URL = config.apiUrl;
@@ -18,7 +20,6 @@ export interface HandlerDependencies extends AssetLibraryState {
   fetchCachedAssets: () => Promise<void>;
   showMetadataSaveToast: (message: string, duration?: number) => void;
   logEvent: (assetId: string, eventType: string, metadata?: any) => Promise<void>;
-  getMachine: (assetId: string, metadata?: any) => AssetMachines;
   fetchPendingSubmissions: () => Promise<void>;
   appSettings?: AppSettings | null;
 }
@@ -160,9 +161,7 @@ export const createEditAssetHandler = (deps: HandlerDependencies) => {
         return newMap;
       });
 
-      // Start editing state for the new copy
-      const machine = deps.getMachine(editedAsset.id, editedAsset);
-      machine.editing.startEdit();
+      // Machine will auto-start editing state for _editing assets
     }
   };
 };
@@ -305,11 +304,8 @@ export const createOpenInBlenderHandler = (deps: HandlerDependencies) => {
  */
 export const createSaveMetadataHandler = (deps: HandlerDependencies) => {
   return async (assetId: string) => {
-    // Get or create machine for this asset
-    let machines = deps.getMachine(assetId);
-
     // Send SAVE event to editing machine
-    machines.editing.send({ type: "SAVE" });
+    getEditingActor(assetId).send({ type: "SAVE" });
 
     try {
       const updatedAsset = deps.selectedAsset();
@@ -351,9 +347,6 @@ export const createSaveMetadataHandler = (deps: HandlerDependencies) => {
 
         editedAsset = newCopy;
         assetId = newCopy.metadata.id;
-
-        // Get new machine for the real asset ID
-        machines = deps.getMachine(assetId, editedAsset.metadata);
       }
 
       // Convert Asset to AssetMetadata format for backend
@@ -422,9 +415,10 @@ export const createSaveMetadataHandler = (deps: HandlerDependencies) => {
       }
 
       // Check publishing machine state
-      const isPending = machines.publishing.isPending();
+      const pubSnapshot = getPublishingActor(assetId, editedAsset?.metadata).getSnapshot();
+      const isPending = pubSnapshot.matches("pending");
       if (isPending) {
-        machines.publishing.send({ type: "EDIT" });
+        getPublishingActor(assetId, editedAsset?.metadata).send({ type: "EDIT" });
         metadata.last_edited_after_publish = true;
 
         deps.setEditedAssets(prev => {
@@ -442,7 +436,7 @@ export const createSaveMetadataHandler = (deps: HandlerDependencies) => {
       console.log("Save completed successfully for asset:", assetId);
 
       // Send SAVE_SUCCESS to editing machine
-      machines.editing.send({ type: "SAVE_SUCCESS" });
+      getEditingActor(assetId).send({ type: "SAVE_SUCCESS" });
 
       // Log event
       await deps.logEvent(assetId, isPending ? "edited_after_publish" : "metadata_saved", {
@@ -455,7 +449,7 @@ export const createSaveMetadataHandler = (deps: HandlerDependencies) => {
       console.error("Failed to save metadata:", error);
 
       // Send SAVE_FAILURE to editing machine
-      machines.editing.send({ type: "SAVE_FAILURE", error: String(error) });
+      getEditingActor(assetId).send({ type: "SAVE_FAILURE", error: String(error) });
 
       throw error;
     }
@@ -486,11 +480,8 @@ export const createChangeThumbnailHandler = (deps: HandlerDependencies) => {
           return newMap;
         });
 
-        // Get or create machine for this asset
-        const machines = deps.getMachine(assetId);
-
         // Send CHANGE_THUMBNAIL event to editing machine
-        machines.editing.send({ type: "CHANGE_THUMBNAIL" });
+        getEditingActor(assetId).send({ type: "CHANGE_THUMBNAIL" });
 
         // Use the selected file path directly for preview (will be converted by convertFileSrc)
         // Prefix with "pending:" so we know it's not saved yet
@@ -566,8 +557,7 @@ export const createPublishAssetHandler = (deps: HandlerDependencies) => {
       return;
     }
 
-    const machines = deps.getMachine(assetId, asset.metadata);
-    machines.publishing.send({ type: "SUBMIT" });
+    getPublishingActor(assetId, asset.metadata).send({ type: "SUBMIT" });
 
     try {
       const formData = new FormData();
@@ -601,7 +591,7 @@ export const createPublishAssetHandler = (deps: HandlerDependencies) => {
 
       const result = await publishAssetToService({ formData });
 
-      machines.publishing.send({
+      getPublishingActor(assetId, asset.metadata).send({
         type: "SUBMIT_SUCCESS",
         submissionId: result.id
       });
@@ -641,7 +631,7 @@ export const createPublishAssetHandler = (deps: HandlerDependencies) => {
     } catch (error) {
       console.error("Failed to publish asset:", error);
 
-      machines.publishing.send({
+      getPublishingActor(assetId, asset.metadata).send({
         type: "SUBMIT_FAILURE",
         error: String(error)
       });

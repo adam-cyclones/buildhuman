@@ -142,7 +142,6 @@ export type AssetDetailPanelProps = {
   isEditingAsset: (id: string) => boolean;
   editedAssets: import("solid-js").Accessor<Map<string, LocalAsset>>;
   cachedAssets: import("solid-js").Accessor<Set<string>>;
-  getMachine: (assetId: string, metadata?: any) => AssetMachines;
   originalEditedMetadata: import("solid-js").Accessor<Map<string, Asset>>;
   convertToAssetPath: (thumbnailUrl: string, bustCache: boolean) => string;
   thumbnailTimestamps: import("solid-js").Accessor<Map<string, number>>;
