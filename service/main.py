@@ -690,6 +690,24 @@ async def create_submission(
     ))
     conn.commit()
 
+    # Create notification for moderators
+    notification_id = str(uuid.uuid4())
+    c.execute("""
+        INSERT INTO notifications
+        (id, submission_id, recipient_id, type, title, message, created_at, read)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        notification_id,
+        submission_id,
+        None,  # NULL recipient_id means it's for all moderators
+        "submission",
+        f"New submission: {metadata_obj.asset_name}",
+        f"{metadata_obj.author} submitted '{metadata_obj.asset_name}' for review",
+        timestamp,
+        0  # unread
+    ))
+    conn.commit()
+
     # Fetch created submission
     c.execute("SELECT * FROM submissions WHERE id = ?", (submission_id,))
     row = c.fetchone()
