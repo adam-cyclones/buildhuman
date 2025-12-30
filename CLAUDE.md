@@ -236,6 +236,52 @@ import Icon from "../../components/Icon";
 
 **Implementation**: Uses SVG `<symbol>` definitions with `<use>` references for optimal performance and DRY code.
 
+### Coding Standards
+
+**Type Definitions**:
+- **ALWAYS** define interfaces and types in `types.ts` within each view folder
+- **NEVER** define interfaces inline in component files
+- Use `import type { TypeName } from "./types"` for type imports
+- Export all types/interfaces that may be used by other files in the view
+
+**Example violations to avoid**:
+```tsx
+// ❌ BAD: Interface defined inline in component
+const MyComponent = () => {
+  interface MyData { id: string; name: string; }
+  // ...
+}
+
+// ✅ GOOD: Types in types.ts
+// types.ts
+export interface MyData { id: string; name: string; }
+
+// MyComponent.tsx
+import type { MyData } from "./types";
+```
+
+**Testing Over Examples**:
+- **NEVER** create example files (e.g., `example.ts`, `sample.tsx`, `demo.tsx`)
+- **ALWAYS** write tests instead (e.g., `feature.test.ts`)
+- If you feel the urge to create an example to demonstrate usage, write a test
+- Tests serve as living documentation and ensure code actually works
+
+**Complex State Management**:
+- For complex state logic with multiple states/transitions, **use XState**
+- **Test the state machine first** before integrating with UI
+- Write tests for all state transitions and edge cases
+- State machines should be in `machines/` folder within the view
+- Structure:
+  - `machines/featureMachine.ts` - XState machine definition
+  - `machines/featureMachine.test.ts` - Machine tests
+  - `machines/useFeature.ts` - SolidJS hook wrapper
+
+**Benefits of this approach**:
+- Type safety: Centralized type definitions prevent inconsistencies
+- Testability: Tests replace throwaway example code
+- Maintainability: State machines make complex logic explicit and testable
+- Documentation: Tests and state machines document behavior better than examples
+
 ### Asset ID Schemes
 - **Original assets**: UUID from API (e.g., `abc123-def456`)
 - **Edited assets**: `{original_uuid}_edited_{timestamp}`
