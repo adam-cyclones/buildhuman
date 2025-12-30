@@ -191,6 +191,13 @@ export const createRevertToOriginalHandler = (deps: HandlerDependencies) => {
           return newMap;
         });
 
+        // Clear pending thumbnail if exists
+        deps.setPendingThumbnails(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(editedId);
+          return newMap;
+        });
+
         deps.setIsPanelOpen(false);
       } catch (error) {
         console.error("Failed to revert to original:", error);
@@ -202,6 +209,13 @@ export const createRevertToOriginalHandler = (deps: HandlerDependencies) => {
 
       // Remove from original metadata map
       deps.setOriginalEditedMetadata(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(editedId);
+        return newMap;
+      });
+
+      // Clear pending thumbnail if exists
+      deps.setPendingThumbnails(prev => {
         const newMap = new Map(prev);
         newMap.delete(editedId);
         return newMap;
@@ -336,6 +350,52 @@ export const createSaveMetadataHandler = (deps: HandlerDependencies) => {
         thumbnail_url: updatedAsset.thumbnail_url,
       };
 
+      // Save pending thumbnail if exists
+      const pendingThumbnailPath = deps.pendingThumbnails().get(assetId);
+      if (pendingThumbnailPath) {
+        await invoke("set_asset_thumbnail", {
+          assetId,
+          thumbnailPath: pendingThumbnailPath
+        });
+
+        const thumbnailFilename = await invoke<string>("get_asset_thumbnail", { assetId });
+
+        // Update metadata with real thumbnail filename
+        metadata.thumbnail_url = thumbnailFilename;
+
+        // Update selected asset with real filename
+        const updatedAssetWithThumb = { ...updatedAsset };
+        updatedAssetWithThumb.thumbnail_url = thumbnailFilename;
+        deps.setSelectedAsset(updatedAssetWithThumb);
+
+        // Update edited assets map with real filename
+        if (deps.editedAssets().has(assetId)) {
+          deps.setEditedAssets(prev => {
+            const newMap = new Map(prev);
+            const asset = newMap.get(assetId);
+            if (asset) {
+              asset.metadata.thumbnail_url = thumbnailFilename;
+            }
+            return newMap;
+          });
+        }
+
+        // Clear pending thumbnail
+        deps.setPendingThumbnails(prev => {
+          const newMap = new Map(prev);
+          newMap.delete(assetId);
+          return newMap;
+        });
+
+        // Update thumbnail timestamp for cache-busting
+        deps.setThumbnailTimestamps(prev => {
+          const newMap = new Map(prev);
+          newMap.set(assetId, Date.now());
+          localStorage.setItem("thumbnailTimestamps", JSON.stringify(Object.fromEntries(newMap)));
+          return newMap;
+        });
+      }
+
       // Check publishing machine state
       const isPending = machines.publishing.isPending();
       if (isPending) {
@@ -392,19 +452,29 @@ export const createChangeThumbnailHandler = (deps: HandlerDependencies) => {
       });
 
       if (selected) {
-        await invoke("set_asset_thumbnail", {
-          assetId,
-          thumbnailPath: selected
+        // Store the pending thumbnail path (don't save to disk yet)
+        deps.setPendingThumbnails(prev => {
+          const newMap = new Map(prev);
+          newMap.set(assetId, selected);
+          return newMap;
         });
 
-        const thumbnailFilename = await invoke<string>("get_asset_thumbnail", { assetId });
+        // Get or create machine for this asset
+        const machines = deps.getMachine(assetId);
 
-        // Update the selected asset
+        // Send CHANGE_THUMBNAIL event to editing machine
+        machines.editing.send({ type: "CHANGE_THUMBNAIL" });
+
+        // Use the selected file path directly for preview (will be converted by convertFileSrc)
+        // Prefix with "pending:" so we know it's not saved yet
+        const pendingUrl = `pending:${selected}`;
+
+        // Update the selected asset for preview (temporary, not saved yet)
         const updatedAsset = { ...deps.selectedAsset()! };
-        updatedAsset.thumbnail_url = thumbnailFilename;
+        updatedAsset.thumbnail_url = pendingUrl;
         deps.setSelectedAsset(updatedAsset);
 
-        // Update the editedAssets map
+        // Update the editedAssets map for preview
         if (deps.editedAssets().has(assetId)) {
           deps.setEditedAssets(prev => {
             const newMap = new Map(prev);
@@ -414,7 +484,7 @@ export const createChangeThumbnailHandler = (deps: HandlerDependencies) => {
                 ...asset,
                 metadata: {
                   ...asset.metadata,
-                  thumbnail_url: thumbnailFilename
+                  thumbnail_url: pendingUrl
                 }
               };
               newMap.set(assetId, updatedLocalAsset);
@@ -423,19 +493,13 @@ export const createChangeThumbnailHandler = (deps: HandlerDependencies) => {
           });
         }
 
-        // Track thumbnail update timestamp for cache-busting
-        deps.setThumbnailTimestamps(prev => {
-          const newMap = new Map(prev);
-          newMap.set(assetId, Date.now());
-          localStorage.setItem("thumbnailTimestamps", JSON.stringify(Object.fromEntries(newMap)));
-          return newMap;
-        });
+        // Note: Thumbnail will be saved when user clicks Save button
 
-        deps.showMetadataSaveToast("Thumbnail updated", 2000);
+        deps.showMetadataSaveToast("Thumbnail selected (click Save to apply)", 2000);
 
         // Log thumbnail change event
-        await deps.logEvent(assetId, "thumbnail_changed", {
-          filename: thumbnailFilename
+        await deps.logEvent(assetId, "thumbnail_selected", {
+          path: selected
         });
       }
     } catch (error) {

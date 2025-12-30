@@ -54,6 +54,8 @@ export interface AssetLibraryState {
   // Thumbnails
   thumbnailTimestamps: Accessor<Map<string, number>>;
   setThumbnailTimestamps: Setter<Map<string, number>>;
+  pendingThumbnails: Accessor<Map<string, string>>; // assetId -> thumbnail file path
+  setPendingThumbnails: Setter<Map<string, string>>;
 
   // Toast notifications
   showMetadataToast: Accessor<boolean>;
@@ -97,6 +99,7 @@ export const useAssetState = (): AssetLibraryState => {
   const [changedAssetId, setChangedAssetId] = createSignal<string | null>(null);
   const [appDataPath, setAppDataPath] = createSignal<string>("");
   const [thumbnailTimestamps, setThumbnailTimestamps] = createSignal<Map<string, number>>(new Map());
+  const [pendingThumbnails, setPendingThumbnails] = createSignal<Map<string, string>>(new Map());
   const [pendingSubmissions, setPendingSubmissions] = createSignal<Submission[]>([]);
   const [reviewAction, setReviewAction] = createSignal<"approve" | "reject" | null>(null);
   const [rejectionReason, setRejectionReason] = createSignal("");
@@ -141,6 +144,8 @@ export const useAssetState = (): AssetLibraryState => {
     setAppDataPath,
     thumbnailTimestamps,
     setThumbnailTimestamps,
+    pendingThumbnails,
+    setPendingThumbnails,
     pendingSubmissions,
     setPendingSubmissions,
     reviewAction,

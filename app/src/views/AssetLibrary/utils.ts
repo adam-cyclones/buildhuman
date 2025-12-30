@@ -107,6 +107,12 @@ export const convertToAssetPath = (
     return thumbnailUrl; // External URL
   }
 
+  // Handle pending thumbnail (not yet saved, use direct file path)
+  if (thumbnailUrl.startsWith('pending:')) {
+    const filePath = thumbnailUrl.substring(8); // Remove "pending:" prefix
+    return convertFileSrc(filePath);
+  }
+
   if (!appDataPath) {
     return ''; // App data path not loaded yet
   }
