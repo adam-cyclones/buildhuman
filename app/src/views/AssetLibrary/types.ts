@@ -74,6 +74,7 @@ export type AppSettings = {
 
 export type AssetLibraryProps = {
   appSettings: AppSettings | null;
+  onTabChange?: (tab: string) => void;
 };
 
 export type AssetEvent = {
@@ -166,6 +167,7 @@ export type AssetDetailPanelProps = {
   onReview: (assetId: string) => void;
   onDownload: (assetId: string, name: string) => void;
   onEditAsset: (assetId: string) => void;
+  onOpenSettings: () => void;
   isLicenseEditable: (license: string) => boolean;
   showMetadataSaveToast: (message: string, duration: number) => void;
 };

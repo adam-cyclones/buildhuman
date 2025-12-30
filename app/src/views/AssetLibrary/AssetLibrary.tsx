@@ -78,6 +78,10 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         });
         return newMap;
       });
+
+      // Populate editing asset IDs set
+      const editingIds = edited.map(asset => asset.metadata.id);
+      state.setEditingAssetIds(new Set(editingIds));
     } catch (error) {
       console.error("Failed to fetch cached assets:", error);
     }
@@ -130,6 +134,26 @@ const AssetLibrary = (props: AssetLibraryProps) => {
   const handleReview = createReviewHandler(handlerDeps);
   const handleOpenDownloadsFolder = createOpenDownloadsFolderHandler();
   const handleReloadChangedAsset = createReloadChangedAssetHandler({ ...handlerDeps, assets });
+
+  const handleOpenSettings = () => {
+    // Check if current asset is being edited (even without changes)
+    const currentAsset = state.selectedAsset();
+    if (currentAsset && isEditingAsset(currentAsset.id, state.editingAssetIds())) {
+      const metadata = state.editedAssets().get(currentAsset.id)?.metadata || currentAsset;
+      const machine = getMachine(currentAsset.id, metadata);
+      // Warn if in editing mode (includes newly created copies)
+      if (machine.editing.isEditing() || machine.editing.hasUnsavedChanges()) {
+        const confirmed = confirm(
+          "You have an asset open for editing. Progress will be lost if you navigate away. Do you want to continue?"
+        );
+        if (!confirmed) return;
+      }
+    }
+
+    if (props.onTabChange) {
+      props.onTabChange("Settings");
+    }
+  };
 
   // Auto-refetch when filters change
   createEffect(
@@ -372,7 +396,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         <AssetDetailPanel
           selectedAsset={state.selectedAsset}
           setSelectedAsset={state.setSelectedAsset}
-          isEditingAsset={(id) => isEditingAsset(id, state.editedAssets())}
+          isEditingAsset={(id) => isEditingAsset(id, state.editingAssetIds())}
           editedAssets={state.editedAssets}
           cachedAssets={state.cachedAssets}
           getMachine={getMachine}
@@ -400,6 +424,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
           onReview={handleReview}
           onDownload={handleDownload}
           onEditAsset={handleEditAsset}
+          onOpenSettings={handleOpenSettings}
           isLicenseEditable={isLicenseEditable}
           showMetadataSaveToast={showMetadataSaveToast}
         />

@@ -12,6 +12,7 @@ const AssetCard = (props: AssetCardProps) => {
     return props.allAssets?.()?.find((a: Asset) => a.id === originalId);
   };
 
+
   return (
     <div class="asset-card" onClick={() => props.onClick(props.asset)}>
       <div class="asset-thumbnail">
@@ -36,7 +37,7 @@ const AssetCard = (props: AssetCardProps) => {
         {isPending() && (
           <span class="pending-badge overlay-badge">Pending Review</span>
         )}
-        {isEdited() && (() => {
+        {isEdited() && !isPending() && (() => {
           const originalAsset = getOriginalAsset();
           return (
             <span
@@ -50,7 +51,7 @@ const AssetCard = (props: AssetCardProps) => {
               }}
             >
               <Icon name="fork" size={12} />
-              Unpublished
+              Editing
             </span>
           );
         })()}
@@ -60,26 +61,29 @@ const AssetCard = (props: AssetCardProps) => {
         <div class="asset-header">
           <div class="asset-title-row">
             <h3 class="asset-name">{props.asset.name}</h3>
-            <button
-              class={`download-icon-btn ${props.cachedAssets().has(props.asset.id) ? "cached" : ""}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                props.onDownload(props.asset.id, props.asset.name);
-              }}
-              disabled={props.downloading() === props.asset.id || props.cachedAssets().has(props.asset.id)}
-              title={props.cachedAssets().has(props.asset.id) ? "Downloaded" : "Download"}
-            >
-              {props.downloading() === props.asset.id ? (
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="spinner">
-                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" opacity="0.4" />
-                  <path d="M12 2v4" opacity="1" />
-                </svg>
-              ) : props.cachedAssets().has(props.asset.id) ? (
-                <Icon name="check" size={20} />
-              ) : (
-                <Icon name="download" size={20} />
-              )}
-            </button>
+            {!isEdited() && (
+              // Library assets only: show download button
+              <button
+                class={`download-icon-btn ${props.cachedAssets().has(props.asset.id) ? "cached" : ""}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onDownload(props.asset.id, props.asset.name);
+                }}
+                disabled={props.downloading() === props.asset.id || props.cachedAssets().has(props.asset.id)}
+                title={props.cachedAssets().has(props.asset.id) ? "Downloaded" : "Download"}
+              >
+                {props.downloading() === props.asset.id ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" class="spinner">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" opacity="0.4" />
+                    <path d="M12 2v4" opacity="1" />
+                  </svg>
+                ) : props.cachedAssets().has(props.asset.id) ? (
+                  <Icon name="check" size={20} />
+                ) : (
+                  <Icon name="download" size={20} />
+                )}
+              </button>
+            )}
           </div>
         </div>
         {props.asset.description && (

@@ -535,6 +535,16 @@
   border-color: var(--accent);
 }
 
+.download-icon-btn.publish-icon {
+  background: var(--accent);
+  color: #1a1a1a;
+}
+
+.download-icon-btn.publish-icon:hover {
+  background: #d4b89a;
+  transform: scale(1.1);
+}
+
 .spinner {
   animation: spin 1s linear infinite;
 }
@@ -551,10 +561,10 @@
 /* Asset detail panel */
 .asset-detail-panel {
   position: fixed;
-  top: 0;
+  top: 40px;
   right: 0;
   width: 350px;
-  height: 100vh;
+  height: calc(100vh - 40px);
   background: var(--medium-gray);
   border-left: 1px solid var(--border);
   display: flex;
@@ -1272,6 +1282,11 @@
   color: var(--accent);
   font-weight: 600;
   font-style: normal;
+  cursor: pointer;
+}
+
+.settings-link:hover {
+  text-decoration: underline;
 }
 
 .action-panel {

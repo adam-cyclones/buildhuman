@@ -6,11 +6,20 @@ import Icon from "../../../components/Icon";
 const AssetDetailPanel = (props: AssetDetailPanelProps) => {
   const asset = () => props.selectedAsset()!;
 
+  const hasUnsavedChanges = () => {
+    if (!props.isEditingAsset(asset().id)) return false;
+    const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
+    return machine.editing.hasUnsavedChanges();
+  };
+
   return (
     <div class="asset-detail-panel">
       <div class="panel-header">
         <div class="panel-title-wrapper">
-          <h2>{asset().name}</h2>
+          <h2>
+            {asset().name}
+            {hasUnsavedChanges() && <span> *</span>}
+          </h2>
         </div>
         <button class="close-btn" onClick={props.onClose}>
           <Icon name="close" size={24} />
@@ -91,6 +100,8 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                 onInput={(e) => {
                   const updated = { ...asset(), name: e.currentTarget.value };
                   props.setSelectedAsset(updated);
+                  const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
+                  machine.editing.changeMetadata();
                 }}
               />
             ) : (
@@ -103,7 +114,10 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
               <span class="detail-value">{asset().author}</span>
               {props.isEditingAsset(asset().id) && (
                 <span class="detail-hint">
-                  Change in <span class="settings-link">Edit → Settings</span>
+                  Change in{" "}
+                  <span class="settings-link" onClick={props.onOpenSettings}>
+                    Settings
+                  </span>
                 </span>
               )}
             </div>
@@ -122,6 +136,8 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                   const value = e.currentTarget.value;
                   const updated = { ...asset(), version: value };
                   props.setSelectedAsset(updated);
+                  const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
+                  machine.editing.changeMetadata();
                 }}
                 onBlur={(e) => {
                   const value = e.currentTarget.value;
@@ -149,6 +165,8 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                 onInput={(e) => {
                   const updated = { ...asset(), type: e.currentTarget.value };
                   props.setSelectedAsset(updated);
+                  const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
+                  machine.editing.changeMetadata();
                 }}
               />
             ) : (
@@ -165,6 +183,8 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                 onInput={(e) => {
                   const updated = { ...asset(), category: e.currentTarget.value };
                   props.setSelectedAsset(updated);
+                  const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
+                  machine.editing.changeMetadata();
                 }}
               />
             ) : (
@@ -208,6 +228,8 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
               onInput={(e) => {
                 const updated = { ...asset(), description: e.currentTarget.value };
                 props.setSelectedAsset(updated);
+                const machine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
+                machine.editing.changeMetadata();
               }}
               rows={4}
               placeholder="Edit description (metadata only - GLB changes must be exported from Blender)"
@@ -223,10 +245,19 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
           <ActivityTimeline events={props.getRecentEvents(asset().id)} />
         )}
 
-        {props.isEditingAsset(asset().id) && asset().id.includes("_edited_") && (() => {
-          const assetMachine = props.getMachine(asset().id, props.editedAssets().get(asset().id)?.metadata);
+        {props.isEditingAsset(asset().id) && (() => {
+          const editedAsset = props.editedAssets().get(asset().id);
+          const hasSavedFile = editedAsset && editedAsset.file_path;
+
+          // Only show publish panel if asset has been saved at least once
+          if (!hasSavedFile) {
+            return null;
+          }
+
+          const assetMachine = props.getMachine(asset().id, editedAsset.metadata);
           const isPending = assetMachine.publishing.isPending();
           const hasEditedAfterSubmit = assetMachine.publishing.hasEditedAfterSubmit();
+          const hasUnsaved = assetMachine.editing.hasUnsavedChanges();
 
           return (
             <div class="panel-section action-panel">
@@ -235,16 +266,18 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                   ? hasEditedAfterSubmit
                     ? "Submit updated version (will replace pending submission)"
                     : "Asset is pending review. You'll be notified when it's approved or rejected."
+                  : hasUnsaved
+                  ? "Save your changes first, then you can submit for review."
                   : "Submit for review. Approved assets will be added to the library for others to use."}
               </p>
               <button
                 class="action-btn"
                 onClick={() => props.onPublishAsset(asset().id)}
                 title="Submit asset for publication"
-                disabled={isPending && !hasEditedAfterSubmit}
+                disabled={(isPending && !hasEditedAfterSubmit) || hasUnsaved}
                 style={{
-                  opacity: (isPending && !hasEditedAfterSubmit) ? "0.5" : "1",
-                  cursor: (isPending && !hasEditedAfterSubmit) ? "not-allowed" : "pointer"
+                  opacity: ((isPending && !hasEditedAfterSubmit) || hasUnsaved) ? "0.5" : "1",
+                  cursor: ((isPending && !hasEditedAfterSubmit) || hasUnsaved) ? "not-allowed" : "pointer"
                 }}
               >
                 <Icon name="upload" size={16} />
@@ -271,7 +304,7 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
           </div>
         )}
 
-        {props.isEditingAsset(asset().id) && asset().id.includes("_edited_") && (
+        {props.isEditingAsset(asset().id) && (
           <>
             <hr class="panel-divider" />
             <div class="panel-section">
@@ -391,8 +424,8 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                 : "Create editable copy"
             }
           >
-            <Icon name="edit" size={16} />
-            Edit
+            <Icon name="fork" size={16} />
+            Create Copy
           </button>
         )}
         {props.isEditingAsset(asset().id) && (

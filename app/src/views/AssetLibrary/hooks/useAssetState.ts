@@ -42,6 +42,8 @@ export interface AssetLibraryState {
   setEditedAssets: Setter<Map<string, LocalAsset>>;
   originalEditedMetadata: Accessor<Map<string, Asset>>;
   setOriginalEditedMetadata: Setter<Map<string, Asset>>;
+  editingAssetIds: Accessor<Set<string>>;
+  setEditingAssetIds: Setter<Set<string>>;
 
   // Asset file changes
   changedAssetId: Accessor<string | null>;
@@ -96,6 +98,7 @@ export const useAssetState = (): AssetLibraryState => {
   const [showMetadataToast, setShowMetadataToast] = createSignal(false);
   const [metadataToastMessage, setMetadataToastMessage] = createSignal("");
   const [originalEditedMetadata, setOriginalEditedMetadata] = createSignal<Map<string, Asset>>(new Map());
+  const [editingAssetIds, setEditingAssetIds] = createSignal<Set<string>>(new Set());
   const [changedAssetId, setChangedAssetId] = createSignal<string | null>(null);
   const [appDataPath, setAppDataPath] = createSignal<string>("");
   const [thumbnailTimestamps, setThumbnailTimestamps] = createSignal<Map<string, number>>(new Map());
@@ -138,6 +141,8 @@ export const useAssetState = (): AssetLibraryState => {
     setMetadataToastMessage,
     originalEditedMetadata,
     setOriginalEditedMetadata,
+    editingAssetIds,
+    setEditingAssetIds,
     changedAssetId,
     setChangedAssetId,
     appDataPath,

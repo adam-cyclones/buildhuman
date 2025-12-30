@@ -91,12 +91,12 @@ describe('AssetEditingMachine', () => {
       expect(actor.getSnapshot().value).toBe('saving');
     });
 
-    it('should transition to saved state on SAVE_SUCCESS', () => {
+    it('should transition to idle on SAVE_SUCCESS', () => {
       actor.send({ type: 'SAVE' });
       actor.send({ type: 'SAVE_SUCCESS' });
 
       const snapshot = actor.getSnapshot();
-      expect(snapshot.value).toBe('saved');
+      expect(snapshot.value).toBe('idle');
       expect(snapshot.context.hasUnsavedChanges).toBe(false);
       expect(snapshot.context.changes).toEqual({
         metadata: false,
@@ -105,16 +105,6 @@ describe('AssetEditingMachine', () => {
       });
       expect(snapshot.context.lastSavedAt).toBeDefined();
       expect(snapshot.context.error).toBeUndefined();
-    });
-
-    it('should transition to idle after 1 second in saved state', async () => {
-      actor.send({ type: 'SAVE' });
-      actor.send({ type: 'SAVE_SUCCESS' });
-
-      // Wait for the delayed transition (1000ms)
-      await new Promise(resolve => setTimeout(resolve, 1100));
-
-      expect(actor.getSnapshot().value).toBe('idle');
     });
   });
 
@@ -190,8 +180,8 @@ describe('AssetEditingMachine', () => {
     });
   });
 
-  describe('Changes from Saved State', () => {
-    it('should transition to editing when making changes from saved state', () => {
+  describe('Changes After Save', () => {
+    it('should transition to editing when making changes after save', () => {
       const actor = createActor(assetEditingMachine).start();
 
       actor.send({ type: 'START_EDIT' });
@@ -199,7 +189,11 @@ describe('AssetEditingMachine', () => {
       actor.send({ type: 'SAVE' });
       actor.send({ type: 'SAVE_SUCCESS' });
 
-      // Make a change from saved state
+      // After save, we're in idle state
+      expect(actor.getSnapshot().value).toBe('idle');
+
+      // Start editing again and make a change
+      actor.send({ type: 'START_EDIT' });
       actor.send({ type: 'CHANGE_THUMBNAIL' });
 
       const snapshot = actor.getSnapshot();

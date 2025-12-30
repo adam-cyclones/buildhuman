@@ -137,7 +137,7 @@ function App() {
             <Humans />
           </Match>
           <Match when={activeTab() === "Asset Library"}>
-            <AssetLibrary appSettings={appSettings()} />
+            <AssetLibrary appSettings={appSettings()} onTabChange={setActiveTab} />
           </Match>
           <Match when={activeTab() === "Settings"}>
             <Settings onClose={async () => {

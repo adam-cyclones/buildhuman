@@ -136,32 +136,12 @@ export const assetEditingMachine = setup({
       description: "Save in progress",
       on: {
         SAVE_SUCCESS: {
-          target: "saved",
+          target: "idle",
           actions: ["clearChanges", "clearError"],
         },
         SAVE_FAILURE: {
           target: "error",
           actions: ["setError"],
-        },
-      },
-    },
-    saved: {
-      description: "Recently saved, brief state before returning to idle",
-      after: {
-        1000: { target: "idle" },
-      },
-      on: {
-        CHANGE_METADATA: {
-          target: "editing",
-          actions: ["markMetadataChanged"],
-        },
-        CHANGE_FILE: {
-          target: "editing",
-          actions: ["markFileChanged"],
-        },
-        CHANGE_THUMBNAIL: {
-          target: "editing",
-          actions: ["markThumbnailChanged"],
         },
       },
     },

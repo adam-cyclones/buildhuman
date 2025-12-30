@@ -17,7 +17,6 @@ export interface UseAssetEditingReturn {
   isIdle: Accessor<boolean>;
   isEditing: Accessor<boolean>;
   isSaving: Accessor<boolean>;
-  isSaved: Accessor<boolean>;
   hasError: Accessor<boolean>;
   hasUnsavedChanges: Accessor<boolean>;
 
@@ -69,7 +68,6 @@ export const useAssetEditing = (
   const isIdle = () => state() === "idle";
   const isEditing = () => state() === "editing";
   const isSaving = () => state() === "saving";
-  const isSaved = () => state() === "saved";
   const hasError = () => state() === "error";
   const hasUnsavedChanges = () => context().hasUnsavedChanges;
 
@@ -96,7 +94,6 @@ export const useAssetEditing = (
     isIdle,
     isEditing,
     isSaving,
-    isSaved,
     hasError,
     hasUnsavedChanges,
     hasMetadataChanges,

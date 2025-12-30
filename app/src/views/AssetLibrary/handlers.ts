@@ -9,7 +9,7 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import { config } from "../../config";
 import { publishAssetToService, submitReview } from "./client";
 import { hasMetadataChanges } from "./utils";
-import type { Asset, LocalAsset, Download, AssetMachines } from "./types";
+import type { Asset, LocalAsset, Download, AssetMachines, AppSettings } from "./types";
 import type { AssetLibraryState } from "./hooks/useAssetState";
 
 const API_URL = config.apiUrl;
@@ -20,7 +20,7 @@ export interface HandlerDependencies extends AssetLibraryState {
   logEvent: (assetId: string, eventType: string, metadata?: any) => Promise<void>;
   getMachine: (assetId: string, metadata?: any) => AssetMachines;
   fetchPendingSubmissions: () => Promise<void>;
-  appSettings?: { moderator_api_key?: string; moderator_mode?: boolean } | null;
+  appSettings?: AppSettings | null;
 }
 
 /**
@@ -143,9 +143,14 @@ export const createEditAssetHandler = (deps: HandlerDependencies) => {
       : {
           ...asset,
           id: assetId + "_editing",
+          name: asset.name + " (copy)",
+          author: deps.appSettings?.author_name || asset.author,
         };
 
     deps.setSelectedAsset(editedAsset);
+
+    // Add to editing set
+    deps.setEditingAssetIds(prev => new Set([...prev, editedAsset.id]));
 
     // Store the original for later copy creation (only if not already stored)
     if (!existingEdited) {
@@ -154,6 +159,10 @@ export const createEditAssetHandler = (deps: HandlerDependencies) => {
         newMap.set(editedAsset.id, { ...asset });
         return newMap;
       });
+
+      // Start editing state for the new copy
+      const machine = deps.getMachine(editedAsset.id, editedAsset);
+      machine.editing.startEdit();
     }
   };
 };
@@ -198,6 +207,9 @@ export const createRevertToOriginalHandler = (deps: HandlerDependencies) => {
           return newMap;
         });
 
+        // Remove from editing set
+        deps.setEditingAssetIds(prev => new Set([...prev].filter(id => id !== editedId)));
+
         deps.setIsPanelOpen(false);
       } catch (error) {
         console.error("Failed to revert to original:", error);
@@ -220,6 +232,9 @@ export const createRevertToOriginalHandler = (deps: HandlerDependencies) => {
         newMap.delete(editedId);
         return newMap;
       });
+
+      // Remove from editing set
+      deps.setEditingAssetIds(prev => new Set([...prev].filter(id => id !== editedId)));
 
       deps.setIsPanelOpen(false);
     }
@@ -309,12 +324,22 @@ export const createSaveMetadataHandler = (deps: HandlerDependencies) => {
 
         console.log("Creating editable copy for save:", originalId);
         const newCopy = await invoke<LocalAsset>("create_editable_copy", { assetId: originalId });
+        console.log("Created new copy with ID:", newCopy.metadata.id);
 
         // Add to edited assets map
         deps.setEditedAssets(prev => {
           const newMap = new Map(prev);
           newMap.set(newCopy.metadata.id, newCopy);
           return newMap;
+        });
+
+        // Update editingAssetIds Set: remove old temporary ID, add new real ID
+        const oldTempId = assetId; // Save the old _editing ID
+        deps.setEditingAssetIds(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(oldTempId); // Remove temporary _editing ID
+          newSet.add(newCopy.metadata.id); // Add real timestamped ID
+          return newSet;
         });
 
         // Update selected asset to use the real edited ID
@@ -413,6 +438,8 @@ export const createSaveMetadataHandler = (deps: HandlerDependencies) => {
       }
 
       await invoke("update_asset_metadata", { assetId, metadata });
+
+      console.log("Save completed successfully for asset:", assetId);
 
       // Send SAVE_SUCCESS to editing machine
       machines.editing.send({ type: "SAVE_SUCCESS" });
@@ -529,8 +556,12 @@ export const createChangeThumbnailHandler = (deps: HandlerDependencies) => {
  */
 export const createPublishAssetHandler = (deps: HandlerDependencies) => {
   return async (assetId: string) => {
+    console.log("Publishing asset with ID:", assetId);
+    console.log("Available edited assets:", Array.from(deps.editedAssets().keys()));
+
     const asset = deps.editedAssets().get(assetId);
     if (!asset) {
+      console.error("Asset not found in editedAssets map for ID:", assetId);
       alert("Asset not found");
       return;
     }
