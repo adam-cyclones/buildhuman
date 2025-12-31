@@ -691,9 +691,28 @@ export const createWithdrawSubmissionHandler = (deps: HandlerDependencies) => {
 
       deps.showMetadataSaveToast("Submission withdrawn successfully", 3000);
 
-      // Update state machine
+      // Update state machine - transition to withdrawn, then back to editing
       const actor = getPublishingActor(assetId, editedAsset.metadata);
       actor.send({ type: "WITHDRAW" });
+      actor.send({ type: "EDIT" });
+
+      // Clear submission_id from metadata so it can be resubmitted
+      const updatedMetadata = { ...editedAsset.metadata };
+      delete updatedMetadata.submission_id;
+      delete updatedMetadata.submission_status;
+
+      // Update local state
+      const updatedEditedAsset = {
+        ...editedAsset,
+        metadata: updatedMetadata
+      };
+      deps.editedAssets().set(assetId, updatedEditedAsset);
+
+      // Save metadata to disk
+      await invoke("save_asset_metadata", {
+        assetId,
+        metadata: updatedMetadata
+      });
 
       // Refresh pending submissions if viewing them
       if (deps.selectedType() === "pending") {
