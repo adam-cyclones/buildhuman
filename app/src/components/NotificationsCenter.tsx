@@ -7,7 +7,7 @@ interface Notification {
   id: string;
   submission_id: string;
   recipient_id?: string;
-  type: "approved" | "rejected" | "under_review" | "submission";
+  type: "approved" | "rejected" | "under_review" | "submission" | "withdrawn";
   title: string;
   message: string;
   created_at: string;
@@ -46,8 +46,8 @@ const NotificationsCenter = (props: NotificationsCenterProps) => {
       await markAsRead(notification.id);
     }
 
-    // Navigate to submission
-    if (props.onNotificationClick) {
+    // Navigate to submission (but not for withdrawn - those are just informational)
+    if (notification.type !== "withdrawn" && props.onNotificationClick) {
       props.onNotificationClick(notification.submission_id);
     }
 

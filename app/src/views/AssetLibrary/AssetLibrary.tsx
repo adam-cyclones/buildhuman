@@ -6,6 +6,7 @@ import AssetFilters from "./components/AssetFilters";
 import AssetDetailPanel from "./components/AssetDetailPanel";
 import { useAssetEvents } from "./components/useAssetEvents";
 import Icon from "../../components/Icon";
+import ConfirmDialog from "../../components/ConfirmDialog";
 import { useAssetState } from "./hooks/useAssetState";
 import { fetchAssets, fetchCategories, fetchPendingSubmissions, fetchCachedAssets } from "./client";
 import { getEditingActor } from "./machines/assetEditingService";
@@ -569,6 +570,17 @@ const AssetLibrary = (props: AssetLibraryProps) => {
           <Icon name="check" size={16} />
           <span>{state.metadataToastMessage()}</span>
         </div>
+      )}
+
+      {state.confirmDialog() && (
+        <ConfirmDialog
+          isOpen={state.confirmDialog()?.isOpen || false}
+          title={state.confirmDialog()?.title || ""}
+          message={state.confirmDialog()?.message || ""}
+          variant={state.confirmDialog()?.variant}
+          onConfirm={state.confirmDialog()?.onConfirm || (() => {})}
+          onCancel={() => state.setConfirmDialog(null)}
+        />
       )}
     </div>
   );

@@ -78,6 +78,22 @@ export interface AssetLibraryState {
   setSubmitting: Setter<boolean>;
   selectedSubmissions: Accessor<Set<string>>;
   setSelectedSubmissions: Setter<Set<string>>;
+
+  // Confirmation dialog
+  confirmDialog: Accessor<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    variant?: "default" | "danger" | "warning";
+    onConfirm: () => void;
+  } | null>;
+  setConfirmDialog: Setter<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    variant?: "default" | "danger" | "warning";
+    onConfirm: () => void;
+  } | null>;
 }
 
 export const useAssetState = (): AssetLibraryState => {
@@ -107,6 +123,13 @@ export const useAssetState = (): AssetLibraryState => {
   const [reviewNotes, setReviewNotes] = createSignal("");
   const [submitting, setSubmitting] = createSignal(false);
   const [selectedSubmissions, setSelectedSubmissions] = createSignal<Set<string>>(new Set());
+  const [confirmDialog, setConfirmDialog] = createSignal<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    variant?: "default" | "danger" | "warning";
+    onConfirm: () => void;
+  } | null>(null);
 
   return {
     searchQuery,
@@ -161,5 +184,7 @@ export const useAssetState = (): AssetLibraryState => {
     setSubmitting,
     selectedSubmissions,
     setSelectedSubmissions,
+    confirmDialog,
+    setConfirmDialog,
   };
 };

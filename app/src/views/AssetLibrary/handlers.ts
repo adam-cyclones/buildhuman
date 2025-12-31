@@ -663,74 +663,78 @@ export const createPublishAssetHandler = (deps: HandlerDependencies) => {
  */
 export const createWithdrawSubmissionHandler = (deps: HandlerDependencies) => {
   return async (assetId: string) => {
-    const confirmed = confirm(
-      "Withdraw this submission from review?\n\n" +
-      "This will remove it from the moderation queue and delete the submitted files. " +
-      "You can edit and resubmit later if needed."
-    );
+    // Show custom confirmation dialog instead of browser confirm
+    deps.setConfirmDialog({
+      isOpen: true,
+      title: "Withdraw Submission",
+      message: "Are you sure you want to withdraw this submission?\n\nYour asset will be removed from review and you can continue editing and resubmit when ready.",
+      variant: "warning",
+      onConfirm: async () => {
+        // Close dialog
+        deps.setConfirmDialog(null);
 
-    if (!confirmed) return;
+        try {
+          const editedAsset = deps.editedAssets().get(assetId);
+          if (!editedAsset) {
+            throw new Error("Edited asset not found");
+          }
 
-    try {
-      const editedAsset = deps.editedAssets().get(assetId);
-      if (!editedAsset) {
-        throw new Error("Edited asset not found");
+          // Get submission ID from metadata
+          const submissionId = editedAsset.metadata.submission_id;
+          if (!submissionId) {
+            throw new Error("No submission ID found");
+          }
+
+          // Get submitter ID from settings
+          const submitterId = deps.appSettings?.author_name || undefined;
+
+          // Call API to withdraw
+          await withdrawSubmission({ submissionId, submitterId });
+
+          deps.showMetadataSaveToast("Submission withdrawn successfully", 3000);
+
+          // Update state machine - transition to withdrawn, then back to editing
+          const actor = getPublishingActor(assetId, editedAsset.metadata);
+          actor.send({ type: "WITHDRAW" });
+          actor.send({ type: "EDIT" });
+
+          // Clear submission_id from metadata so it can be resubmitted
+          const updatedMetadata = { ...editedAsset.metadata };
+          delete updatedMetadata.submission_id;
+          delete updatedMetadata.submission_status;
+
+          // Update local state - create new Map for reactivity
+          const updatedEditedAsset = {
+            ...editedAsset,
+            metadata: updatedMetadata
+          };
+          const newEditedAssets = new Map(deps.editedAssets());
+          newEditedAssets.set(assetId, updatedEditedAsset);
+          deps.setEditedAssets(newEditedAssets);
+
+          // Save metadata to disk
+          await invoke("update_asset_metadata", {
+            assetId,
+            metadata: updatedMetadata
+          });
+
+          // Refresh pending submissions if viewing them
+          if (deps.selectedType() === "pending") {
+            await deps.fetchPendingSubmissions();
+          }
+
+          // Close panel
+          deps.setIsPanelOpen(false);
+
+        } catch (error) {
+          console.error("Failed to withdraw submission:", error);
+          deps.showMetadataSaveToast(
+            `Failed to withdraw: ${error instanceof Error ? error.message : String(error)}`,
+            5000
+          );
+        }
       }
-
-      // Get submission ID from metadata
-      const submissionId = editedAsset.metadata.submission_id;
-      if (!submissionId) {
-        throw new Error("No submission ID found");
-      }
-
-      // Get submitter ID from settings
-      const submitterId = deps.appSettings?.author_name || undefined;
-
-      // Call API to withdraw
-      await withdrawSubmission({ submissionId, submitterId });
-
-      deps.showMetadataSaveToast("Submission withdrawn successfully", 3000);
-
-      // Update state machine - transition to withdrawn, then back to editing
-      const actor = getPublishingActor(assetId, editedAsset.metadata);
-      actor.send({ type: "WITHDRAW" });
-      actor.send({ type: "EDIT" });
-
-      // Clear submission_id from metadata so it can be resubmitted
-      const updatedMetadata = { ...editedAsset.metadata };
-      delete updatedMetadata.submission_id;
-      delete updatedMetadata.submission_status;
-
-      // Update local state - create new Map for reactivity
-      const updatedEditedAsset = {
-        ...editedAsset,
-        metadata: updatedMetadata
-      };
-      const newEditedAssets = new Map(deps.editedAssets());
-      newEditedAssets.set(assetId, updatedEditedAsset);
-      deps.setEditedAssets(newEditedAssets);
-
-      // Save metadata to disk
-      await invoke("update_asset_metadata", {
-        assetId,
-        metadata: updatedMetadata
-      });
-
-      // Refresh pending submissions if viewing them
-      if (deps.selectedType() === "pending") {
-        await deps.fetchPendingSubmissions();
-      }
-
-      // Close panel
-      deps.setIsPanelOpen(false);
-
-    } catch (error) {
-      console.error("Failed to withdraw submission:", error);
-      deps.showMetadataSaveToast(
-        `Failed to withdraw: ${error instanceof Error ? error.message : String(error)}`,
-        5000
-      );
-    }
+    });
   };
 };
 
