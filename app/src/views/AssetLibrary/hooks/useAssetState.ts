@@ -76,6 +76,8 @@ export interface AssetLibraryState {
   setReviewNotes: Setter<string>;
   submitting: Accessor<boolean>;
   setSubmitting: Setter<boolean>;
+  selectedSubmissions: Accessor<Set<string>>;
+  setSelectedSubmissions: Setter<Set<string>>;
 }
 
 export const useAssetState = (): AssetLibraryState => {
@@ -104,6 +106,7 @@ export const useAssetState = (): AssetLibraryState => {
   const [rejectionReason, setRejectionReason] = createSignal("");
   const [reviewNotes, setReviewNotes] = createSignal("");
   const [submitting, setSubmitting] = createSignal(false);
+  const [selectedSubmissions, setSelectedSubmissions] = createSignal<Set<string>>(new Set());
 
   return {
     searchQuery,
@@ -156,5 +159,7 @@ export const useAssetState = (): AssetLibraryState => {
     setReviewNotes,
     submitting,
     setSubmitting,
+    selectedSubmissions,
+    setSelectedSubmissions,
   };
 };

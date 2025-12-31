@@ -7,7 +7,7 @@ interface Notification {
   id: string;
   submission_id: string;
   recipient_id?: string;
-  type: "approved" | "rejected" | "under_review";
+  type: "approved" | "rejected" | "under_review" | "submission";
   title: string;
   message: string;
   created_at: string;
@@ -16,7 +16,11 @@ interface Notification {
 
 const API_URL = config.apiUrl;
 
-const NotificationsCenter = () => {
+interface NotificationsCenterProps {
+  onNotificationClick?: (submissionId: string) => void;
+}
+
+const NotificationsCenter = (props: NotificationsCenterProps) => {
   const [notifications, setNotifications] = createSignal<Notification[]>([]);
   const [isOpen, setIsOpen] = createSignal(false);
   const [unreadCount, setUnreadCount] = createSignal(0);
@@ -34,6 +38,21 @@ const NotificationsCenter = () => {
     } catch (error) {
       console.error("Failed to fetch notifications:", error);
     }
+  };
+
+  const handleNotificationClick = async (notification: Notification) => {
+    // Mark as read
+    if (!notification.read) {
+      await markAsRead(notification.id);
+    }
+
+    // Navigate to submission
+    if (props.onNotificationClick) {
+      props.onNotificationClick(notification.submission_id);
+    }
+
+    // Close panel
+    setIsOpen(false);
   };
 
   const markAsRead = async (id: string) => {
@@ -93,12 +112,14 @@ const NotificationsCenter = () => {
                 {(notification) => (
                   <div
                     class={`notification-item ${!notification.read ? "unread" : ""} ${notification.type}`}
-                    onClick={() => !notification.read && markAsRead(notification.id)}
+                    onClick={() => handleNotificationClick(notification)}
+                    style={{ cursor: "pointer" }}
                   >
                     <div class="notification-icon">
                       {notification.type === "approved" && "✓"}
                       {notification.type === "rejected" && "✗"}
                       {notification.type === "under_review" && "⏳"}
+                      {notification.type === "submission" && "📥"}
                     </div>
                     <div class="notification-content">
                       <div class="notification-title">{notification.title}</div>

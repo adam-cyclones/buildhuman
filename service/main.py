@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, Header, Depends
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
@@ -33,6 +34,10 @@ STORAGE_PATH = "storage"
 os.makedirs(STORAGE_PATH, exist_ok=True)
 os.makedirs(f"{STORAGE_PATH}/models", exist_ok=True)
 os.makedirs(f"{STORAGE_PATH}/environment", exist_ok=True)
+os.makedirs(f"{STORAGE_PATH}/submissions", exist_ok=True)
+
+# Mount storage directory as static files
+app.mount("/storage", StaticFiles(directory=STORAGE_PATH), name="storage")
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)

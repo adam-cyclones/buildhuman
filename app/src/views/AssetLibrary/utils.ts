@@ -5,6 +5,7 @@
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Asset, LocalAsset, Submission } from "./types";
+import { config } from "../../config";
 
 /**
  * Check if asset is currently being edited
@@ -106,23 +107,33 @@ export const mergeAndSortAssets = (
 ): Asset[] => {
   // If viewing pending submissions, return those instead
   if (selectedType === "pending") {
-    return pendingSubmissions.map(submission => ({
-      id: submission.id,
-      name: submission.asset_name,
-      description: submission.asset_description || "",
-      type: submission.asset_type,
-      category: submission.asset_category,
-      author: submission.author,
-      rating: 0,
-      rating_count: 0,
-      license: submission.license,
-      publish_date: submission.submitted_at,
-      downloads: 0,
-      file_size: submission.file_size || 0,
-      version: submission.version,
-      required: false,
-      thumbnail_url: submission.thumbnail_path || ""
-    }));
+    return pendingSubmissions.map(submission => {
+      // Convert server-side thumbnail path to HTTP URL
+      let thumbnailUrl = "";
+      if (submission.thumbnail_path) {
+        // Server stores thumbnails at /storage/submissions/xxx_thumb.png
+        // Convert to HTTP URL: http://localhost:8000/storage/submissions/xxx_thumb.png
+        thumbnailUrl = `${config.apiUrl}/${submission.thumbnail_path}`;
+      }
+
+      return {
+        id: submission.id,
+        name: submission.asset_name,
+        description: submission.asset_description || "",
+        type: submission.asset_type,
+        category: submission.asset_category,
+        author: submission.author,
+        rating: 0,
+        rating_count: 0,
+        license: submission.license,
+        publish_date: submission.submitted_at,
+        downloads: 0,
+        file_size: submission.file_size || 0,
+        version: submission.version,
+        required: false,
+        thumbnail_url: thumbnailUrl
+      };
+    });
   }
 
   const localAssetMetadata = localAssets.map(local => local.metadata as Asset);

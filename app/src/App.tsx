@@ -60,6 +60,7 @@ function App() {
 
   const [activeTab, setActiveTab] = createSignal("Humans");
   const [previousTab, setPreviousTab] = createSignal("Humans");
+  const [pendingSubmissionId, setPendingSubmissionId] = createSignal<string | null>(null);
 
   const exportGltf = () => {
     // Call the exportGltf function from 3DEditor view
@@ -71,6 +72,13 @@ function App() {
   const openSettings = () => {
     setPreviousTab(activeTab());
     setActiveTab("Settings");
+  };
+
+  const handleNotificationClick = (submissionId: string) => {
+    // Switch to Asset Library tab
+    setActiveTab("Asset Library");
+    // Signal to AssetLibrary to open this submission
+    setPendingSubmissionId(submissionId);
   };
 
   const fileMenuItems = [{ label: "Export GLTF", onClick: exportGltf }];
@@ -127,7 +135,7 @@ function App() {
           <Tabs tabs={tabs} onTabChange={setActiveTab} />
         </div>
         <div class="menu-right">
-          <NotificationsCenter />
+          <NotificationsCenter onNotificationClick={handleNotificationClick} />
         </div>
       </div>
 
@@ -137,7 +145,12 @@ function App() {
             <Humans />
           </Match>
           <Match when={activeTab() === "Asset Library"}>
-            <AssetLibrary appSettings={appSettings()} onTabChange={setActiveTab} />
+            <AssetLibrary
+              appSettings={appSettings()}
+              onTabChange={setActiveTab}
+              pendingSubmissionId={pendingSubmissionId()}
+              onSubmissionOpened={() => setPendingSubmissionId(null)}
+            />
           </Match>
           <Match when={activeTab() === "Settings"}>
             <Settings onClose={async () => {

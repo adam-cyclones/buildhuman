@@ -373,17 +373,6 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
               </div>
             )}
 
-            <div class="form-group">
-              <label>Notes (optional)</label>
-              <textarea
-                class="form-textarea"
-                value={props.reviewNotes()}
-                onInput={(e) => props.setReviewNotes(e.currentTarget.value)}
-                placeholder="Add any additional notes..."
-                rows={3}
-              />
-            </div>
-
             <button
               class="submit-review-btn"
               onClick={() => props.onReview(asset().id)}

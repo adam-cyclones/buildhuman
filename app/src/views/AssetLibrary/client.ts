@@ -97,7 +97,6 @@ export const fetchCachedAssets = async () => {
 export const submitReview = async (params: {
   submissionId: string;
   action: "approve" | "reject";
-  notes: string;
   rejectionReason?: string;
   apiKey: string;
 }) => {
@@ -111,7 +110,6 @@ export const submitReview = async (params: {
       },
       body: JSON.stringify({
         action: params.action,
-        notes: params.notes,
         rejection_reason: params.action === "reject" ? params.rejectionReason : undefined
       })
     }

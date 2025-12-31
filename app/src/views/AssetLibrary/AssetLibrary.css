@@ -155,6 +155,16 @@
   border-color: var(--accent);
 }
 
+.select-input.moderator-control {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+}
+
+.select-input.moderator-control:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+}
+
 .asset-grid {
   flex: 1;
   overflow-y: auto;
@@ -231,6 +241,17 @@
   min-height: 450px;
   display: flex;
   flex-direction: column;
+}
+
+.asset-checkbox {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: var(--accent);
 }
 
 .asset-card:hover {
@@ -1476,6 +1497,109 @@
   flex-shrink: 0;
   line-height: 1.2;
   padding-top: 0.15rem;
+}
+
+/* Pending submissions header */
+.pending-submissions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--medium-gray);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.pending-header-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.pending-header-content svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.pending-header-content h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.pending-header-content p {
+  margin: 4px 0 0 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.pending-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.selected-count {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+
+.batch-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border: 1px solid;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.batch-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.batch-action-btn.approve {
+  border-color: #4ade80;
+  color: #4ade80;
+}
+
+.batch-action-btn.approve:hover:not(:disabled) {
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.batch-action-btn.reject {
+  border-color: #f87171;
+  color: #f87171;
+}
+
+.batch-action-btn.reject:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.batch-action-btn.clear {
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.batch-action-btn.clear:hover {
+  background: var(--medium-gray);
+}
+
+.pending-count {
+  background: var(--accent);
+  color: #1a1a1a;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
 /* Asset changed notification banner */

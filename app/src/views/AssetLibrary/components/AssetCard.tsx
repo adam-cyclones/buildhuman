@@ -34,6 +34,15 @@ const AssetCard = (props: AssetCardProps) => {
 
   return (
     <div class="asset-card" onClick={() => props.onClick(props.asset)}>
+      {props.isSelectable && (
+        <input
+          type="checkbox"
+          class="asset-checkbox"
+          checked={props.isSelected}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => props.onToggleSelect?.(props.asset.id)}
+        />
+      )}
       <div class="asset-thumbnail">
         {props.asset.thumbnail_url ? (
           <img

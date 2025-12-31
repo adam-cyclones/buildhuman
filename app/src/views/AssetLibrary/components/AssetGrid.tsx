@@ -41,6 +41,9 @@ const AssetGrid = (props: AssetGridProps) => {
             allAssets={props.allAssets}
             onAssetClick={props.onAssetClick}
             onPublishAsset={props.onPublishAsset}
+            isSelectable={props.selectedType() === "pending"}
+            isSelected={props.selectedSubmissions?.().has(asset.id)}
+            onToggleSelect={props.onToggleSubmissionSelect}
           />
         )}
       </For>

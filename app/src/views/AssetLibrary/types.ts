@@ -78,6 +78,8 @@ export type AppSettings = {
 export type AssetLibraryProps = {
   appSettings: AppSettings | null;
   onTabChange?: (tab: string) => void;
+  pendingSubmissionId?: string | null;
+  onSubmissionOpened?: () => void;
 };
 
 export type AssetEvent = {
@@ -104,6 +106,9 @@ export type AssetCardProps = {
   allAssets?: import("solid-js").Accessor<Asset[]>;
   onAssetClick?: (asset: Asset) => void;
   onPublishAsset?: (id: string) => void;
+  isSelectable?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (id: string) => void;
 };
 
 export type AssetGridProps = {
@@ -122,6 +127,8 @@ export type AssetGridProps = {
   editedAssets?: import("solid-js").Accessor<Map<string, any>>;
   allAssets?: import("solid-js").Accessor<Asset[]>;
   onPublishAsset: (id: string) => void;
+  selectedSubmissions?: import("solid-js").Accessor<Set<string>>;
+  onToggleSubmissionSelect?: (id: string) => void;
 };
 
 export type AssetFiltersProps = {

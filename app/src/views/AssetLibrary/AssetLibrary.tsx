@@ -29,10 +29,12 @@ import {
   createChangeThumbnailHandler,
   createPublishAssetHandler,
   createReviewHandler,
+  createBatchApproveHandler,
+  createBatchRejectHandler,
   createOpenDownloadsFolderHandler,
   createReloadChangedAssetHandler
 } from "./handlers";
-import type { AssetLibraryProps } from "./types";
+import type { AssetLibraryProps, Asset } from "./types";
 import "./AssetLibrary.css";
 
 const AssetLibrary = (props: AssetLibraryProps) => {
@@ -115,6 +117,8 @@ const AssetLibrary = (props: AssetLibraryProps) => {
   const handleChangeThumbnail = createChangeThumbnailHandler(handlerDeps);
   const handlePublishAsset = createPublishAssetHandler(handlerDeps);
   const handleReview = createReviewHandler(handlerDeps);
+  const handleBatchApprove = createBatchApproveHandler(handlerDeps);
+  const handleBatchReject = createBatchRejectHandler(handlerDeps);
   const handleOpenDownloadsFolder = createOpenDownloadsFolderHandler();
   const handleReloadChangedAsset = createReloadChangedAssetHandler({ ...handlerDeps, assets });
 
@@ -160,11 +164,98 @@ const AssetLibrary = (props: AssetLibraryProps) => {
     )
   );
 
+  // Handle notification click - open specific pending submission
+  createEffect(
+    on(
+      () => props.pendingSubmissionId,
+      (submissionId) => {
+        if (submissionId) {
+          // Switch to pending view
+          state.setSelectedType("pending");
+
+          // Wait for submissions to load, then open the detail panel
+          setTimeout(() => {
+            const submission = state.pendingSubmissions().find(s => s.id === submissionId);
+            if (submission) {
+              // Convert submission to Asset format
+              const assetFromSubmission: Asset = {
+                id: submission.id,
+                name: submission.asset_name,
+                description: submission.asset_description || "",
+                type: submission.asset_type,
+                category: submission.asset_category,
+                author: submission.author,
+                rating: 0,
+                rating_count: 0,
+                license: submission.license,
+                publish_date: submission.submitted_at,
+                downloads: 0,
+                file_size: submission.file_size || 0,
+                version: submission.version,
+                required: false,
+                thumbnail_url: submission.thumbnail_path || ""
+              };
+              handleAssetClick(assetFromSubmission);
+            }
+
+            // Clear the signal
+            if (props.onSubmissionOpened) {
+              props.onSubmissionOpened();
+            }
+          }, 500);
+        }
+      }
+    )
+  );
+
   // Merge API assets with local edited assets
   const allAssets = () => {
     const apiAssets = assets() || [];
     const localAssets = Array.from(state.editedAssets().values());
-    return mergeAndSortAssets(apiAssets, localAssets, state.selectedType(), state.pendingSubmissions());
+    let merged = mergeAndSortAssets(apiAssets, localAssets, state.selectedType(), state.pendingSubmissions());
+
+    // Apply client-side filtering for pending submissions and my creations
+    if (state.selectedType() === "pending" || state.selectedType() === "my-creations") {
+      const searchLower = state.searchQuery().toLowerCase();
+
+      // Filter to only edited/created assets for "my-creations"
+      if (state.selectedType() === "my-creations") {
+        merged = merged.filter(asset => asset.id.includes("_edited_"));
+      }
+
+      // Filter by search query
+      if (searchLower) {
+        merged = merged.filter(asset =>
+          asset.name.toLowerCase().includes(searchLower) ||
+          asset.description?.toLowerCase().includes(searchLower) ||
+          asset.author.toLowerCase().includes(searchLower)
+        );
+      }
+
+      // Filter by category
+      if (state.selectedCategory() !== "all") {
+        merged = merged.filter(asset => asset.category === state.selectedCategory());
+      }
+
+      // Apply sorting
+      const sortBy = state.sortBy();
+      merged.sort((a, b) => {
+        switch (sortBy) {
+          case "name":
+            return a.name.localeCompare(b.name);
+          case "date":
+            return new Date(b.publish_date).getTime() - new Date(a.publish_date).getTime();
+          case "downloads":
+            return (b.downloads || 0) - (a.downloads || 0);
+          case "rating":
+            return (b.rating || 0) - (a.rating || 0);
+          default:
+            return 0;
+        }
+      });
+    }
+
+    return merged;
   };
 
   // Filter categories by selected type
@@ -261,6 +352,52 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         setViewMode={state.setViewMode}
       />
 
+      {state.selectedType() === "pending" && (
+        <div class="pending-submissions-header">
+          <div class="pending-header-content">
+            <Icon name="shield" size={24} />
+            <div>
+              <h2>Pending Submissions</h2>
+              <p>Review community-submitted assets awaiting moderation</p>
+            </div>
+          </div>
+          <div class="pending-actions">
+            {state.selectedSubmissions().size > 0 && (
+              <>
+                <span class="selected-count">
+                  {state.selectedSubmissions().size} selected
+                </span>
+                <button
+                  class="batch-action-btn approve"
+                  onClick={handleBatchApprove}
+                  disabled={state.submitting()}
+                >
+                  <Icon name="check" size={16} />
+                  Approve All
+                </button>
+                <button
+                  class="batch-action-btn reject"
+                  onClick={handleBatchReject}
+                  disabled={state.submitting()}
+                >
+                  <Icon name="x-circle" size={16} />
+                  Reject All
+                </button>
+                <button
+                  class="batch-action-btn clear"
+                  onClick={() => state.setSelectedSubmissions(new Set())}
+                >
+                  Clear Selection
+                </button>
+              </>
+            )}
+            <div class="pending-count">
+              {state.pendingSubmissions().length} submission{state.pendingSubmissions().length !== 1 ? 's' : ''}
+            </div>
+          </div>
+        </div>
+      )}
+
       <AssetGrid
         assets={allAssets}
         loading={assets.loading}
@@ -277,6 +414,18 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         editedAssets={state.editedAssets}
         allAssets={() => assets() || []}
         onPublishAsset={handlePublishAsset}
+        selectedSubmissions={state.selectedSubmissions}
+        onToggleSubmissionSelect={(id: string) => {
+          state.setSelectedSubmissions(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(id)) {
+              newSet.delete(id);
+            } else {
+              newSet.add(id);
+            }
+            return newSet;
+          });
+        }}
       />
 
       <div class="asset-pagination">

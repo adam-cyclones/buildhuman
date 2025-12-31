@@ -80,8 +80,22 @@ const AssetFilters = (props: AssetFiltersProps) => {
                 <option value="all">All</option>
                 <option value="models">Models</option>
                 <option value="environment">Environment</option>
+              </select>
+            </div>
+            <div class="control-group">
+              <label>Show:</label>
+              <select
+                class={`select-input ${props.showModeratorOptions ? "moderator-control" : ""}`}
+                value={props.selectedType() === "pending" ? "pending" : props.selectedType() === "my-creations" ? "my-creations" : "all"}
+                onChange={(e) => {
+                  props.setSelectedType(e.currentTarget.value);
+                  props.setSelectedCategory("all");
+                }}
+              >
+                <option value="all">Published Assets</option>
+                <option value="my-creations">My Creations</option>
                 {props.showModeratorOptions && (
-                  <option value="pending">Pending</option>
+                  <option value="pending">Needs Reviewing</option>
                 )}
               </select>
             </div>
