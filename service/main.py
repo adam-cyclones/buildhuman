@@ -1139,12 +1139,43 @@ async def publish_release(
         if row[4] != "draft":
             raise HTTPException(status_code=400, detail="Release is already published")
 
+        release_name = row[1]
+        release_version = row[2]
+
         # Update to published
         c.execute("""
             UPDATE releases
             SET status = 'published', published_at = ?, published_by = ?
             WHERE id = ?
         """, (published_at, published_by, release_id))
+
+        # Get all assets in this release and their authors
+        c.execute("""
+            SELECT DISTINCT a.author, a.name
+            FROM assets a
+            JOIN release_assets ra ON a.id = ra.asset_id
+            WHERE ra.release_id = ?
+        """, (release_id,))
+
+        asset_authors = c.fetchall()
+
+        # Create notifications for all asset contributors
+        for author, asset_name in asset_authors:
+            notif_id = str(uuid.uuid4())
+            c.execute("""
+                INSERT INTO notifications
+                (id, submission_id, recipient_id, type, title, message, created_at, read)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                notif_id,
+                release_id,  # Using release_id instead of submission_id
+                author,
+                "release",
+                f"Your asset included in {release_name} v{release_version}",
+                f"Congratulations! Your asset '{asset_name}' has been released as part of {release_name} v{release_version}",
+                published_at,
+                False
+            ))
 
         conn.commit()
 
