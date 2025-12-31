@@ -303,6 +303,17 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                   ? "Resubmit Asset"
                   : "Publish Asset"}
               </button>
+
+              {isPending && props.onWithdrawSubmission && (
+                <button
+                  class="action-btn withdraw-btn"
+                  onClick={() => props.onWithdrawSubmission!(asset().id)}
+                  title="Withdraw this submission from review"
+                >
+                  <Icon name="x-circle" size={16} />
+                  Withdraw Submission
+                </button>
+              )}
             </div>
           );
         })()}

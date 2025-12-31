@@ -22,6 +22,7 @@ export type AssetPublishingEvent =
   | { type: "EDIT" }
   | { type: "APPROVE"; moderatorNotes?: string }
   | { type: "REJECT"; reason: string; moderatorNotes?: string }
+  | { type: "WITHDRAW" }
   | { type: "RESUBMIT" }
   | { type: "CANCEL" };
 
@@ -128,6 +129,9 @@ export const assetPublishingMachine = setup({
           target: "rejected",
           actions: ["setRejectionDetails"],
         },
+        WITHDRAW: {
+          target: "withdrawn",
+        },
       },
     },
     pendingWithEdits: {
@@ -145,6 +149,9 @@ export const assetPublishingMachine = setup({
           target: "rejected",
           actions: ["setRejectionDetails"],
         },
+        WITHDRAW: {
+          target: "withdrawn",
+        },
       },
     },
     approved: {
@@ -153,6 +160,19 @@ export const assetPublishingMachine = setup({
     },
     rejected: {
       description: "Asset was rejected by moderator",
+      on: {
+        EDIT: {
+          target: "editing",
+          actions: ["clearEditedAfterSubmit"],
+        },
+        RESUBMIT: {
+          target: "submitting",
+          actions: ["clearEditedAfterSubmit"],
+        },
+      },
+    },
+    withdrawn: {
+      description: "User withdrew submission from review - can edit and resubmit",
       on: {
         EDIT: {
           target: "editing",

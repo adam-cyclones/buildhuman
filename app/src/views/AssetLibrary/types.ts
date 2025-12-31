@@ -173,6 +173,7 @@ export type AssetDetailPanelProps = {
   onOpenInBlender: (assetId: string) => void;
   onSaveMetadata: (assetId: string) => Promise<void>;
   onPublishAsset: (assetId: string) => void;
+  onWithdrawSubmission?: (assetId: string) => void;
   onDeleteCached: (assetId: string, name: string) => void;
   onRevertToOriginal: (assetId: string) => void;
   onReview: (assetId: string) => void;

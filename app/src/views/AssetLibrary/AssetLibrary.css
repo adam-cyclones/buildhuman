@@ -1408,6 +1408,19 @@
   flex-shrink: 0;
 }
 
+.action-btn.withdraw-btn {
+  margin-top: 0.5rem;
+  background: transparent;
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.action-btn.withdraw-btn:hover {
+  background: var(--error);
+  color: white;
+  border-color: var(--error);
+}
+
 .workflow-step {
   display: flex;
   align-items: flex-start;

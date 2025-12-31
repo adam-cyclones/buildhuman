@@ -123,6 +123,36 @@ export const submitReview = async (params: {
 };
 
 /**
+ * Withdraw a pending submission from review
+ */
+export const withdrawSubmission = async (params: {
+  submissionId: string;
+  submitterId?: string;
+}) => {
+  const urlParams = new URLSearchParams();
+  if (params.submitterId) {
+    urlParams.append("submitter_id", params.submitterId);
+  }
+
+  const response = await fetch(
+    `${API_URL}/api/submissions/${params.submissionId}/withdraw?${urlParams}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      }
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.detail || "Failed to withdraw submission");
+  }
+
+  return response.json();
+};
+
+/**
  * Publish asset to service
  */
 export const publishAssetToService = async (params: {

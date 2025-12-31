@@ -28,6 +28,7 @@ import {
   createSaveMetadataHandler,
   createChangeThumbnailHandler,
   createPublishAssetHandler,
+  createWithdrawSubmissionHandler,
   createReviewHandler,
   createBatchApproveHandler,
   createBatchRejectHandler,
@@ -116,6 +117,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
   const handleSaveMetadata = createSaveMetadataHandler(handlerDeps);
   const handleChangeThumbnail = createChangeThumbnailHandler(handlerDeps);
   const handlePublishAsset = createPublishAssetHandler(handlerDeps);
+  const handleWithdrawSubmission = createWithdrawSubmissionHandler(handlerDeps);
   const handleReview = createReviewHandler(handlerDeps);
   const handleBatchApprove = createBatchApproveHandler(handlerDeps);
   const handleBatchReject = createBatchRejectHandler(handlerDeps);
@@ -550,6 +552,7 @@ const AssetLibrary = (props: AssetLibraryProps) => {
           onOpenInBlender={handleOpenInBlender}
           onSaveMetadata={handleSaveMetadata}
           onPublishAsset={handlePublishAsset}
+          onWithdrawSubmission={handleWithdrawSubmission}
           onDeleteCached={handleDeleteCachedAsset}
           onRevertToOriginal={handleRevertToOriginal}
           onReview={handleReview}

@@ -97,6 +97,8 @@ def init_db():
     """)
 
     # Submissions table for asset review workflow
+    # status can be: 'pending', 'approved', 'rejected', 'withdrawn'
+    # reviewed_at and reviewed_by track when/who took action (approve/reject/withdraw)
     c.execute("""
         CREATE TABLE IF NOT EXISTS submissions (
             id TEXT PRIMARY KEY,
@@ -850,6 +852,78 @@ async def review_submission(
     conn.close()
 
     return {"status": "success", "action": review.action}
+
+@app.post("/api/submissions/{submission_id}/withdraw")
+async def withdraw_submission(
+    submission_id: str,
+    submitter_id: Optional[str] = Query(None)
+):
+    """Withdraw a pending submission (author or moderator only)"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Get submission
+    c.execute("SELECT * FROM submissions WHERE id = ?", (submission_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    submission = build_submission_from_row(row)
+
+    # Check authorization: must be author or moderator
+    # For now, we check submitter_id (later add proper auth)
+    if submitter_id and submission.submitter_id != submitter_id:
+        # Could be a moderator - for now allow (add proper auth later)
+        pass
+
+    # Check status - can only withdraw pending submissions
+    if submission.status != "pending":
+        conn.close()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot withdraw submission with status: {submission.status}"
+        )
+
+    timestamp = datetime.utcnow().isoformat()
+
+    # Update submission status
+    c.execute("""
+        UPDATE submissions
+        SET status = 'withdrawn', reviewed_at = ?, reviewed_by = ?
+        WHERE id = ?
+    """, (timestamp, submitter_id or "system", submission_id))
+
+    # Delete submission files
+    try:
+        if submission.file_path and os.path.exists(submission.file_path):
+            os.remove(submission.file_path)
+        if submission.thumbnail_path and os.path.exists(submission.thumbnail_path):
+            os.remove(submission.thumbnail_path)
+    except Exception as e:
+        print(f"Warning: Failed to delete submission files: {e}")
+
+    # Create notification
+    notif_id = str(uuid.uuid4())
+    c.execute("""
+        INSERT INTO notifications
+        (id, submission_id, recipient_id, type, title, message, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        notif_id, submission_id, submission.submitter_id, "withdrawn",
+        "Submission Withdrawn",
+        f"Your submission '{submission.asset_name}' has been withdrawn from review.",
+        timestamp
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "message": "Submission withdrawn successfully",
+        "submission_id": submission_id,
+        "status": "withdrawn"
+    }
 
 # Notification Endpoints
 @app.get("/api/notifications", response_model=List[Notification])

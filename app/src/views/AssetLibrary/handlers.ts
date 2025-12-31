@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
 import { config } from "../../config";
-import { publishAssetToService, submitReview } from "./client";
+import { publishAssetToService, submitReview, withdrawSubmission } from "./client";
 import { hasMetadataChanges } from "./utils";
 import { getEditingActor } from "./machines/assetEditingService";
 import { getPublishingActor } from "./machines/assetPublishingService";
@@ -654,6 +654,61 @@ export const createPublishAssetHandler = (deps: HandlerDependencies) => {
       });
 
       deps.showMetadataSaveToast(`Failed to publish: ${error}`, 5000);
+    }
+  };
+};
+
+/**
+ * Handle withdrawal of pending submission
+ */
+export const createWithdrawSubmissionHandler = (deps: HandlerDependencies) => {
+  return async (assetId: string) => {
+    const confirmed = confirm(
+      "Withdraw this submission from review?\n\n" +
+      "This will remove it from the moderation queue and delete the submitted files. " +
+      "You can edit and resubmit later if needed."
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const editedAsset = deps.editedAssets().get(assetId);
+      if (!editedAsset) {
+        throw new Error("Edited asset not found");
+      }
+
+      // Get submission ID from metadata
+      const submissionId = editedAsset.metadata.submission_id;
+      if (!submissionId) {
+        throw new Error("No submission ID found");
+      }
+
+      // Get submitter ID from settings
+      const submitterId = deps.appSettings?.author_name || undefined;
+
+      // Call API to withdraw
+      await withdrawSubmission({ submissionId, submitterId });
+
+      deps.showMetadataSaveToast("Submission withdrawn successfully", 3000);
+
+      // Update state machine
+      const actor = getPublishingActor(assetId, editedAsset.metadata);
+      actor.send({ type: "WITHDRAW" });
+
+      // Refresh pending submissions if viewing them
+      if (deps.selectedType() === "pending") {
+        await deps.fetchPendingSubmissions();
+      }
+
+      // Close panel
+      deps.setIsPanelOpen(false);
+
+    } catch (error) {
+      console.error("Failed to withdraw submission:", error);
+      deps.showMetadataSaveToast(
+        `Failed to withdraw: ${error instanceof Error ? error.message : String(error)}`,
+        5000
+      );
     }
   };
 };
