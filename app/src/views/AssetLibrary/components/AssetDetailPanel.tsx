@@ -304,7 +304,7 @@ const AssetDetailPanel = (props: AssetDetailPanelProps) => {
                   : "Publish Asset"}
               </button>
 
-              {isPending && props.onWithdrawSubmission && (
+              {isPending && editedAsset.metadata.submission_id && props.onWithdrawSubmission && (
                 <button
                   class="action-btn withdraw-btn"
                   onClick={() => props.onWithdrawSubmission!(asset().id)}

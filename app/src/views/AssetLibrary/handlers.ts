@@ -701,15 +701,17 @@ export const createWithdrawSubmissionHandler = (deps: HandlerDependencies) => {
       delete updatedMetadata.submission_id;
       delete updatedMetadata.submission_status;
 
-      // Update local state
+      // Update local state - create new Map for reactivity
       const updatedEditedAsset = {
         ...editedAsset,
         metadata: updatedMetadata
       };
-      deps.editedAssets().set(assetId, updatedEditedAsset);
+      const newEditedAssets = new Map(deps.editedAssets());
+      newEditedAssets.set(assetId, updatedEditedAsset);
+      deps.setEditedAssets(newEditedAssets);
 
       // Save metadata to disk
-      await invoke("save_asset_metadata", {
+      await invoke("update_asset_metadata", {
         assetId,
         metadata: updatedMetadata
       });
