@@ -1,0 +1,296 @@
+.release-announcement-modal {
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  background: var(--darker-gray);
+  color: var(--text-primary);
+  max-width: 1000px;
+  width: 90%;
+  max-height: 85vh;
+  animation: modalFadeIn 0.3s ease-out;
+}
+
+.release-announcement-modal::backdrop {
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  animation: backdropFadeIn 0.3s ease-out;
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(-40px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes backdropFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.release-announcement-modal .announcement-modal-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 85vh;
+}
+
+.release-announcement-modal .announcement-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 2rem;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, var(--light-gray) 0%, var(--darker-gray) 100%);
+}
+
+.release-announcement-modal .header-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  background: rgba(189, 162, 138, 0.15);
+  border: 2px solid var(--accent);
+  border-radius: 12px;
+  color: var(--accent);
+}
+
+.release-announcement-modal .header-text {
+  flex: 1;
+}
+
+.release-announcement-modal .header-text h2 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.release-announcement-modal .release-version-date {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.release-announcement-modal .version-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: rgba(189, 162, 138, 0.2);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.release-announcement-modal .release-date {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.release-announcement-modal .close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.release-announcement-modal .close-btn:hover {
+  background: var(--light-gray);
+  color: var(--text-primary);
+}
+
+.release-announcement-modal .announcement-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.release-announcement-modal .release-description {
+  padding: 1.5rem;
+  background: var(--light-gray);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+}
+
+.release-announcement-modal .release-description p {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.release-announcement-modal .assets-section h3 {
+  margin: 0 0 1.5rem 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.release-announcement-modal .assets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.release-announcement-modal .release-asset-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--light-gray);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.release-announcement-modal .release-asset-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.release-announcement-modal .asset-thumbnail {
+  width: 100%;
+  height: 160px;
+  background: var(--darker-gray);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.release-announcement-modal .thumbnail-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.release-announcement-modal .placeholder-icon {
+  color: var(--text-muted);
+}
+
+.release-announcement-modal .asset-details {
+  padding: 1rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.release-announcement-modal .asset-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.release-announcement-modal .asset-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.release-announcement-modal .asset-description {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.release-announcement-modal .asset-actions {
+  padding: 0 1rem 1rem 1rem;
+}
+
+.release-announcement-modal .download-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: #1a1a1a;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.release-announcement-modal .download-btn:hover:not(:disabled) {
+  background: #d4b89a;
+  transform: scale(1.02);
+}
+
+.release-announcement-modal .download-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.release-announcement-modal .spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.release-announcement-modal .announcement-modal-footer {
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem 2rem;
+  border-top: 1px solid var(--border);
+  background: var(--light-gray);
+}
+
+.release-announcement-modal .btn {
+  padding: 0.75rem 2rem;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+}
+
+.release-announcement-modal .btn-primary {
+  background: var(--accent);
+  color: #1a1a1a;
+}
+
+.release-announcement-modal .btn-primary:hover {
+  background: #d4b89a;
+  transform: scale(1.05);
+}

@@ -20,7 +20,6 @@ export interface HandlerDependencies extends AssetLibraryState {
   fetchCachedAssets: () => Promise<void>;
   showMetadataSaveToast: (message: string, duration?: number) => void;
   logEvent: (assetId: string, eventType: string, metadata?: any) => Promise<void>;
-  fetchPendingSubmissions: () => Promise<void>;
   appSettings?: AppSettings | null;
 }
 
@@ -718,11 +717,6 @@ export const createWithdrawSubmissionHandler = (deps: HandlerDependencies) => {
             metadata: updatedMetadata
           });
 
-          // Refresh pending submissions if viewing them
-          if (deps.selectedType() === "pending") {
-            await deps.fetchPendingSubmissions();
-          }
-
           // Close panel
           deps.setIsPanelOpen(false);
 
@@ -771,113 +765,9 @@ export const createReviewHandler = (deps: HandlerDependencies) => {
       deps.setRejectionReason("");
       deps.setIsPanelOpen(false);
 
-      // Refetch pending submissions
-      await deps.fetchPendingSubmissions();
-
     } catch (error) {
       console.error("Review failed:", error);
       deps.showMetadataSaveToast(`Failed to submit review: ${error}`, 5000);
-    } finally {
-      deps.setSubmitting(false);
-    }
-  };
-};
-
-/**
- * Handle batch approval of submissions
- */
-export const createBatchApproveHandler = (deps: HandlerDependencies) => {
-  return async () => {
-    const selectedIds = Array.from(deps.selectedSubmissions());
-
-    if (selectedIds.length === 0) return;
-    if (!deps.appSettings?.moderator_api_key) {
-      alert("API key not configured. Please set it in Settings.");
-      return;
-    }
-
-    deps.setSubmitting(true);
-
-    try {
-      // Process all approvals in parallel
-      await Promise.all(
-        selectedIds.map(submissionId =>
-          submitReview({
-            submissionId,
-            action: "approve",
-            apiKey: deps.appSettings!.moderator_api_key
-          })
-        )
-      );
-
-      deps.showMetadataSaveToast(
-        `${selectedIds.length} submission${selectedIds.length > 1 ? 's' : ''} approved successfully!`,
-        4000
-      );
-
-      // Clear selection
-      deps.setSelectedSubmissions(new Set<string>());
-      deps.setIsPanelOpen(false);
-
-      // Refetch pending submissions
-      await deps.fetchPendingSubmissions();
-
-    } catch (error) {
-      console.error("Batch approval failed:", error);
-      deps.showMetadataSaveToast(`Failed to approve submissions: ${error}`, 5000);
-    } finally {
-      deps.setSubmitting(false);
-    }
-  };
-};
-
-/**
- * Handle batch rejection of submissions
- */
-export const createBatchRejectHandler = (deps: HandlerDependencies) => {
-  return async () => {
-    const selectedIds = Array.from(deps.selectedSubmissions());
-
-    if (selectedIds.length === 0) return;
-    if (!deps.appSettings?.moderator_api_key) {
-      alert("API key not configured. Please set it in Settings.");
-      return;
-    }
-
-    // Prompt for rejection reason
-    const reason = prompt("Rejection reason (required):\n\nOptions: quality, inappropriate, copyright, incomplete, other");
-    if (!reason) return;
-
-    deps.setSubmitting(true);
-
-    try {
-      // Process all rejections in parallel
-      await Promise.all(
-        selectedIds.map(submissionId =>
-          submitReview({
-            submissionId,
-            action: "reject",
-            rejectionReason: reason,
-            apiKey: deps.appSettings!.moderator_api_key
-          })
-        )
-      );
-
-      deps.showMetadataSaveToast(
-        `${selectedIds.length} submission${selectedIds.length > 1 ? 's' : ''} rejected successfully!`,
-        4000
-      );
-
-      // Clear selection
-      deps.setSelectedSubmissions(new Set<string>());
-      deps.setIsPanelOpen(false);
-
-      // Refetch pending submissions
-      await deps.fetchPendingSubmissions();
-
-    } catch (error) {
-      console.error("Batch rejection failed:", error);
-      deps.showMetadataSaveToast(`Failed to reject submissions: ${error}`, 5000);
     } finally {
       deps.setSubmitting(false);
     }

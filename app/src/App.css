@@ -824,3 +824,27 @@ html, body, #root {
 .primary-button:hover {
   opacity: 0.9;
 }
+
+/* Releases Button */
+.releases-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 0.4rem 0.8rem;
+  margin-right: 0.5rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 400;
+  transition: color 0.15s;
+  border-radius: 4px;
+}
+
+.releases-btn:hover {
+  color: var(--text-primary);
+  background: var(--light-gray);
+}
+
+.releases-btn.active {
+  color: var(--text-primary);
+  background: var(--light-gray);
+}

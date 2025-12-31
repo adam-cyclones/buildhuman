@@ -8,7 +8,7 @@ import { useAssetEvents } from "./components/useAssetEvents";
 import Icon from "../../components/Icon";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import { useAssetState } from "./hooks/useAssetState";
-import { fetchAssets, fetchCategories, fetchPendingSubmissions, fetchCachedAssets } from "./client";
+import { fetchAssets, fetchCategories, fetchCachedAssets } from "./client";
 import { getEditingActor } from "./machines/assetEditingService";
 import { config } from "../../config";
 import {
@@ -31,12 +31,10 @@ import {
   createPublishAssetHandler,
   createWithdrawSubmissionHandler,
   createReviewHandler,
-  createBatchApproveHandler,
-  createBatchRejectHandler,
   createOpenDownloadsFolderHandler,
   createReloadChangedAssetHandler
 } from "./handlers";
-import type { AssetLibraryProps, Asset } from "./types";
+import type { AssetLibraryProps } from "./types";
 import "./AssetLibrary.css";
 
 const AssetLibrary = (props: AssetLibraryProps) => {
@@ -92,19 +90,12 @@ const AssetLibrary = (props: AssetLibraryProps) => {
     }
   };
 
-  // Fetch pending submissions helper
-  const loadPendingSubmissions = async () => {
-    const submissions = await fetchPendingSubmissions(props.appSettings || undefined);
-    state.setPendingSubmissions(submissions);
-  };
-
   // Create all event handlers
   const handlerDeps = {
     ...state,
     fetchCachedAssets: loadCachedAssets,
     showMetadataSaveToast,
     logEvent,
-    fetchPendingSubmissions: loadPendingSubmissions,
     appSettings: props.appSettings
   };
 
@@ -120,8 +111,6 @@ const AssetLibrary = (props: AssetLibraryProps) => {
   const handlePublishAsset = createPublishAssetHandler(handlerDeps);
   const handleWithdrawSubmission = createWithdrawSubmissionHandler(handlerDeps);
   const handleReview = createReviewHandler(handlerDeps);
-  const handleBatchApprove = createBatchApproveHandler(handlerDeps);
-  const handleBatchReject = createBatchRejectHandler(handlerDeps);
   const handleOpenDownloadsFolder = createOpenDownloadsFolderHandler();
   const handleReloadChangedAsset = createReloadChangedAssetHandler({ ...handlerDeps, assets });
 
@@ -155,76 +144,19 @@ const AssetLibrary = (props: AssetLibraryProps) => {
     )
   );
 
-  // Fetch pending submissions when type changes to "pending"
-  createEffect(
-    on(
-      state.selectedType,
-      (type) => {
-        if (type === "pending") {
-          loadPendingSubmissions();
-        }
-      }
-    )
-  );
-
-  // Handle notification click - open specific pending submission
-  createEffect(
-    on(
-      () => props.pendingSubmissionId,
-      (submissionId) => {
-        if (submissionId) {
-          // Switch to pending view
-          state.setSelectedType("pending");
-
-          // Wait for submissions to load, then open the detail panel
-          setTimeout(() => {
-            const submission = state.pendingSubmissions().find(s => s.id === submissionId);
-            if (submission) {
-              // Convert submission to Asset format
-              const assetFromSubmission: Asset = {
-                id: submission.id,
-                name: submission.asset_name,
-                description: submission.asset_description || "",
-                type: submission.asset_type,
-                category: submission.asset_category,
-                author: submission.author,
-                rating: 0,
-                rating_count: 0,
-                license: submission.license,
-                publish_date: submission.submitted_at,
-                downloads: 0,
-                file_size: submission.file_size || 0,
-                version: submission.version,
-                required: false,
-                thumbnail_url: submission.thumbnail_path || ""
-              };
-              handleAssetClick(assetFromSubmission);
-            }
-
-            // Clear the signal
-            if (props.onSubmissionOpened) {
-              props.onSubmissionOpened();
-            }
-          }, 500);
-        }
-      }
-    )
-  );
 
   // Merge API assets with local edited assets
   const allAssets = () => {
     const apiAssets = assets() || [];
     const localAssets = Array.from(state.editedAssets().values());
-    let merged = mergeAndSortAssets(apiAssets, localAssets, state.selectedType(), state.pendingSubmissions());
+    let merged = mergeAndSortAssets(apiAssets, localAssets);
 
-    // Apply client-side filtering for pending submissions and my creations
-    if (state.selectedType() === "pending" || state.selectedType() === "my-creations") {
+    // Apply client-side filtering for my creations
+    if (state.selectedType() === "my-creations") {
       const searchLower = state.searchQuery().toLowerCase();
 
       // Filter to only edited/created assets for "my-creations"
-      if (state.selectedType() === "my-creations") {
-        merged = merged.filter(asset => asset.id.includes("_edited_"));
-      }
+      merged = merged.filter(asset => asset.id.includes("_edited_"));
 
       // Filter by search query
       if (searchLower) {
@@ -350,56 +282,9 @@ const AssetLibrary = (props: AssetLibraryProps) => {
         filteredCategories={filteredCategories}
         assetCount={assets()?.length || 0}
         onSearch={() => refetch()}
-        showModeratorOptions={props.appSettings?.moderator_mode && !!props.appSettings?.moderator_api_key}
         viewMode={state.viewMode}
         setViewMode={state.setViewMode}
       />
-
-      {state.selectedType() === "pending" && (
-        <div class="pending-submissions-header">
-          <div class="pending-header-content">
-            <Icon name="shield" size={24} />
-            <div>
-              <h2>Pending Submissions</h2>
-              <p>Review community-submitted assets awaiting moderation</p>
-            </div>
-          </div>
-          <div class="pending-actions">
-            {state.selectedSubmissions().size > 0 && (
-              <>
-                <span class="selected-count">
-                  {state.selectedSubmissions().size} selected
-                </span>
-                <button
-                  class="batch-action-btn approve"
-                  onClick={handleBatchApprove}
-                  disabled={state.submitting()}
-                >
-                  <Icon name="check" size={16} />
-                  Approve All
-                </button>
-                <button
-                  class="batch-action-btn reject"
-                  onClick={handleBatchReject}
-                  disabled={state.submitting()}
-                >
-                  <Icon name="x-circle" size={16} />
-                  Reject All
-                </button>
-                <button
-                  class="batch-action-btn clear"
-                  onClick={() => state.setSelectedSubmissions(new Set())}
-                >
-                  Clear Selection
-                </button>
-              </>
-            )}
-            <div class="pending-count">
-              {state.pendingSubmissions().length} submission{state.pendingSubmissions().length !== 1 ? 's' : ''}
-            </div>
-          </div>
-        </div>
-      )}
 
       <AssetGrid
         assets={allAssets}
@@ -433,16 +318,6 @@ const AssetLibrary = (props: AssetLibraryProps) => {
 
       <div class="asset-pagination">
         <div class="status-bar-buttons">
-          {props.appSettings?.moderator_mode && !!props.appSettings?.moderator_api_key && (
-            <button
-              class="publish-btn"
-              title="Manage releases"
-              onClick={() => props.onTabChange?.("Releases")}
-            >
-              <Icon name="rocket" size={16} />
-              Releases
-            </button>
-          )}
           <div class="downloads-wrapper">
             <button
               class="downloads-btn"

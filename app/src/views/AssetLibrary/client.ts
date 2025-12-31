@@ -169,3 +169,38 @@ export const publishAssetToService = async (params: {
 
   return response.json();
 };
+
+/**
+ * Fetch latest published release
+ */
+export const fetchLatestRelease = async () => {
+  const response = await fetch(`${API_URL}/api/releases?status=published`);
+  if (!response.ok) {
+    throw new Error("Failed to fetch releases");
+  }
+
+  const releases = await response.json();
+  if (releases.length === 0) {
+    return null;
+  }
+
+  // Sort by published_at descending and return the first one
+  return releases.sort((a: any, b: any) => {
+    const dateA = new Date(a.published_at || a.created_at).getTime();
+    const dateB = new Date(b.published_at || b.created_at).getTime();
+    return dateB - dateA;
+  })[0];
+};
+
+/**
+ * Fetch assets for a specific release
+ */
+export const fetchReleaseAssets = async (releaseId: string) => {
+  const response = await fetch(`${API_URL}/api/releases/${releaseId}`);
+  if (!response.ok) {
+    throw new Error("Failed to fetch release details");
+  }
+
+  const data = await response.json();
+  return data.assets || [];
+};
