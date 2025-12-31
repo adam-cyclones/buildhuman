@@ -139,10 +139,41 @@ def init_db():
         )
     """)
 
+    # Releases table for versioned asset collections
+    # status can be: 'draft', 'published'
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS releases (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            version TEXT NOT NULL,
+            description TEXT,
+            status TEXT NOT NULL DEFAULT 'draft',
+            created_at TEXT NOT NULL,
+            published_at TEXT,
+            published_by TEXT,
+            FOREIGN KEY (published_by) REFERENCES api_keys(name)
+        )
+    """)
+
+    # Release assets table (many-to-many relationship)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS release_assets (
+            release_id TEXT NOT NULL,
+            asset_id TEXT NOT NULL,
+            added_at TEXT NOT NULL,
+            PRIMARY KEY (release_id, asset_id),
+            FOREIGN KEY (release_id) REFERENCES releases(id) ON DELETE CASCADE,
+            FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+        )
+    """)
+
     # Create indexes for performance
     c.execute("CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient_id, read)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(active)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_releases_status ON releases(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_release_assets_release ON release_assets(release_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_release_assets_asset ON release_assets(asset_id)")
 
     # Insert default types
     types = [
