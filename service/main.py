@@ -822,6 +822,15 @@ async def review_submission(
             timestamp
         ))
 
+        # Cleanup: Delete original submission files after copying to assets
+        try:
+            if submission.file_path and os.path.exists(submission.file_path):
+                os.remove(submission.file_path)
+            if submission.thumbnail_path and os.path.exists(submission.thumbnail_path):
+                os.remove(submission.thumbnail_path)
+        except Exception as e:
+            print(f"Warning: Failed to delete approved submission files: {e}")
+
     elif review.action == "reject":
         # Update submission status
         c.execute("""
@@ -844,6 +853,16 @@ async def review_submission(
             f"Your asset '{submission.asset_name}' was not approved.{reason_text}",
             timestamp
         ))
+
+        # Cleanup: Delete rejected submission files
+        try:
+            if submission.file_path and os.path.exists(submission.file_path):
+                os.remove(submission.file_path)
+            if submission.thumbnail_path and os.path.exists(submission.thumbnail_path):
+                os.remove(submission.thumbnail_path)
+        except Exception as e:
+            print(f"Warning: Failed to delete rejected submission files: {e}")
+
     else:
         conn.close()
         raise HTTPException(status_code=400, detail="Invalid action")
