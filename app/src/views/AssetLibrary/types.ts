@@ -195,3 +195,20 @@ export type FormattedEvent = {
   time: string;
   warning?: boolean;
 };
+
+export type Release = {
+  id: string;
+  name: string;
+  version: string;
+  description?: string;
+  status: "draft" | "published";
+  created_at: string;
+  published_at?: string;
+  published_by?: string;
+};
+
+export type ReleaseAsset = {
+  release_id: string;
+  asset_id: string;
+  added_at: string;
+};

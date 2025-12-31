@@ -1,9 +1,10 @@
-import { For, onMount, createResource, createEffect, on } from "solid-js";
+import { For, onMount, createResource, createEffect, on, createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import AssetGrid from "./components/AssetGrid";
 import AssetFilters from "./components/AssetFilters";
 import AssetDetailPanel from "./components/AssetDetailPanel";
+import ReleaseModal from "./components/ReleaseModal";
 import { useAssetEvents } from "./components/useAssetEvents";
 import Icon from "../../components/Icon";
 import ConfirmDialog from "../../components/ConfirmDialog";
@@ -42,6 +43,9 @@ import "./AssetLibrary.css";
 const AssetLibrary = (props: AssetLibraryProps) => {
   // Initialize all state
   const state = useAssetState();
+
+  // Release modal state
+  const [isReleaseModalOpen, setIsReleaseModalOpen] = createSignal(false);
 
   // Create resource for assets with dynamic params
   const [assets, { refetch }] = createResource(() => ({
@@ -144,6 +148,43 @@ const AssetLibrary = (props: AssetLibraryProps) => {
     }
   };
 
+  // Handler for publishing a release
+  const handlePublishRelease = async (releaseData: {
+    name: string;
+    version: string;
+    description: string;
+    assetIds: string[];
+  }) => {
+    if (!props.appSettings?.moderator_api_key) {
+      throw new Error("Moderator API key is required to publish releases");
+    }
+
+    const response = await fetch(`${config.apiUrl}/api/releases`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": props.appSettings.moderator_api_key,
+      },
+      body: JSON.stringify({
+        name: releaseData.name,
+        version: releaseData.version,
+        description: releaseData.description,
+        asset_ids: releaseData.assetIds,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to publish release: ${error}`);
+    }
+
+    const result = await response.json();
+    console.log("Release published successfully:", result);
+
+    // Optionally refetch assets to show updated metadata
+    refetch();
+  };
+
   // Auto-refetch when filters change
   createEffect(
     on(
@@ -212,6 +253,12 @@ const AssetLibrary = (props: AssetLibraryProps) => {
   );
 
   // Merge API assets with local edited assets
+  // Get candidate assets for releases (published, non-required assets only)
+  const candidateAssets = () => {
+    const apiAssets = assets() || [];
+    return apiAssets.filter((asset: Asset) => !asset.required && asset.submission_status !== "pending");
+  };
+
   const allAssets = () => {
     const apiAssets = assets() || [];
     const localAssets = Array.from(state.editedAssets().values());
@@ -433,10 +480,16 @@ const AssetLibrary = (props: AssetLibraryProps) => {
 
       <div class="asset-pagination">
         <div class="status-bar-buttons">
-          <button class="publish-btn" title="Publish to community">
-            <Icon name="upload" size={16} />
-            Publish
-          </button>
+          {props.appSettings?.moderator_mode && !!props.appSettings?.moderator_api_key && (
+            <button
+              class="publish-btn"
+              title="Create and publish a new release"
+              onClick={() => setIsReleaseModalOpen(true)}
+            >
+              <Icon name="rocket" size={16} />
+              Release
+            </button>
+          )}
           <div class="downloads-wrapper">
             <button
               class="downloads-btn"
@@ -582,6 +635,13 @@ const AssetLibrary = (props: AssetLibraryProps) => {
           onCancel={() => state.setConfirmDialog(null)}
         />
       )}
+
+      <ReleaseModal
+        isOpen={isReleaseModalOpen()}
+        onClose={() => setIsReleaseModalOpen(false)}
+        availableAssets={candidateAssets()}
+        onPublishRelease={handlePublishRelease}
+      />
     </div>
   );
 };

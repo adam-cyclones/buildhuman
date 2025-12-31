@@ -310,6 +310,22 @@ class ApiKeyCreate(BaseModel):
     name: str
     role: str = "moderator"
 
+class ReleaseCreate(BaseModel):
+    name: str
+    version: str
+    description: Optional[str] = None
+    asset_ids: List[str]
+
+class Release(BaseModel):
+    id: str
+    name: str
+    version: str
+    description: Optional[str] = None
+    status: str
+    created_at: str
+    published_at: Optional[str] = None
+    published_by: Optional[str] = None
+
 # Authentication Middleware
 async def verify_api_key(x_api_key: Optional[str] = Header(None)) -> dict:
     """Verify API key for moderation endpoints"""
@@ -1041,6 +1057,150 @@ async def create_api_key(
 async def verify_key(auth: dict = Depends(verify_api_key)):
     """Verify API key is valid"""
     return {"valid": True, "role": auth["role"], "name": auth["name"]}
+
+# ==================== Releases ====================
+
+@app.post("/api/releases", response_model=Release)
+async def create_release(
+    release: ReleaseCreate,
+    auth: dict = Depends(verify_api_key)
+):
+    """Create and publish a new release"""
+    if auth["role"] not in ["admin", "moderator"]:
+        raise HTTPException(status_code=403, detail="Only admins and moderators can create releases")
+
+    release_id = str(uuid.uuid4())
+    created_at = datetime.utcnow().isoformat()
+    published_at = created_at
+    published_by = auth["name"]
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    try:
+        # Insert release
+        c.execute("""
+            INSERT INTO releases (id, name, version, description, status, created_at, published_at, published_by)
+            VALUES (?, ?, ?, ?, 'published', ?, ?, ?)
+        """, (release_id, release.name, release.version, release.description, created_at, published_at, published_by))
+
+        # Insert release assets
+        for asset_id in release.asset_ids:
+            # Verify asset exists
+            c.execute("SELECT id FROM assets WHERE id = ?", (asset_id,))
+            if not c.fetchone():
+                raise HTTPException(status_code=404, detail=f"Asset {asset_id} not found")
+
+            c.execute("""
+                INSERT INTO release_assets (release_id, asset_id, added_at)
+                VALUES (?, ?, ?)
+            """, (release_id, asset_id, created_at))
+
+        conn.commit()
+
+        return Release(
+            id=release_id,
+            name=release.name,
+            version=release.version,
+            description=release.description,
+            status="published",
+            created_at=created_at,
+            published_at=published_at,
+            published_by=published_by
+        )
+
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+@app.get("/api/releases", response_model=List[Release])
+async def list_releases(
+    status: Optional[str] = Query(None, description="Filter by status (draft/published)")
+):
+    """List all releases"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    query = "SELECT id, name, version, description, status, created_at, published_at, published_by FROM releases"
+    params = []
+
+    if status:
+        query += " WHERE status = ?"
+        params.append(status)
+
+    query += " ORDER BY published_at DESC, created_at DESC"
+
+    c.execute(query, params)
+    rows = c.fetchall()
+    conn.close()
+
+    return [
+        Release(
+            id=row[0],
+            name=row[1],
+            version=row[2],
+            description=row[3],
+            status=row[4],
+            created_at=row[5],
+            published_at=row[6],
+            published_by=row[7]
+        )
+        for row in rows
+    ]
+
+@app.get("/api/releases/{release_id}")
+async def get_release(release_id: str):
+    """Get release details with asset list"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Get release
+    c.execute("""
+        SELECT id, name, version, description, status, created_at, published_at, published_by
+        FROM releases WHERE id = ?
+    """, (release_id,))
+
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Release not found")
+
+    # Get assets in this release
+    c.execute("""
+        SELECT a.id, a.name, a.type, a.category, a.version
+        FROM assets a
+        JOIN release_assets ra ON a.id = ra.asset_id
+        WHERE ra.release_id = ?
+        ORDER BY ra.added_at
+    """, (release_id,))
+
+    asset_rows = c.fetchall()
+    conn.close()
+
+    return {
+        "release": Release(
+            id=row[0],
+            name=row[1],
+            version=row[2],
+            description=row[3],
+            status=row[4],
+            created_at=row[5],
+            published_at=row[6],
+            published_by=row[7]
+        ),
+        "assets": [
+            {
+                "id": a[0],
+                "name": a[1],
+                "type": a[2],
+                "category": a[3],
+                "version": a[4]
+            }
+            for a in asset_rows
+        ]
+    }
 
 if __name__ == "__main__":
     import uvicorn
