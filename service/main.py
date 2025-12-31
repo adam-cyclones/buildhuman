@@ -1060,29 +1060,27 @@ async def verify_key(auth: dict = Depends(verify_api_key)):
 
 # ==================== Releases ====================
 
-@app.post("/api/releases", response_model=Release)
-async def create_release(
+@app.post("/api/releases/draft", response_model=Release)
+async def create_draft_release(
     release: ReleaseCreate,
     auth: dict = Depends(verify_api_key)
 ):
-    """Create and publish a new release"""
+    """Create a draft release"""
     if auth["role"] not in ["admin", "moderator"]:
         raise HTTPException(status_code=403, detail="Only admins and moderators can create releases")
 
     release_id = str(uuid.uuid4())
     created_at = datetime.utcnow().isoformat()
-    published_at = created_at
-    published_by = auth["name"]
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     try:
-        # Insert release
+        # Insert release as draft
         c.execute("""
             INSERT INTO releases (id, name, version, description, status, created_at, published_at, published_by)
-            VALUES (?, ?, ?, ?, 'published', ?, ?, ?)
-        """, (release_id, release.name, release.version, release.description, created_at, published_at, published_by))
+            VALUES (?, ?, ?, ?, 'draft', ?, NULL, NULL)
+        """, (release_id, release.name, release.version, release.description, created_at))
 
         # Insert release assets
         for asset_id in release.asset_ids:
@@ -1103,12 +1101,66 @@ async def create_release(
             name=release.name,
             version=release.version,
             description=release.description,
-            status="published",
+            status="draft",
             created_at=created_at,
+            published_at=None,
+            published_by=None
+        )
+
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+@app.post("/api/releases/{release_id}/publish", response_model=Release)
+async def publish_release(
+    release_id: str,
+    auth: dict = Depends(verify_api_key)
+):
+    """Publish a draft release"""
+    if auth["role"] not in ["admin", "moderator"]:
+        raise HTTPException(status_code=403, detail="Only admins and moderators can publish releases")
+
+    published_at = datetime.utcnow().isoformat()
+    published_by = auth["name"]
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    try:
+        # Check release exists and is draft
+        c.execute("SELECT id, name, version, description, status, created_at FROM releases WHERE id = ?", (release_id,))
+        row = c.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Release not found")
+
+        if row[4] != "draft":
+            raise HTTPException(status_code=400, detail="Release is already published")
+
+        # Update to published
+        c.execute("""
+            UPDATE releases
+            SET status = 'published', published_at = ?, published_by = ?
+            WHERE id = ?
+        """, (published_at, published_by, release_id))
+
+        conn.commit()
+
+        return Release(
+            id=row[0],
+            name=row[1],
+            version=row[2],
+            description=row[3],
+            status="published",
+            created_at=row[5],
             published_at=published_at,
             published_by=published_by
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))

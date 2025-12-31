@@ -5,6 +5,7 @@ import Tabs from "./components/Tabs";
 import AssetLibrary from "./views/AssetLibrary/AssetLibrary";
 import Settings from "./views/Settings/Settings";
 import Humans from "./views/Humans/Humans";
+import ReleaseManager from "./views/ReleaseManager/ReleaseManager";
 import DropdownMenu from "./components/DropdownMenu";
 import NotificationsCenter from "./components/NotificationsCenter";
 import { IconSymbols } from "./components/Icon";
@@ -163,6 +164,12 @@ function App() {
               }
               setActiveTab(previousTab());
             }} />
+          </Match>
+          <Match when={activeTab() === "Releases"}>
+            <ReleaseManager
+              appSettings={appSettings()}
+              onBack={() => setActiveTab("Asset Library")}
+            />
           </Match>
         </Switch>
       </div>
