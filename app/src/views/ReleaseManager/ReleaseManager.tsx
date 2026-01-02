@@ -1,9 +1,10 @@
-import { For, Show, createSignal, createResource } from "solid-js";
+import { For, Show, createSignal, createResource, createEffect, onCleanup, untrack } from "solid-js";
 import Icon from "../../components/Icon";
 import { formatBytes, getStatusColor, getAssetTypeIcon, getAssetTypeColor, buildThumbnailUrl, getNextVersionString } from "./utils";
 import type { ReleaseManagerProps, ExtendedRelease } from "./types";
 import type { Submission } from "../AssetLibrary/types";
-import { fetchPendingSubmissions } from "./client";
+import { fetchPendingSubmissions, reviewSubmission } from "./client";
+import { getReviewActor, removeReviewActor } from "./machines/submissionReviewService";
 import "./ReleaseManager.css";
 
 const ReleaseManager = (props: ReleaseManagerProps) => {
@@ -13,13 +14,65 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
   const [newReleaseBranch, setNewReleaseBranch] = createSignal("production");
   const [newReleaseDescription, setNewReleaseDescription] = createSignal("");
   const [selectedSubmission, setSelectedSubmission] = createSignal<Submission | null>(null);
-  const [approvedSubmissions, setApprovedSubmissions] = createSignal<Set<string>>(new Set());
   const [selectedReleaseForSubmission, setSelectedReleaseForSubmission] = createSignal<{[key: string]: string}>({});
   const [galleryOpen, setGalleryOpen] = createSignal(false);
   const [gallerySubmission, setGallerySubmission] = createSignal<Submission | null>(null);
+  const [reviewSnapshots, setReviewSnapshots] = createSignal<Map<string, any>>(new Map());
+  const subscriptionsMap = new Map<string, { unsubscribe: () => void }>();
 
-  // Fetch pending submissions
-  const [pendingSubmissions] = createResource(() => fetchPendingSubmissions(props.appSettings));
+  // Fetch pending submissions with refetch capability
+  const [pendingSubmissions, { refetch: refetchSubmissions }] = createResource(() => fetchPendingSubmissions(props.appSettings));
+
+  // Subscribe to actor state changes for all pending submissions
+  createEffect(() => {
+    const submissions = pendingSubmissions();
+    if (!submissions) return;
+
+    // Use untrack to read current snapshots without making the effect reactive to them
+    const currentSnapshots = untrack(reviewSnapshots);
+
+    submissions.forEach((submission: Submission) => {
+      // Skip if already subscribed
+      if (subscriptionsMap.has(submission.id)) return;
+
+      const actor = getReviewActor(submission.id);
+
+      // Only set initial snapshot if we don't have one yet
+      if (!currentSnapshots.has(submission.id)) {
+        setReviewSnapshots(prev => {
+          const next = new Map(prev);
+          next.set(submission.id, actor.getSnapshot());
+          return next;
+        });
+      }
+
+      // Subscribe to changes
+      const sub = actor.subscribe((snapshot) => {
+        setReviewSnapshots(prev => {
+          const next = new Map(prev);
+          next.set(submission.id, snapshot);
+          return next;
+        });
+
+        // Clean up and refetch when removed
+        if (snapshot.value === "removed") {
+          removeReviewActor(submission.id);
+          subscriptionsMap.get(submission.id)?.unsubscribe();
+          subscriptionsMap.delete(submission.id);
+
+          // Refetch pending submissions from server
+          refetchSubmissions();
+        }
+      });
+
+      subscriptionsMap.set(submission.id, sub);
+    });
+
+    onCleanup(() => {
+      subscriptionsMap.forEach(sub => sub.unsubscribe());
+      subscriptionsMap.clear();
+    });
+  });
 
   const handleCreateRelease = (e: Event) => {
     e.preventDefault();
@@ -62,38 +115,94 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
     console.log("Deploy release:", releaseId, "to:", targetStatus);
   };
 
-  const handleApproveSubmission = (submissionId: string) => {
-    // TODO: Implement approval - mark as approved
-    console.log("Approve submission:", submissionId);
-    setApprovedSubmissions(prev => new Set(prev).add(submissionId));
+  const handleApproveSubmission = async (submissionId: string) => {
+    const actor = getReviewActor(submissionId);
+    actor.send({ type: "APPROVE" });
+
     // Auto-select the submission to show release options
     const submission = pendingSubmissions()?.find((s: Submission) => s.id === submissionId);
     if (submission) {
       setSelectedSubmission(submission);
+    }
+
+    // Call API to approve submission
+    try {
+      if (props.appSettings?.moderator_api_key) {
+        await reviewSubmission(submissionId, "approve", props.appSettings.moderator_api_key);
+      }
+    } catch (error) {
+      console.error("Failed to approve submission:", error);
     }
   };
 
   const handleAddToRelease = (submissionId: string, releaseId: string) => {
     // TODO: Add approved asset to selected release
     console.log("Add submission:", submissionId, "to release:", releaseId);
-    // Remove from approved list after adding to release
-    setApprovedSubmissions(prev => {
-      const next = new Set(prev);
-      next.delete(submissionId);
-      return next;
-    });
+
+    const actor = getReviewActor(submissionId);
+
+    // Collapse the card
     setSelectedSubmission(null);
+
+    // Get release name for the badge
+    const releaseName = getDraftReleases().find(r => r.id === releaseId)?.name || "Release";
+
+    // Send event to show "Added to [Release]" state
+    // Machine will automatically transition to removed after hang time
+    actor.send({ type: "ADD_TO_RELEASE", releaseId, releaseName });
   };
 
-  const handleRejectSubmission = (submissionId: string) => {
-    // TODO: Implement rejection with reason dialog
-    console.log("Reject submission:", submissionId);
+  const handleRejectSubmission = async (submissionId: string) => {
+    const actor = getReviewActor(submissionId);
+
+    // Collapse the card
     setSelectedSubmission(null);
+
+    // Send event to show "Rejected" badge
+    // Machine will automatically transition to removed after hang time
+    actor.send({ type: "REJECT" });
+
+    // Call API to reject submission
+    try {
+      if (props.appSettings?.moderator_api_key) {
+        await reviewSubmission(submissionId, "reject", props.appSettings.moderator_api_key, "Rejected by moderator");
+      }
+    } catch (error) {
+      console.error("Failed to reject submission:", error);
+    }
   };
 
   const getDraftReleases = () => {
     return mockReleases().filter(r => r.status === "draft");
   };
+
+  const getSubmissionSnapshot = (submissionId: string) => {
+    return reviewSnapshots().get(submissionId);
+  };
+
+  const isApproved = (submissionId: string) => {
+    const snapshot = getSubmissionSnapshot(submissionId);
+    if (!snapshot) return false;
+    return snapshot.matches("approved") || snapshot.matches("addedToRelease");
+  };
+
+  const getBadgeText = (submissionId: string): string | null => {
+    const snapshot = getSubmissionSnapshot(submissionId);
+    if (!snapshot) return null;
+
+    if (snapshot.matches("approved")) {
+      return "Approved";
+    }
+    if (snapshot.matches("addedToRelease")) {
+      const releaseName = snapshot.context.releaseName || "Release";
+      return `Added to ${releaseName}`;
+    }
+    if (snapshot.matches("rejecting")) {
+      return "Rejected";
+    }
+    return null;
+  };
+
 
   // Mock data for demonstration - replace with actual API data
   const mockReleases = (): ExtendedRelease[] => [
@@ -205,11 +314,11 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
                     <div class="review-card-header">
                       <h4>{submission.asset_name}</h4>
                       <Show
-                        when={!approvedSubmissions().has(submission.id)}
+                        when={!getBadgeText(submission.id)}
                         fallback={
                           <div class="approved-badge">
                             <Icon name="check" size={12} />
-                            <span>Approved</span>
+                            <span>{getBadgeText(submission.id)}</span>
                           </div>
                         }
                       >
@@ -275,7 +384,7 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
                       <p class="review-description">{submission.asset_description}</p>
                     </Show>
 
-                    <Show when={selectedSubmission()?.id === submission.id && approvedSubmissions().has(submission.id)}>
+                    <Show when={selectedSubmission()?.id === submission.id && isApproved(submission.id)}>
                       <div class="review-actions">
                         <div class="review-action-group">
                           <label class="action-label">Add to Draft Release:</label>

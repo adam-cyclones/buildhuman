@@ -84,6 +84,15 @@ export type ReleaseData = {
 };
 
 /**
+ * Submission review state tracking
+ */
+export type SubmissionState = {
+  status: "pending" | "approved" | "addedToRelease" | "rejected";
+  releaseId?: string;
+  releaseName?: string;
+};
+
+/**
  * Re-export types from AssetLibrary for convenience
  */
 export type { Release, Submission };
