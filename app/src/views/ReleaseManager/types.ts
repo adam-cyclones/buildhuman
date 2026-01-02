@@ -2,7 +2,39 @@
  * Type definitions for ReleaseManager
  */
 
-import type { Release, Asset, Submission } from "../AssetLibrary/types";
+import type { Release, Asset as LibraryAsset, Submission } from "../AssetLibrary/types";
+
+/**
+ * Extended Asset type with release-specific metadata
+ */
+export type ReleaseAsset = LibraryAsset & {
+  size?: number;
+  uploadedAt?: Date;
+  commitMessage?: string;
+  thumbnail?: string;
+  folder?: string;
+};
+
+/**
+ * Release status types
+ */
+export type ReleaseStatus = "draft" | "staging" | "production" | "deprecated";
+
+/**
+ * Extended Release type with full metadata
+ */
+export type ExtendedRelease = {
+  id: string;
+  version: string;
+  name: string;
+  description: string;
+  createdAt: Date;
+  status: ReleaseStatus;
+  author: string;
+  branch: string;
+  assets: ReleaseAsset[];
+  deployedAt?: Date;
+};
 
 /**
  * View mode for the release manager
@@ -23,7 +55,7 @@ export type ReleaseManagerProps = {
 export type ReleaseEditorProps = {
   releaseId: string | null;
   isNew: boolean;
-  availableAssets: Asset[];
+  availableAssets: LibraryAsset[];
   onSave: (data: ReleaseData) => Promise<void>;
   onPublish: (releaseId: string) => Promise<void>;
   onCancel: () => void;
@@ -54,4 +86,4 @@ export type ReleaseData = {
 /**
  * Re-export types from AssetLibrary for convenience
  */
-export type { Release, Asset, Submission };
+export type { Release, Submission };

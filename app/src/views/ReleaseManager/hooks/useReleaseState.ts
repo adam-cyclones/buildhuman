@@ -1,56 +1,61 @@
-/**
- * State management hook for ReleaseManager
- * Centralizes all component state using SolidJS signals
- */
+import { createSignal, createResource, onMount, createEffect } from "solid-js";
+import { fetchReleases, fetchAssets, fetchPendingSubmissions } from "../client";
+import type { Release, Asset, Submission } from "../types";
 
-import { createSignal, Accessor, Setter } from "solid-js";
-import type { ViewMode, Release, Submission } from "../types";
-
-export type ReleaseManagerState = {
-  // View mode
-  viewMode: Accessor<ViewMode>;
-  setViewMode: Setter<ViewMode>;
-
-  // Selected items
-  selectedReleaseId: Accessor<string | null>;
-  setSelectedReleaseId: Setter<string | null>;
-  selectedSubmissionId: Accessor<string | null>;
-  setSelectedSubmissionId: Setter<string | null>;
-
-  // Data collections
-  releases: Accessor<Release[]>;
-  setReleases: Setter<Release[]>;
-  draftReleases: Accessor<Release[]>;
-  setDraftReleases: Setter<Release[]>;
-  pendingSubmissions: Accessor<Submission[]>;
-  setPendingSubmissions: Setter<Submission[]>;
-
-  // UI state
-  searchQuery: Accessor<string>;
-  setSearchQuery: Setter<string>;
-  isCreatingNew: Accessor<boolean>;
-  setIsCreatingNew: Setter<boolean>;
-};
-
-/**
- * Custom hook for ReleaseManager state management
- */
-export const useReleaseState = (): ReleaseManagerState => {
-  // View mode
-  const [viewMode, setViewMode] = createSignal<ViewMode>("releases");
-
-  // Selected items
+export function useReleaseState(props: { appSettings: any }) {
+  const [viewMode, setViewMode] = createSignal<"releases" | "review">("releases");
   const [selectedReleaseId, setSelectedReleaseId] = createSignal<string | null>(null);
   const [selectedSubmissionId, setSelectedSubmissionId] = createSignal<string | null>(null);
-
-  // Data collections
   const [releases, setReleases] = createSignal<Release[]>([]);
   const [draftReleases, setDraftReleases] = createSignal<Release[]>([]);
   const [pendingSubmissions, setPendingSubmissions] = createSignal<Submission[]>([]);
-
-  // UI state
   const [searchQuery, setSearchQuery] = createSignal("");
   const [isCreatingNew, setIsCreatingNew] = createSignal(false);
+
+  // Form state for creating a new release
+  const [newReleaseName, setNewReleaseName] = createSignal("");
+  const [newReleaseVersion, setNewReleaseVersion] = createSignal("");
+  const [newReleaseDescription, setNewReleaseDescription] = createSignal("");
+
+  const [availableAssets] = createResource(fetchAssets);
+
+  const loadPendingSubmissions = async () => {
+    const submissions = await fetchPendingSubmissions(props.appSettings);
+    setPendingSubmissions(submissions);
+  };
+
+  onMount(async () => {
+    const data = await fetchReleases();
+    setReleases(data);
+    setDraftReleases(data.filter((r: Release) => r.status === "draft"));
+
+    if (props.appSettings?.moderator_mode) {
+      loadPendingSubmissions();
+    }
+  });
+
+  createEffect(() => {
+    if (viewMode() === "review" && props.appSettings?.moderator_mode) {
+      loadPendingSubmissions();
+    }
+  });
+
+  const candidateAssets = () => {
+    const assets = availableAssets() || [];
+    return assets.filter((asset: Asset) => !asset.required && asset.submission_status !== "pending");
+  };
+
+  const filteredAssets = () => {
+    const query = searchQuery().toLowerCase();
+    const assets = candidateAssets();
+    if (!query) return assets;
+
+    return assets.filter((asset: Asset) =>
+      asset.name.toLowerCase().includes(query) ||
+      asset.type.toLowerCase().includes(query) ||
+      asset.category.toLowerCase().includes(query)
+    );
+  };
 
   return {
     viewMode,
@@ -69,5 +74,14 @@ export const useReleaseState = (): ReleaseManagerState => {
     setSearchQuery,
     isCreatingNew,
     setIsCreatingNew,
+    availableAssets,
+    filteredAssets,
+    loadPendingSubmissions,
+    newReleaseName,
+    setNewReleaseName,
+    newReleaseVersion,
+    setNewReleaseVersion,
+    newReleaseDescription,
+    setNewReleaseDescription,
   };
-};
+}
