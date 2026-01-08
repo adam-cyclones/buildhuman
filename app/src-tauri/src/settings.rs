@@ -2,9 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use tauri::AppHandle;
+use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
+    pub device_id: String,
     pub author_name: String,
     pub default_editor: String,
     pub default_editor_type: String,  // "blender", "maya", etc.
@@ -16,6 +18,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            device_id: Uuid::new_v4().to_string(),
             author_name: String::new(),
             default_editor: String::new(),
             default_editor_type: String::new(),
@@ -38,8 +41,15 @@ pub fn get_app_settings(app: AppHandle) -> Result<AppSettings, String> {
     if settings_path.exists() {
         let content = fs::read_to_string(&settings_path)
             .map_err(|e| format!("Failed to read settings: {}", e))?;
-        let settings: AppSettings = serde_json::from_str(&content)
+        let mut settings: AppSettings = serde_json::from_str(&content)
             .map_err(|e| format!("Failed to parse settings: {}", e))?;
+
+        // If device_id is empty, generate one and save
+        if settings.device_id.is_empty() {
+            settings.device_id = Uuid::new_v4().to_string();
+            save_app_settings(app.clone(), settings.clone())?;
+        }
+
         Ok(settings)
     } else {
         // Return default settings with created-assets path set

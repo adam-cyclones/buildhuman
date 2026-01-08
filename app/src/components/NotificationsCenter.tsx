@@ -7,7 +7,7 @@ interface Notification {
   id: string;
   submission_id: string;
   recipient_id?: string;
-  type: "approved" | "rejected" | "under_review" | "submission" | "withdrawn";
+  type: "approved" | "rejected" | "under_review" | "submission" | "withdrawn" | "release";
   title: string;
   message: string;
   created_at: string;
@@ -18,6 +18,7 @@ const API_URL = config.apiUrl;
 
 interface NotificationsCenterProps {
   onNotificationClick?: (submissionId: string) => void;
+  deviceId?: string;
 }
 
 const NotificationsCenter = (props: NotificationsCenterProps) => {
@@ -28,8 +29,12 @@ const NotificationsCenter = (props: NotificationsCenterProps) => {
   let pollInterval: number | undefined;
 
   const fetchNotifications = async () => {
+    if (!props.deviceId) return;
+
     try {
-      const response = await fetch(`${API_URL}/api/notifications?unread_only=false`);
+      const response = await fetch(
+        `${API_URL}/api/notifications?recipient_id=${encodeURIComponent(props.deviceId)}&unread_only=false`
+      );
       if (response.ok) {
         const data = await response.json();
         setNotifications(data);
@@ -46,8 +51,8 @@ const NotificationsCenter = (props: NotificationsCenterProps) => {
       await markAsRead(notification.id);
     }
 
-    // Navigate to submission (but not for withdrawn - those are just informational)
-    if (notification.type !== "withdrawn" && props.onNotificationClick) {
+    // Navigate to submission (but not for withdrawn or release - those are just informational)
+    if (notification.type !== "withdrawn" && notification.type !== "release" && props.onNotificationClick) {
       props.onNotificationClick(notification.submission_id);
     }
 
@@ -66,6 +71,27 @@ const NotificationsCenter = (props: NotificationsCenterProps) => {
       setUnreadCount(Math.max(0, unreadCount() - 1));
     } catch (error) {
       console.error("Failed to mark as read:", error);
+    }
+  };
+
+  const clearAllNotifications = async () => {
+    if (!props.deviceId) {
+      console.error("No device ID provided");
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/notifications/clear?recipient_id=${encodeURIComponent(props.deviceId)}`,
+        { method: "DELETE" }
+      );
+
+      if (response.ok) {
+        setNotifications([]);
+        setUnreadCount(0);
+      }
+    } catch (error) {
+      console.error("Failed to clear notifications:", error);
     }
   };
 
@@ -96,12 +122,23 @@ const NotificationsCenter = (props: NotificationsCenterProps) => {
         <div class="notifications-panel">
           <div class="notifications-header">
             <h3>Notifications</h3>
-            <button
-              class="close-btn"
-              onClick={() => setIsOpen(false)}
-            >
-              ×
-            </button>
+            <div class="notifications-header-actions">
+              {notifications().length > 0 && (
+                <button
+                  class="clear-all-btn"
+                  onClick={clearAllNotifications}
+                  title="Clear all notifications"
+                >
+                  Clear All
+                </button>
+              )}
+              <button
+                class="close-btn"
+                onClick={() => setIsOpen(false)}
+              >
+                ×
+              </button>
+            </div>
           </div>
 
           <div class="notifications-list">
@@ -120,6 +157,7 @@ const NotificationsCenter = (props: NotificationsCenterProps) => {
                       {notification.type === "rejected" && "✗"}
                       {notification.type === "under_review" && "⏳"}
                       {notification.type === "submission" && "📥"}
+                      {notification.type === "release" && "🎉"}
                     </div>
                     <div class="notification-content">
                       <div class="notification-title">{notification.title}</div>

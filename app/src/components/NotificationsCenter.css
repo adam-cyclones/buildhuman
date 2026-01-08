@@ -64,6 +64,29 @@
   color: var(--text-primary);
 }
 
+.notifications-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.clear-all-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.clear-all-btn:hover {
+  background: var(--light-gray);
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
+}
+
 .close-btn {
   background: none;
   border: none;
@@ -135,6 +158,11 @@
 .notification-item.under_review .notification-icon {
   background-color: rgba(255, 152, 0, 0.2);
   color: #ff9800;
+}
+
+.notification-item.release .notification-icon {
+  background-color: rgba(189, 162, 138, 0.2);
+  color: var(--accent);
 }
 
 .notification-content {

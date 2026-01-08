@@ -15,6 +15,7 @@ import { fetchLatestRelease, fetchReleaseAssets } from "./views/AssetLibrary/cli
 import type { Release, Asset } from "./views/AssetLibrary/types";
 
 interface AppSettings {
+  device_id: string;
   author_name: string;
   default_editor: string;
   default_editor_type: string;
@@ -203,7 +204,10 @@ function App() {
               Releases
             </button>
           )}
-          <NotificationsCenter onNotificationClick={handleNotificationClick} />
+          <NotificationsCenter
+            onNotificationClick={handleNotificationClick}
+            deviceId={appSettings()?.device_id}
+          />
         </div>
       </div>
 

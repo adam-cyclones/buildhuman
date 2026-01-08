@@ -25,6 +25,7 @@ interface SettingsProps {
 }
 
 interface AppSettings {
+  device_id: string;
   author_name: string;
   default_editor: string;
   default_editor_type: string;
@@ -38,6 +39,7 @@ const Settings = (_props: SettingsProps) => {
   const [clearing, setClearing] = createSignal(false);
   const [activeCategory, setActiveCategory] = createSignal("general");
   const [settings, setSettings] = createSignal<AppSettings>({
+    device_id: "",
     author_name: "",
     default_editor: "",
     default_editor_type: "",
