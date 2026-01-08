@@ -423,7 +423,7 @@ async def list_assets(
         SELECT id, name, description, type, category, author, publish_date, license,
                rating, rating_count, downloads, file_size, file_format, thumbnail_path,
                created_at, updated_at, tags, version, required
-        FROM assets WHERE 1=1
+        FROM assets WHERE published = 1
     """
     params = []
 
@@ -836,25 +836,25 @@ async def review_submission(
             thumb_path = f"{STORAGE_PATH}/{submission.asset_category}/{asset_id}_thumb{thumb_ext}"
             shutil.copy(submission.thumbnail_path, thumb_path)
 
-        # Create asset record
+        # Create asset record (unpublished until added to a published release)
         c.execute("""
             INSERT INTO assets
             (id, name, description, type, category, author, publish_date, license,
-             file_path, file_size, thumbnail_path, created_at, updated_at, version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             file_path, file_size, thumbnail_path, created_at, updated_at, version, published)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             asset_id, submission.asset_name, submission.asset_description,
             submission.asset_type, submission.asset_category, submission.author,
             timestamp, submission.license, asset_path, submission.file_size,
-            thumb_path, timestamp, timestamp, submission.version
+            thumb_path, timestamp, timestamp, submission.version, 0
         ))
 
-        # Update submission status
+        # Update submission status and link to created asset
         c.execute("""
             UPDATE submissions
-            SET status = 'approved', reviewed_at = ?, reviewed_by = ?, moderation_notes = ?
+            SET status = 'approved', reviewed_at = ?, reviewed_by = ?, moderation_notes = ?, created_asset_id = ?
             WHERE id = ?
-        """, (timestamp, auth["name"], review.notes, submission_id))
+        """, (timestamp, auth["name"], review.notes, asset_id, submission_id))
 
         # Create notification
         notif_id = str(uuid.uuid4())
@@ -1029,6 +1029,24 @@ async def mark_notification_read(notification_id: str):
     conn.close()
     return {"status": "success"}
 
+@app.delete("/api/notifications/clear")
+async def clear_notifications(recipient_id: str = Query(...)):
+    """Clear all notifications for a specific recipient"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # Delete notifications where recipient_id matches or is NULL (broadcast notifications)
+    c.execute(
+        "DELETE FROM notifications WHERE recipient_id = ? OR recipient_id IS NULL",
+        (recipient_id,)
+    )
+
+    deleted_count = c.rowcount
+    conn.commit()
+    conn.close()
+
+    return {"status": "success", "deleted_count": deleted_count}
+
 # API Key Management
 @app.post("/api/admin/api-keys")
 async def create_api_key(
@@ -1149,6 +1167,15 @@ async def publish_release(
             WHERE id = ?
         """, (published_at, published_by, release_id))
 
+        # Mark all assets in this release as published
+        c.execute("""
+            UPDATE assets
+            SET published = 1
+            WHERE id IN (
+                SELECT asset_id FROM release_assets WHERE release_id = ?
+            )
+        """, (release_id,))
+
         # Get all assets in this release and their authors
         c.execute("""
             SELECT DISTINCT a.author, a.name
@@ -1198,11 +1225,11 @@ async def publish_release(
     finally:
         conn.close()
 
-@app.get("/api/releases", response_model=List[Release])
+@app.get("/api/releases")
 async def list_releases(
     status: Optional[str] = Query(None, description="Filter by status (draft/published)")
 ):
-    """List all releases"""
+    """List all releases with their assets"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
@@ -1217,21 +1244,111 @@ async def list_releases(
 
     c.execute(query, params)
     rows = c.fetchall()
-    conn.close()
 
-    return [
-        Release(
-            id=row[0],
-            name=row[1],
-            version=row[2],
-            description=row[3],
-            status=row[4],
-            created_at=row[5],
-            published_at=row[6],
-            published_by=row[7]
-        )
-        for row in rows
-    ]
+    # For each release, get its assets
+    releases = []
+    for row in rows:
+        release_id = row[0]
+
+        # Get assets for this release
+        c.execute("""
+            SELECT a.id, a.name, a.type, a.category, a.version
+            FROM assets a
+            JOIN release_assets ra ON a.id = ra.asset_id
+            WHERE ra.release_id = ?
+            ORDER BY ra.added_at
+        """, (release_id,))
+
+        asset_rows = c.fetchall()
+
+        releases.append({
+            "id": row[0],
+            "name": row[1],
+            "version": row[2],
+            "description": row[3],
+            "status": row[4],
+            "created_at": row[5],
+            "published_at": row[6],
+            "published_by": row[7],
+            "assets": [
+                {
+                    "id": a[0],
+                    "name": a[1],
+                    "type": a[2],
+                    "category": a[3],
+                    "version": a[4]
+                }
+                for a in asset_rows
+            ]
+        })
+
+    conn.close()
+    return releases
+
+@app.post("/api/releases/{release_id}/assets")
+async def add_asset_to_release(
+    release_id: str,
+    body: dict,
+    auth: dict = Depends(verify_api_key)
+):
+    """Add an approved asset from a submission to a release"""
+    if auth["role"] not in ["admin", "moderator"]:
+        raise HTTPException(status_code=403, detail="Only admins and moderators can add assets to releases")
+
+    submission_id = body.get("submission_id")
+    if not submission_id:
+        raise HTTPException(status_code=400, detail="submission_id is required")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    try:
+        # Check if release exists and is draft
+        c.execute("SELECT status FROM releases WHERE id = ?", (release_id,))
+        release = c.fetchone()
+        if not release:
+            raise HTTPException(status_code=404, detail="Release not found")
+        if release[0] != "draft":
+            raise HTTPException(status_code=400, detail="Can only add assets to draft releases")
+
+        # Get the approved submission and its created asset
+        c.execute("""
+            SELECT created_asset_id, status
+            FROM submissions
+            WHERE id = ?
+        """, (submission_id,))
+        submission = c.fetchone()
+
+        if not submission:
+            raise HTTPException(status_code=404, detail="Submission not found")
+        if submission[1] != "approved":
+            raise HTTPException(status_code=400, detail="Submission must be approved before adding to release")
+        if not submission[0]:
+            raise HTTPException(status_code=400, detail="Submission has no associated asset")
+
+        asset_id = submission[0]
+        added_at = datetime.utcnow().isoformat()
+
+        # Add asset to release (ignore if already exists)
+        c.execute("""
+            INSERT OR IGNORE INTO release_assets (release_id, asset_id, added_at)
+            VALUES (?, ?, ?)
+        """, (release_id, asset_id, added_at))
+
+        conn.commit()
+
+        return {"success": True, "asset_id": asset_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"Error adding asset to release: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 @app.get("/api/releases/{release_id}")
 async def get_release(release_id: str):
@@ -1284,6 +1401,146 @@ async def get_release(release_id: str):
             for a in asset_rows
         ]
     }
+
+@app.post("/api/releases/{release_id}/unpublish")
+async def unpublish_release(
+    release_id: str,
+    auth: dict = Depends(verify_api_key)
+):
+    """Unpublish a release - sets status to archived, sets all assets back to published=0, no notifications sent"""
+    if auth["role"] not in ["admin", "moderator"]:
+        raise HTTPException(status_code=403, detail="Only admins and moderators can unpublish releases")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    try:
+        # Check if release exists and is published
+        c.execute("SELECT status FROM releases WHERE id = ?", (release_id,))
+        release = c.fetchone()
+        if not release:
+            raise HTTPException(status_code=404, detail="Release not found")
+        if release[0] != "published":
+            raise HTTPException(status_code=400, detail="Can only unpublish published releases")
+
+        # Set release status to archived
+        c.execute("""
+            UPDATE releases
+            SET status = 'archived'
+            WHERE id = ?
+        """, (release_id,))
+
+        # Set all assets in this release back to published=0
+        c.execute("""
+            UPDATE assets
+            SET published = 0
+            WHERE id IN (
+                SELECT asset_id FROM release_assets WHERE release_id = ?
+            )
+        """, (release_id,))
+
+        conn.commit()
+
+        return {"success": True, "message": "Release unpublished, assets removed from production"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"Error unpublishing release: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/releases/{release_id}/assets/{asset_id}")
+async def remove_asset_from_release(
+    release_id: str,
+    asset_id: str,
+    auth: dict = Depends(verify_api_key)
+):
+    """Remove an asset from a draft release"""
+    if auth["role"] not in ["admin", "moderator"]:
+        raise HTTPException(status_code=403, detail="Only admins and moderators can remove assets from releases")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    try:
+        # Check if release exists and is draft
+        c.execute("SELECT status FROM releases WHERE id = ?", (release_id,))
+        release = c.fetchone()
+        if not release:
+            raise HTTPException(status_code=404, detail="Release not found")
+        if release[0] != "draft":
+            raise HTTPException(status_code=400, detail="Can only remove assets from draft releases")
+
+        # Remove asset from release
+        c.execute("""
+            DELETE FROM release_assets
+            WHERE release_id = ? AND asset_id = ?
+        """, (release_id, asset_id))
+
+        if c.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Asset not found in this release")
+
+        conn.commit()
+
+        return {"success": True, "message": "Asset removed from release"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"Error removing asset from release: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+@app.delete("/api/releases/{release_id}")
+async def delete_release(
+    release_id: str,
+    auth: dict = Depends(verify_api_key)
+):
+    """Delete a draft release"""
+    if auth["role"] not in ["admin", "moderator"]:
+        raise HTTPException(status_code=403, detail="Only admins and moderators can delete releases")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    try:
+        # Check if release exists and is draft
+        c.execute("SELECT status FROM releases WHERE id = ?", (release_id,))
+        release = c.fetchone()
+        if not release:
+            raise HTTPException(status_code=404, detail="Release not found")
+        if release[0] != "draft":
+            raise HTTPException(status_code=400, detail="Can only delete draft releases")
+
+        # Delete all release_assets entries for this release
+        c.execute("DELETE FROM release_assets WHERE release_id = ?", (release_id,))
+
+        # Delete the release
+        c.execute("DELETE FROM releases WHERE id = ?", (release_id,))
+
+        conn.commit()
+
+        return {"success": True, "message": "Release deleted"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"Error deleting release: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 if __name__ == "__main__":
     import uvicorn
