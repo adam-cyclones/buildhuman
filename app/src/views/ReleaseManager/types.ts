@@ -1,3 +1,4 @@
+
 /**
  * Type definitions for ReleaseManager
  */
@@ -27,19 +28,19 @@ export type ExtendedRelease = {
   id: string;
   version: string;
   name: string;
-  description: string;
-  createdAt: Date;
+  description: string | null;
   status: ReleaseStatus;
-  author: string;
-  branch: string;
-  assets: ReleaseAsset[];
-  deployedAt?: Date;
+  created_at: string;
+  published_at: string | null;
+  published_by: string | null;
+  assets?: ReleaseAsset[];
 };
 
 /**
  * View mode for the release manager
  */
 export type ViewMode = "releases" | "review";
+
 
 /**
  * Props for the main ReleaseManager component

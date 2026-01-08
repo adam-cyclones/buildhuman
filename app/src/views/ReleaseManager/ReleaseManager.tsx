@@ -3,7 +3,7 @@ import Icon from "../../components/Icon";
 import { formatBytes, getStatusColor, getAssetTypeIcon, getAssetTypeColor, buildThumbnailUrl, getNextVersionString } from "./utils";
 import type { ReleaseManagerProps, ExtendedRelease } from "./types";
 import type { Submission } from "../AssetLibrary/types";
-import { fetchPendingSubmissions, reviewSubmission } from "./client";
+import { fetchPendingSubmissions, reviewSubmission, fetchReleases, saveDraftRelease, addAssetToRelease, publishRelease } from "./client";
 import { getReviewActor, removeReviewActor } from "./machines/submissionReviewService";
 import "./ReleaseManager.css";
 
@@ -22,6 +22,7 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
 
   // Fetch pending submissions with refetch capability
   const [pendingSubmissions, { refetch: refetchSubmissions }] = createResource(() => fetchPendingSubmissions(props.appSettings));
+  const [releases, { refetch: refetchReleases }] = createResource(fetchReleases);
 
   // Subscribe to actor state changes for all pending submissions
   createEffect(() => {
@@ -74,22 +75,26 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
     });
   });
 
-  const handleCreateRelease = (e: Event) => {
+  const handleCreateRelease = async (e: Event) => {
     e.preventDefault();
-    const release: ExtendedRelease = {
-      id: Date.now().toString(),
-      version: newReleaseVersion(),
+
+    const releaseData = {
       name: newReleaseName(),
+      version: newReleaseVersion(),
       description: newReleaseDescription(),
-      createdAt: new Date(),
-      status: "draft",
-      author: props.appSettings?.author_name || "current.user",
-      branch: newReleaseBranch(),
-      assets: [],
+      assetIds: [],
     };
 
-    // TODO: Call API to create release
-    console.log("Creating release:", release);
+    try {
+      if (props.appSettings?.moderator_api_key) {
+        await saveDraftRelease(releaseData, props.appSettings.moderator_api_key);
+
+        // Refetch releases to show the new one
+        refetchReleases();
+      }
+    } catch (error) {
+      console.error("Failed to create release:", error);
+    }
 
     setIsCreateOpen(false);
     setNewReleaseName("");
@@ -98,21 +103,22 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
     setNewReleaseDescription("");
   };
 
-  const handleFileSelect = (releaseId: string, files: FileList | null) => {
-    if (!files || files.length === 0) return;
-
-    // TODO: Implement file upload with commit message dialog
-    console.log("Files selected for release:", releaseId, files);
-  };
-
   const handleDeleteAsset = (releaseId: string, assetId: string) => {
     // TODO: Implement asset deletion
     console.log("Delete asset:", assetId, "from release:", releaseId);
   };
 
-  const handleDeploy = (releaseId: string, targetStatus: "staging" | "production") => {
-    // TODO: Implement deployment
-    console.log("Deploy release:", releaseId, "to:", targetStatus);
+  const handleDeploy = async (releaseId: string, targetStatus: "staging" | "production") => {
+    try {
+      if (props.appSettings?.moderator_api_key) {
+        await publishRelease(releaseId, props.appSettings.moderator_api_key);
+
+        // Refetch releases to show updated status
+        refetchReleases();
+      }
+    } catch (error) {
+      console.error("Failed to publish release:", error);
+    }
   };
 
   const handleApproveSubmission = async (submissionId: string) => {
@@ -135,10 +141,7 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
     }
   };
 
-  const handleAddToRelease = (submissionId: string, releaseId: string) => {
-    // TODO: Add approved asset to selected release
-    console.log("Add submission:", submissionId, "to release:", releaseId);
-
+  const handleAddToRelease = async (submissionId: string, releaseId: string) => {
     const actor = getReviewActor(submissionId);
 
     // Collapse the card
@@ -150,6 +153,18 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
     // Send event to show "Added to [Release]" state
     // Machine will automatically transition to removed after hang time
     actor.send({ type: "ADD_TO_RELEASE", releaseId, releaseName });
+
+    // Call API to add asset to release
+    try {
+      if (props.appSettings?.moderator_api_key) {
+        await addAssetToRelease(releaseId, submissionId, props.appSettings.moderator_api_key);
+
+        // Refetch releases to show the updated asset list
+        refetchReleases();
+      }
+    } catch (error) {
+      console.error("Failed to add asset to release:", error);
+    }
   };
 
   const handleRejectSubmission = async (submissionId: string) => {
@@ -173,7 +188,7 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
   };
 
   const getDraftReleases = () => {
-    return mockReleases().filter(r => r.status === "draft");
+    return releases() ? releases().filter((r: ExtendedRelease) => r.status === "draft") : [];
   };
 
   const getSubmissionSnapshot = (submissionId: string) => {
@@ -203,64 +218,6 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
     return null;
   };
 
-
-  // Mock data for demonstration - replace with actual API data
-  const mockReleases = (): ExtendedRelease[] => [
-    {
-      id: "1",
-      version: "10-25.R1",
-      name: "Halloween Pack",
-      description: "Spooky themed 3D assets including characters, props, and environments for Halloween season event.",
-      createdAt: new Date("2025-10-15"),
-      status: "production",
-      author: "maya.artist",
-      branch: "main",
-      deployedAt: new Date("2025-10-20"),
-      assets: [
-        {
-          id: "a1",
-          name: "pumpkin_jack.glb",
-          type: "models",
-          category: "characters",
-          author: "maya.artist",
-          rating: 4.5,
-          rating_count: 10,
-          license: "CC-BY",
-          publish_date: "2025-10-15",
-          downloads: 50,
-          version: "1.0",
-          required: false,
-          size: 12458921,
-          uploadedAt: new Date("2025-10-15"),
-          commitMessage: "Added animated jack-o-lantern character",
-          folder: "characters",
-        },
-      ],
-    },
-    {
-      id: "2",
-      version: "12-25.R1",
-      name: "Winter Collection",
-      description: "Upcoming winter assets release - currently collecting assets for review.",
-      createdAt: new Date("2025-12-01"),
-      status: "draft",
-      author: props.appSettings?.author_name || "current.user",
-      branch: "main",
-      assets: [],
-    },
-    {
-      id: "3",
-      version: "12-25.R2",
-      name: "Fantasy Weapons Pack",
-      description: "Major release featuring legendary fantasy weapons and armor sets.",
-      createdAt: new Date("2025-12-02"),
-      status: "draft",
-      author: props.appSettings?.author_name || "current.user",
-      branch: "main",
-      assets: [],
-    },
-  ];
-
   return (
     <div class="release-manager">
       <div class="release-manager-header">
@@ -270,7 +227,7 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
         </div>
         <div class="header-actions">
           <button class="btn btn-primary" onClick={() => {
-            const versions = mockReleases().map(r => r.version);
+            const versions = releases() ? releases().map((r: ExtendedRelease) => r.version) : [];
             const nextVersion = getNextVersionString(versions);
             setNewReleaseVersion(nextVersion);
             setIsCreateOpen(true);
@@ -386,37 +343,59 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
 
                     <Show when={selectedSubmission()?.id === submission.id && isApproved(submission.id)}>
                       <div class="review-actions">
-                        <div class="review-action-group">
-                          <label class="action-label">Add to Draft Release:</label>
-                          <div class="release-radio-group">
-                            <For each={getDraftReleases()}>
-                              {(release) => (
-                                <label
-                                  class={`release-radio-option ${selectedReleaseForSubmission()[submission.id] === release.id ? "selected" : ""}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedReleaseForSubmission({
-                                      ...selectedReleaseForSubmission(),
-                                      [submission.id]: release.id
-                                    });
-                                    // Auto-submit when selection is made
-                                    handleAddToRelease(submission.id, release.id);
-                                  }}
-                                >
-                                  <div class="release-radio-check">
-                                    <Show when={selectedReleaseForSubmission()[submission.id] === release.id}>
-                                      <Icon name="check" size={16} />
-                                    </Show>
-                                  </div>
-                                  <div class="release-radio-content">
-                                    <span class="release-version">{release.version}</span>
-                                    <span class="release-name">{release.name}</span>
-                                  </div>
-                                </label>
-                              )}
-                            </For>
+                        <Show
+                          when={getDraftReleases().length > 0}
+                          fallback={
+                            <div class="review-action-group">
+                              <label class="action-label">No Draft Releases Available</label>
+                              <button
+                                class="btn btn-primary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const versions = releases() ? releases()!.map((r: ExtendedRelease) => r.version) : [];
+                                  const nextVersion = getNextVersionString(versions);
+                                  setNewReleaseVersion(nextVersion);
+                                  setIsCreateOpen(true);
+                                }}
+                              >
+                                <Icon name="plus" size={16} />
+                                Create Release
+                              </button>
+                            </div>
+                          }
+                        >
+                          <div class="review-action-group">
+                            <label class="action-label">Add to Draft Release:</label>
+                            <div class="release-radio-group">
+                              <For each={getDraftReleases()}>
+                                {(release) => (
+                                  <label
+                                    class={`release-radio-option ${selectedReleaseForSubmission()[submission.id] === release.id ? "selected" : ""}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedReleaseForSubmission({
+                                        ...selectedReleaseForSubmission(),
+                                        [submission.id]: release.id
+                                      });
+                                      // Auto-submit when selection is made
+                                      handleAddToRelease(submission.id, release.id);
+                                    }}
+                                  >
+                                    <div class="release-radio-check">
+                                      <Show when={selectedReleaseForSubmission()[submission.id] === release.id}>
+                                        <Icon name="check" size={16} />
+                                      </Show>
+                                    </div>
+                                    <div class="release-radio-content">
+                                      <span class="release-version">{release.version}</span>
+                                      <span class="release-name">{release.name}</span>
+                                    </div>
+                                  </label>
+                                )}
+                              </For>
+                            </div>
                           </div>
-                        </div>
+                        </Show>
                       </div>
                     </Show>
                   </div>
@@ -494,8 +473,18 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
 
         {/* Releases List */}
         <div class="releases-container">
-          <For each={mockReleases()}>
-            {(release) => (
+          <Show
+            when={releases() && releases()!.length > 0}
+            fallback={
+              <div class="empty-review-state">
+                <Icon name="folder" size={48} />
+                <p>No releases yet</p>
+                <span>Create your first release to get started</span>
+              </div>
+            }
+          >
+            <For each={releases()}>
+              {(release: ExtendedRelease) => (
               <div class="release-card">
                 {/* Release Header */}
                 <div class="release-card-header">
@@ -533,24 +522,24 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
                 <div class="release-metadata">
                   <div class="metadata-item">
                     <Icon name="calendar" size={16} />
-                    {release.createdAt.toLocaleDateString()}
+                    {new Date(release.created_at).toLocaleDateString()}
                   </div>
-                  <div class="metadata-item">
-                    <Icon name="user" size={16} />
-                    {release.author}
-                  </div>
-                  <div class="metadata-item">
-                    <Icon name="git-branch" size={16} />
-                    {release.branch}
-                  </div>
-                  <div class="metadata-item">
-                    <Icon name="box" size={16} />
-                    {release.assets.length} {release.assets.length === 1 ? "asset" : "assets"}
-                  </div>
-                  <Show when={release.deployedAt}>
+                  <Show when={release.published_by}>
+                    <div class="metadata-item">
+                      <Icon name="user" size={16} />
+                      {release.published_by}
+                    </div>
+                  </Show>
+                  <Show when={release.assets}>
+                    <div class="metadata-item">
+                      <Icon name="box" size={16} />
+                      {release.assets!.length} {release.assets!.length === 1 ? "asset" : "assets"}
+                    </div>
+                  </Show>
+                  <Show when={release.published_at}>
                     <div class="metadata-item">
                       <Icon name="upload" size={16} />
-                      Deployed {release.deployedAt?.toLocaleDateString()}
+                      Published {new Date(release.published_at!).toLocaleDateString()}
                     </div>
                   </Show>
                 </div>
@@ -559,44 +548,26 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
                 <div class="release-assets-section">
                   <div class="assets-section-header">
                     <h4>Release Assets</h4>
-                    <label for={`upload-${release.id}`}>
-                      <button
-                        type="button"
-                        class="btn btn-secondary btn-sm"
-                        onClick={() => document.getElementById(`upload-${release.id}`)?.click()}
-                      >
-                        <Icon name="upload" size={16} />
-                        Upload Assets
-                      </button>
-                      <input
-                        id={`upload-${release.id}`}
-                        type="file"
-                        multiple
-                        accept=".glb,.gltf,.fbx,.obj,.blend,.png,.jpg,.jpeg"
-                        class="file-input-hidden"
-                        onChange={(e) => handleFileSelect(release.id, e.currentTarget.files)}
-                      />
-                    </label>
                   </div>
 
                   <Show
-                    when={release.assets.length > 0}
+                    when={release.assets && release.assets.length > 0}
                     fallback={
                       <div class="empty-assets-state">
                         <Icon name="box" size={48} />
-                        <p>No assets uploaded yet</p>
-                        <span>Upload 3D models, textures, animations, or drag approved assets from the review queue</span>
+                        <p>No assets in this release</p>
+                        <span>Approve submissions from the review queue and add them to this release</span>
                       </div>
                     }
                   >
                     <div class="assets-grid">
-                      <For each={release.assets}>
+                      <For each={release.assets!}>
                         {(asset) => (
                           <div class="asset-card-grid">
                             {/* Asset Thumbnail */}
                             <div class="asset-thumbnail">
                               <img
-                                src={asset.thumbnail || "/placeholder.svg"}
+                                src={asset.thumbnail ? buildThumbnailUrl(asset.thumbnail) : "/placeholder.svg"}
                                 alt={asset.name}
                               />
                               <div class="asset-actions-overlay">
@@ -644,6 +615,7 @@ const ReleaseManager = (props: ReleaseManagerProps) => {
               </div>
             )}
           </For>
+          </Show>
         </div>
       </div>
 

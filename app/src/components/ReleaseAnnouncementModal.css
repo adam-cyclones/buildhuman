@@ -41,7 +41,7 @@
 .release-announcement-modal .announcement-modal-content {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  min-height: 400px;
   max-height: 85vh;
 }
 
