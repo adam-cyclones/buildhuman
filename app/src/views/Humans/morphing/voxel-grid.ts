@@ -1,7 +1,7 @@
 // Voxel grid for SDF evaluation
 
-import type { Vec3, Mould } from "./types";
-import { sphereSDF } from "./sdf";
+import type { Vec3 } from "./types";
+import type { MouldManager } from "./mould-manager";
 
 export class VoxelGrid {
   resolution: number;
@@ -23,9 +23,9 @@ export class VoxelGrid {
   }
 
   /**
-   * Evaluate SDF at all voxel positions for given mould
+   * Evaluate SDF at all voxel positions using MouldManager
    */
-  evaluate(mould: Mould) {
+  evaluate(mouldManager: MouldManager) {
     const { min } = this.bounds;
     const res = this.resolution;
 
@@ -38,7 +38,7 @@ export class VoxelGrid {
             min[2] + z * this.cellSize,
           ];
 
-          const distance = sphereSDF(point, mould.center, mould.radius);
+          const distance = mouldManager.evaluateSDF(point);
           const index = x + y * res + z * res * res;
           this.data[index] = distance;
         }

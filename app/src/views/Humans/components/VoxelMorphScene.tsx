@@ -3,7 +3,7 @@ import * as THREE from "three";
 import ThreeScene from "./ThreeScene";
 import { VoxelGrid } from "../morphing/voxel-grid";
 import { marchingCubes } from "../morphing/marching-cubes";
-import type { Mould } from "../morphing/types";
+import { MouldManager } from "../morphing/mould-manager";
 
 type VoxelMorphSceneProps = {
   mouldRadius: number;
@@ -28,14 +28,63 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       max: [1, 1, 1],
     });
 
-    // Define mould
-    const mould: Mould = {
-      center: [0, 0, 0],
-      radius: props.mouldRadius,
-    };
+    // Create mould manager and add multiple moulds
+    const mouldManager = new MouldManager();
 
-    // Evaluate SDF
-    grid.evaluate(mould);
+    // Create a simple humanoid form with 6 spheres (head, torso, arms, legs)
+    const baseRadius = props.mouldRadius;
+    const blendRadius = 0.2;
+
+    // Head
+    mouldManager.addMould({
+      id: "head",
+      center: [0, 0.5, 0],
+      radius: baseRadius * 0.4,
+      blendRadius,
+    });
+
+    // Torso
+    mouldManager.addMould({
+      id: "torso",
+      center: [0, 0, 0],
+      radius: baseRadius * 0.6,
+      blendRadius,
+    });
+
+    // Left arm
+    mouldManager.addMould({
+      id: "arm-left",
+      center: [-0.4, 0.1, 0],
+      radius: baseRadius * 0.25,
+      blendRadius,
+    });
+
+    // Right arm
+    mouldManager.addMould({
+      id: "arm-right",
+      center: [0.4, 0.1, 0],
+      radius: baseRadius * 0.25,
+      blendRadius,
+    });
+
+    // Left leg
+    mouldManager.addMould({
+      id: "leg-left",
+      center: [-0.15, -0.5, 0],
+      radius: baseRadius * 0.3,
+      blendRadius,
+    });
+
+    // Right leg
+    mouldManager.addMould({
+      id: "leg-right",
+      center: [0.15, -0.5, 0],
+      radius: baseRadius * 0.3,
+      blendRadius,
+    });
+
+    // Evaluate SDF with all moulds
+    grid.evaluate(mouldManager);
 
     // Extract surface
     const meshData = marchingCubes(grid, 0);
