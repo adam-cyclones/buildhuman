@@ -2,7 +2,6 @@ import { createSignal, For, Switch, Match } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
-import type { Scene } from "@babylonjs/core";
 import ThreeDViewport from "./components/3DViewport";
 import WeightForAgeChart from "./components/WeightForAgeChart";
 import HeightForAgeChart from "./components/HeightForAgeChart";
@@ -39,6 +38,7 @@ const Humans = () => {
   const [activeChart, setActiveChart] = createSignal<"height" | "weight">("weight");
   const [sceneTab, setSceneTab] = createSignal("Scene");
   const sceneTabs = ["Scene", "Properties"];
+  const [mouldRadius, setMouldRadius] = createSignal(0.5);
 
   const selectedHuman = () => humans().find((h) => h.id === selectedHumanId());
 
@@ -92,9 +92,6 @@ const Humans = () => {
     });
   };
 
-  const handleSceneReady = (_scene: Scene) => {
-    console.log("Babylon.js scene ready!");
-  };
 
   const generateHuman = async (human: Human | undefined) => {
     if (!human) return;
@@ -170,7 +167,7 @@ const Humans = () => {
 
   return (
     <div class="three-d-editor">
-      <ThreeDViewport onSceneReady={handleSceneReady} onAddHuman={addHuman} />
+      <ThreeDViewport onAddHuman={addHuman} mouldRadius={mouldRadius()} />
 
       <div class="inspector">
         <div class="inspector-header">
@@ -285,6 +282,28 @@ const Humans = () => {
                       </div>
                     </div>
                   </div>
+                  <div class="property-section">
+                    <h4>Mould System (Phase 1)</h4>
+
+                    <div class="property-group">
+                      <div class="property-label-row">
+                        <label>Mould Size</label>
+                        <span class="property-value">
+                          {mouldRadius().toFixed(2)}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="1.0"
+                        step="0.01"
+                        value={mouldRadius()}
+                        onInput={(e) => setMouldRadius(parseFloat(e.currentTarget.value))}
+                        class="property-slider"
+                      />
+                    </div>
+                  </div>
+
                   <div class="property-section">
                     <h4>Basic Parameters</h4>
 

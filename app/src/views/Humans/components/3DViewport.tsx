@@ -1,10 +1,9 @@
-import type { Scene } from "@babylonjs/core";
-import BabylonScene from "./BabylonScene";
+import VoxelMorphScene from "./VoxelMorphScene";
 import Icon from "../../../components/Icon";
 
-interface ThreeDViewportProps {
-  onSceneReady: (scene: Scene) => void;
+type ThreeDViewportProps = {
   onAddHuman: () => void;
+  mouldRadius: number;
 }
 
 const ThreeDViewport = (props: ThreeDViewportProps) => {
@@ -30,7 +29,7 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
         </div>
       </div>
       <div class="viewport-content">
-        <BabylonScene onSceneReady={props.onSceneReady} />
+        <VoxelMorphScene mouldRadius={props.mouldRadius} />
       </div>
     </div>
   );
