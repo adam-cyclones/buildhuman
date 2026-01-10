@@ -1,4 +1,5 @@
 // MouldManager: Combines multiple moulds into single SDF
+// Moulds are now defined in bone-local space and transformed to world space
 
 import type { Mould, Vec3 } from "./types";
 import type { Skeleton } from "./skeleton";
@@ -7,7 +8,6 @@ import { sphereSDF, capsuleSDF, smoothMinPoly } from "./sdf";
 export class MouldManager {
   private moulds: Map<string, Mould> = new Map();
   private skeleton: Skeleton | null = null;
-  private mouldLocalOffsets: Map<string, Vec3> = new Map(); // Store offset from joint
 
   /**
    * Set the skeleton that moulds are attached to
@@ -18,6 +18,7 @@ export class MouldManager {
 
   /**
    * Add a mould to the system
+   * NOTE: center and endPoint are now in BONE-LOCAL space
    */
   addMould(mould: Mould): void {
     this.moulds.set(mould.id, mould);
@@ -28,13 +29,6 @@ export class MouldManager {
    */
   getMould(id: string): Mould | undefined {
     return this.moulds.get(id);
-  }
-
-  /**
-   * Update a mould's local offset from its parent joint
-   */
-  setMouldOffset(mouldId: string, offset: Vec3): void {
-    this.mouldLocalOffsets.set(mouldId, offset);
   }
 
   /**
@@ -59,29 +53,40 @@ export class MouldManager {
   }
 
   /**
-   * Get world position of a mould (joint position + local offset)
-   * Falls back to mould.center if no skeleton or parentJointId
+   * Get world position of a mould's center
+   * Transforms from bone-local space to world space
    */
-  getMouldWorldCenter(mouldId: string): Vec3 {
+  private getMouldWorldCenter(mouldId: string): Vec3 {
     const mould = this.moulds.get(mouldId);
     if (!mould) {
       return [0, 0, 0];
     }
 
-    // If no skeleton or no parent joint, use the mould's center directly
+    // If no skeleton or no parent joint, use mould center directly (fallback)
     if (!this.skeleton || !mould.parentJointId) {
       return mould.center;
     }
 
-    // Get world position of parent joint
-    const jointPos = this.skeleton.getWorldPosition(mould.parentJointId);
-    const offset = this.mouldLocalOffsets.get(mouldId) ?? [0, 0, 0];
+    // Transform from bone-local to world space
+    return this.skeleton.transformToWorld(mould.parentJointId, mould.center);
+  }
 
-    return [
-      jointPos[0] + offset[0],
-      jointPos[1] + offset[1],
-      jointPos[2] + offset[2],
-    ];
+  /**
+   * Get world position of a mould's endpoint (for capsules)
+   * Transforms from bone-local space to world space
+   */
+  private getMouldWorldEndpoint(mould: Mould): Vec3 {
+    if (!mould.endPoint) {
+      return [0, 0, 0];
+    }
+
+    // If no skeleton or no parent joint, use endpoint directly (fallback)
+    if (!this.skeleton || !mould.parentJointId) {
+      return mould.endPoint;
+    }
+
+    // Transform from bone-local to world space
+    return this.skeleton.transformToWorld(mould.parentJointId, mould.endPoint);
   }
 
   /**
@@ -91,20 +96,7 @@ export class MouldManager {
     const center = this.getMouldWorldCenter(mould.id);
 
     if (mould.shape === "capsule" && mould.endPoint) {
-      // For capsule, transform endPoint using same offset as center
-      const offset = this.mouldLocalOffsets.get(mould.id) ?? [0, 0, 0];
-      let endPoint = mould.endPoint;
-
-      // If skeleton attached, apply joint transform to endPoint too
-      if (this.skeleton && mould.parentJointId) {
-        const jointPos = this.skeleton.getWorldPosition(mould.parentJointId);
-        endPoint = [
-          jointPos[0] + offset[0] + mould.endPoint[0],
-          jointPos[1] + offset[1] + mould.endPoint[1],
-          jointPos[2] + offset[2] + mould.endPoint[2],
-        ];
-      }
-
+      const endPoint = this.getMouldWorldEndpoint(mould);
       return capsuleSDF(point, center, endPoint, mould.radius);
     }
 
@@ -115,7 +107,7 @@ export class MouldManager {
   /**
    * Evaluate combined SDF at a point
    * All moulds are blended together using smooth minimum
-   * Uses world positions when skeleton is attached
+   * Moulds are now properly attached to bone frames
    */
   evaluateSDF(point: Vec3): number {
     const mouldArray = Array.from(this.moulds.values());

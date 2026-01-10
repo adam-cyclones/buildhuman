@@ -5,6 +5,7 @@ import { VoxelGrid } from "../morphing/voxel-grid";
 import { dualContouring } from "../morphing/dual-contouring";
 import { MouldManager } from "../morphing/mould-manager";
 import { Skeleton } from "../morphing/skeleton";
+import { identityQuat } from "../morphing/transform";
 
 type VoxelMorphSceneProps = {
   mouldRadius: number;
@@ -29,52 +30,62 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   const initializeSkeletonAndMoulds = () => {
     if (isInitialized) return;
 
-    console.log("Initializing skeleton and moulds");
+    console.log("Initializing skeleton and moulds with bone transforms");
 
     // Create skeleton with joints for a simple humanoid
+    // Joints now use localOffset (parent-relative) and localRotation
     const skeleton = new Skeleton();
+    const identityRot = identityQuat();
 
-    // Root joint (pelvis/torso center)
+    // Root joint (pelvis/torso center) - world position [0,0,0]
     skeleton.addJoint({
       id: "torso",
-      position: [0, 0, 0],
+      localOffset: [0, 0, 0], // Root has no parent, so local = world
+      localRotation: identityRot,
       children: ["head", "shoulder-left", "shoulder-right", "hip-left", "hip-right"],
     });
 
-    // Head joint (child of torso)
+    // Head joint - offset UP from torso
     skeleton.addJoint({
       id: "head",
-      position: [0, 0.5, 0],
+      localOffset: [0, 0.5, 0], // 0.5 units up in torso's local space
+      localRotation: identityRot,
       parentId: "torso",
       children: [],
     });
 
-    // Shoulder joints (children of torso)
+    // Left shoulder - offset LEFT and slightly UP from torso
     skeleton.addJoint({
       id: "shoulder-left",
-      position: [-0.4, 0.1, 0],
+      localOffset: [-0.4, 0.1, 0], // Left in torso's local space
+      localRotation: identityRot,
       parentId: "torso",
       children: [],
     });
 
+    // Right shoulder - offset RIGHT and slightly UP from torso
     skeleton.addJoint({
       id: "shoulder-right",
-      position: [0.4, 0.1, 0],
+      localOffset: [0.4, 0.1, 0], // Right in torso's local space
+      localRotation: identityRot,
       parentId: "torso",
       children: [],
     });
 
-    // Leg joints (children of torso)
+    // Left hip - offset LEFT and DOWN from torso
     skeleton.addJoint({
       id: "hip-left",
-      position: [-0.15, -0.5, 0],
+      localOffset: [-0.15, -0.5, 0], // Down in torso's local space
+      localRotation: identityRot,
       parentId: "torso",
       children: [],
     });
 
+    // Right hip - offset RIGHT and DOWN from torso
     skeleton.addJoint({
       id: "hip-right",
-      position: [0.15, -0.5, 0],
+      localOffset: [0.15, -0.5, 0], // Down in torso's local space
+      localRotation: identityRot,
       parentId: "torso",
       children: [],
     });
@@ -87,78 +98,73 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     currentSkeleton = skeleton;
     currentMouldManager = mouldManager;
 
-    // Create moulds structure (with placeholder radius, will be updated)
+    // Create moulds structure in BONE-LOCAL space
+    // Moulds are now attached to bone frames, not world positions
     const blendRadius = 0.2;
 
-    // Head (sphere attached to head joint)
+    // Head sphere - centered on head joint
     mouldManager.addMould({
       id: "head",
       shape: "sphere",
-      center: [0, 0, 0],
-      radius: 0.5 * 0.4, // Will be updated by updateMouldSizes
+      center: [0, 0, 0], // At head joint origin (bone-local)
+      radius: 0.5 * 0.4,
       blendRadius,
       parentJointId: "head",
     });
-    mouldManager.setMouldOffset("head", [0, 0, 0]);
 
-    // Torso (sphere attached to torso joint)
+    // Torso sphere - centered on torso joint
     mouldManager.addMould({
       id: "torso",
       shape: "sphere",
-      center: [0, 0, 0],
+      center: [0, 0, 0], // At torso joint origin (bone-local)
       radius: 0.5 * 0.6,
       blendRadius,
       parentJointId: "torso",
     });
-    mouldManager.setMouldOffset("torso", [0, 0, 0]);
 
-    // Left arm (capsule)
+    // Left arm capsule - extends down and left from shoulder
     mouldManager.addMould({
       id: "arm-left",
       shape: "capsule",
-      center: [0, 0, 0],
-      endPoint: [-0.3, -0.2, 0],
+      center: [0, 0, 0], // Start at shoulder joint (bone-local)
+      endPoint: [-0.3, -0.2, 0], // End point in shoulder's local space
       radius: 0.5 * 0.15,
       blendRadius,
       parentJointId: "shoulder-left",
     });
-    mouldManager.setMouldOffset("arm-left", [0, 0, 0]);
 
-    // Right arm (capsule)
+    // Right arm capsule - extends down and right from shoulder
     mouldManager.addMould({
       id: "arm-right",
       shape: "capsule",
-      center: [0, 0, 0],
-      endPoint: [0.3, -0.2, 0],
+      center: [0, 0, 0], // Start at shoulder joint (bone-local)
+      endPoint: [0.3, -0.2, 0], // End point in shoulder's local space
       radius: 0.5 * 0.15,
       blendRadius,
       parentJointId: "shoulder-right",
     });
-    mouldManager.setMouldOffset("arm-right", [0, 0, 0]);
 
-    // Left leg (capsule)
+    // Left leg capsule - extends down from hip
     mouldManager.addMould({
       id: "leg-left",
       shape: "capsule",
-      center: [0, 0, 0],
-      endPoint: [0, -0.4, 0],
+      center: [0, 0, 0], // Start at hip joint (bone-local)
+      endPoint: [0, -0.4, 0], // Extend down in hip's local space
       radius: 0.5 * 0.2,
       blendRadius,
       parentJointId: "hip-left",
     });
-    mouldManager.setMouldOffset("leg-left", [0, 0, 0]);
 
-    // Right leg (capsule)
+    // Right leg capsule - extends down from hip
     mouldManager.addMould({
       id: "leg-right",
       shape: "capsule",
-      center: [0, 0, 0],
-      endPoint: [0, -0.4, 0],
+      center: [0, 0, 0], // Start at hip joint (bone-local)
+      endPoint: [0, -0.4, 0], // Extend down in hip's local space
       radius: 0.5 * 0.2,
       blendRadius,
       parentJointId: "hip-right",
     });
-    mouldManager.setMouldOffset("leg-right", [0, 0, 0]);
 
     isInitialized = true;
   };

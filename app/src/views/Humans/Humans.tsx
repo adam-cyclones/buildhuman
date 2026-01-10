@@ -40,6 +40,7 @@ const Humans = () => {
   const sceneTabs = ["Scene", "Properties"];
   const [mouldRadius, setMouldRadius] = createSignal(0.5);
   const [debouncedMouldRadius, setDebouncedMouldRadius] = createSignal(0.5);
+  const [voxelResolution, setVoxelResolution] = createSignal<32 | 48 | 64>(64);
   const [jointMovement, setJointMovement] = createSignal<{ jointId: string; offset: [number, number, number] } | null>(null);
 
   // Debounce mould radius updates for better performance
