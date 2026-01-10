@@ -1,14 +1,15 @@
 // Dual Contouring surface extraction (Surface Nets variant)
 // Based on: https://people.compute.dtu.dk/janba/gallery/polygonization.html
 //
-// STATUS: Basic implementation complete - produces closed meshes with gradient-based
-// vertex projection. Currently using simple 2x2 grid face generation.
+// STATUS: Produces smooth closed meshes with Newton's method vertex projection
+// to isosurface. Vertices are accurately positioned on the surface, not grid-aligned.
+// Uses 2x2 grid face generation with shortest diagonal triangulation.
 //
 // TODO for better quality:
 // - Fix triangle winding order for proper front-face culling (currently using DoubleSide)
-// - Implement proper QEF (Quadratic Error Function) vertex positioning
-// - Add edge-based quad generation instead of grid-based
-// - Consider full marching cubes lookup table for better topology
+// - Consider QEF (Quadratic Error Function) for even better vertex positioning
+// - Add edge-based quad generation instead of grid-based for cleaner topology
+// - Implement feature-preserving techniques for sharp edges
 
 import type { VoxelGrid } from "./voxel-grid";
 import type { Vec3 } from "./types";
@@ -138,7 +139,10 @@ function cellIntersectsSurface(
 
 /**
  * Find optimal vertex position for a cell using surface projection
- * Uses gradient descent to project cell center onto isosurface
+ * Uses Newton's method to find the closest point on the isosurface to the cell center
+ *
+ * This implements the improved algorithm mentioned in the dual contouring reference:
+ * "tries to find the point on the isosurface which is closest to the original cube corner"
  */
 function findCellVertex(
   grid: VoxelGrid,
@@ -152,21 +156,34 @@ function findCellVertex(
   const cellCenter = grid.getPosition(x + 0.5, y + 0.5, z + 0.5);
   let pos: Vec3 = [cellCenter[0], cellCenter[1], cellCenter[2]];
 
-  // Simple iterative projection: move along gradient toward surface
-  const maxIterations = 8;
+  // Use Newton's method for fast convergence to isosurface
+  // This is more aggressive than gradient descent and converges faster
+  const maxIterations = 20; // Increased from 8
+  const tolerance = 0.0001; // Tighter tolerance (was 0.001)
+
   for (let iter = 0; iter < maxIterations; iter++) {
     const dist = evaluateSDF(pos) - isoValue;
 
     // Close enough to surface
-    if (Math.abs(dist) < 0.001) {
+    if (Math.abs(dist) < tolerance) {
       break;
     }
 
     // Compute gradient at current position
     const grad = computeGradient(pos, evaluateSDF);
 
-    // Move toward surface (gradient points away from surface, so subtract)
-    const stepSize = dist * 0.5; // Damped step
+    // Gradient magnitude for normalization
+    const gradLen = Math.sqrt(grad[0] * grad[0] + grad[1] * grad[1] + grad[2] * grad[2]);
+
+    if (gradLen < 0.0001) {
+      // Gradient too small, can't make progress
+      break;
+    }
+
+    // Newton's method: move exactly to the surface along gradient direction
+    // Distance to surface divided by gradient magnitude gives step size
+    const stepSize = dist / gradLen;
+
     pos = [
       pos[0] - grad[0] * stepSize,
       pos[1] - grad[1] * stepSize,
