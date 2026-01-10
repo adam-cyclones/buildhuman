@@ -51,6 +51,8 @@ export default function ThreeScene(props: ThreeSceneProps) {
       color: 0x95c0d0,
       flatShading: true,
       side: THREE.DoubleSide, // TODO: Fix triangle winding in dual-contouring.ts, then use FrontSide
+      transparent: true,
+      opacity: 0.8,
     });
     mesh = new THREE.Mesh(geometry, material);
     scene.add(mesh);

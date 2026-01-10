@@ -42,6 +42,8 @@ const Humans = () => {
   const [debouncedMouldRadius, setDebouncedMouldRadius] = createSignal(0.5);
   const [voxelResolution, setVoxelResolution] = createSignal<32 | 48 | 64>(64);
   const [jointMovement, setJointMovement] = createSignal<{ jointId: string; offset: [number, number, number] } | null>(null);
+  const [showSkeleton, setShowSkeleton] = createSignal(true);
+  const [selectedJointId, setSelectedJointId] = createSignal<string | null>(null);
 
   // Debounce mould radius updates for better performance
   let radiusDebounceTimer: number | undefined;
@@ -192,6 +194,8 @@ const Humans = () => {
         onAddHuman={addHuman}
         mouldRadius={debouncedMouldRadius()}
         jointMovement={jointMovement()}
+        showSkeleton={showSkeleton()}
+        selectedJointId={selectedJointId()}
       />
 
       <div class="inspector">
@@ -307,37 +311,55 @@ const Humans = () => {
                                   {expandedNodes().has(skeletonNodeId) && (
                                     <>
                                       {/* Torso (root joint) */}
-                                      <div class="tree-item tree-indent-4">
+                                      <div
+                                        class={`tree-item tree-indent-4 ${selectedJointId() === 'torso' ? 'active' : ''}`}
+                                        onClick={() => setSelectedJointId('torso')}
+                                      >
                                         <span class="tree-icon">🦴</span>
                                         <span class="tree-label">torso</span>
                                       </div>
 
                                       {/* Head */}
-                                      <div class="tree-item tree-indent-5">
+                                      <div
+                                        class={`tree-item tree-indent-5 ${selectedJointId() === 'head' ? 'active' : ''}`}
+                                        onClick={() => setSelectedJointId('head')}
+                                      >
                                         <span class="tree-icon">🦴</span>
                                         <span class="tree-label">head</span>
                                       </div>
 
                                       {/* Left shoulder */}
-                                      <div class="tree-item tree-indent-5">
+                                      <div
+                                        class={`tree-item tree-indent-5 ${selectedJointId() === 'shoulder-left' ? 'active' : ''}`}
+                                        onClick={() => setSelectedJointId('shoulder-left')}
+                                      >
                                         <span class="tree-icon">🦴</span>
                                         <span class="tree-label">shoulder-left</span>
                                       </div>
 
                                       {/* Right shoulder */}
-                                      <div class="tree-item tree-indent-5">
+                                      <div
+                                        class={`tree-item tree-indent-5 ${selectedJointId() === 'shoulder-right' ? 'active' : ''}`}
+                                        onClick={() => setSelectedJointId('shoulder-right')}
+                                      >
                                         <span class="tree-icon">🦴</span>
                                         <span class="tree-label">shoulder-right</span>
                                       </div>
 
                                       {/* Left hip */}
-                                      <div class="tree-item tree-indent-5">
+                                      <div
+                                        class={`tree-item tree-indent-5 ${selectedJointId() === 'hip-left' ? 'active' : ''}`}
+                                        onClick={() => setSelectedJointId('hip-left')}
+                                      >
                                         <span class="tree-icon">🦴</span>
                                         <span class="tree-label">hip-left</span>
                                       </div>
 
                                       {/* Right hip */}
-                                      <div class="tree-item tree-indent-5">
+                                      <div
+                                        class={`tree-item tree-indent-5 ${selectedJointId() === 'hip-right' ? 'active' : ''}`}
+                                        onClick={() => setSelectedJointId('hip-right')}
+                                      >
                                         <span class="tree-icon">🦴</span>
                                         <span class="tree-label">hip-right</span>
                                       </div>
@@ -436,6 +458,17 @@ const Humans = () => {
                         onInput={(e) => updateMouldRadius(parseFloat(e.currentTarget.value))}
                         class="property-slider"
                       />
+                    </div>
+
+                    <div class="property-group">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={showSkeleton()}
+                          onChange={(e) => setShowSkeleton(e.currentTarget.checked)}
+                        />
+                        Show Skeleton
+                      </label>
                     </div>
                   </div>
 

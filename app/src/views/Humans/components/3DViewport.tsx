@@ -6,6 +6,8 @@ type ThreeDViewportProps = {
   onAddHuman: () => void;
   mouldRadius: number;
   jointMovement: { jointId: string; offset: [number, number, number] } | null;
+  showSkeleton: boolean;
+  selectedJointId: string | null;
 }
 
 const ThreeDViewport = (props: ThreeDViewportProps) => {
@@ -47,6 +49,8 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
           mouldRadius={props.mouldRadius}
           jointMovement={props.jointMovement}
           showWireframe={showWireframe()}
+          showSkeleton={props.showSkeleton}
+          selectedJointId={props.selectedJointId}
         />
       </div>
     </div>

@@ -11,19 +11,26 @@ type VoxelMorphSceneProps = {
   mouldRadius: number;
   jointMovement: { jointId: string; offset: [number, number, number] } | null;
   showWireframe: boolean;
+  showSkeleton: boolean;
+  selectedJointId: string | null;
 };
 
 export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   let sceneMesh: THREE.Mesh | undefined;
   let wireframeMesh: THREE.LineSegments | undefined;
+  let skeletonGroup: THREE.Group | undefined;
+  let jointSpheres: Map<string, THREE.Mesh> = new Map();
+  let currentScene: THREE.Scene | undefined;
   let currentSkeleton: Skeleton | undefined;
   let currentMouldManager: MouldManager | undefined;
   let isInitialized = false;
 
-  const handleSceneReady = (_scene: THREE.Scene, mesh: THREE.Mesh) => {
+  const handleSceneReady = (scene: THREE.Scene, mesh: THREE.Mesh) => {
+    currentScene = scene;
     sceneMesh = mesh;
     initializeSkeletonAndMoulds();
     updateMesh();
+    createSkeletonVisualization();
   };
 
   // Initialize skeleton and mould structure (only once)
@@ -261,6 +268,74 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     sceneMesh.add(wireframeMesh);
   };
 
+  // Create skeleton visualization with bones and joints
+  const createSkeletonVisualization = () => {
+    if (!currentScene || !currentSkeleton) return;
+
+    // Remove existing skeleton visualization
+    if (skeletonGroup) {
+      currentScene.remove(skeletonGroup);
+      skeletonGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
+          child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach(m => m.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      });
+    }
+
+    // Create new group for skeleton
+    skeletonGroup = new THREE.Group();
+    jointSpheres.clear();
+
+    // Materials
+    const boneMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 2 });
+    const jointMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+    const selectedJointMaterial = new THREE.MeshBasicMaterial({ color: 0xff00ff });
+    const jointGeometry = new THREE.SphereGeometry(0.03, 8, 8);
+
+    // Draw each joint as a sphere
+    const joints = currentSkeleton.getJoints();
+    for (const joint of joints) {
+      const worldPos = currentSkeleton.getWorldPosition(joint.id);
+
+      // Create joint sphere
+      const isSelected = joint.id === props.selectedJointId;
+      const sphere = new THREE.Mesh(
+        jointGeometry,
+        isSelected ? selectedJointMaterial : jointMaterial
+      );
+      sphere.position.set(worldPos[0], worldPos[1], worldPos[2]);
+      sphere.userData = { jointId: joint.id }; // Store joint ID for selection
+      skeletonGroup.add(sphere);
+      jointSpheres.set(joint.id, sphere);
+
+      // Draw bone line to parent
+      if (joint.parentId) {
+        const parentPos = currentSkeleton.getWorldPosition(joint.parentId);
+        const points = [
+          new THREE.Vector3(parentPos[0], parentPos[1], parentPos[2]),
+          new THREE.Vector3(worldPos[0], worldPos[1], worldPos[2])
+        ];
+        const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(lineGeometry, boneMaterial);
+        skeletonGroup.add(line);
+      }
+    }
+
+    skeletonGroup.visible = props.showSkeleton;
+
+    // Add skeleton as child of mesh so it rotates together
+    if (sceneMesh) {
+      sceneMesh.add(skeletonGroup);
+    } else {
+      currentScene.add(skeletonGroup);
+    }
+  };
+
   // Update mesh when radius changes
   createEffect(() => {
     // This will run whenever props.mouldRadius changes
@@ -274,6 +349,28 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   createEffect(() => {
     if (!wireframeMesh) return;
     wireframeMesh.visible = props.showWireframe;
+  });
+
+  // Handle skeleton visibility toggle
+  createEffect(() => {
+    if (!skeletonGroup) return;
+    skeletonGroup.visible = props.showSkeleton;
+  });
+
+  // Handle joint selection changes
+  createEffect(() => {
+    const selected = props.selectedJointId;
+    if (!jointSpheres.size) return;
+
+    // Update all joint materials
+    const jointMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+    const selectedJointMaterial = new THREE.MeshBasicMaterial({ color: 0xff00ff });
+
+    jointSpheres.forEach((sphere, jointId) => {
+      const oldMaterial = sphere.material as THREE.Material;
+      sphere.material = jointId === selected ? selectedJointMaterial : jointMaterial;
+      oldMaterial.dispose();
+    });
   });
 
   // Handle joint movements
@@ -318,6 +415,9 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
     // Update wireframe mesh
     updateWireframe(geometry);
+
+    // Update skeleton visualization
+    createSkeletonVisualization();
   });
 
   return <ThreeScene onSceneReady={handleSceneReady} />;
