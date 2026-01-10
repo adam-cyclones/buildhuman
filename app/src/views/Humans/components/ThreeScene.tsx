@@ -50,6 +50,7 @@ export default function ThreeScene(props: ThreeSceneProps) {
     const material = new THREE.MeshStandardMaterial({
       color: 0x95c0d0,
       flatShading: true,
+      side: THREE.DoubleSide, // TODO: Fix triangle winding in dual-contouring.ts, then use FrontSide
     });
     mesh = new THREE.Mesh(geometry, material);
     scene.add(mesh);

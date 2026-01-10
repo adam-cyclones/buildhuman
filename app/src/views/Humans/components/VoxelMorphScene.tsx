@@ -2,7 +2,7 @@ import { createEffect } from "solid-js";
 import * as THREE from "three";
 import ThreeScene from "./ThreeScene";
 import { VoxelGrid } from "../morphing/voxel-grid";
-import { marchingCubes } from "../morphing/marching-cubes";
+import { dualContouring } from "../morphing/dual-contouring";
 import { MouldManager } from "../morphing/mould-manager";
 
 type VoxelMorphSceneProps = {
@@ -86,8 +86,12 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     // Evaluate SDF with all moulds
     grid.evaluate(mouldManager);
 
-    // Extract surface
-    const meshData = marchingCubes(grid, 0);
+    // Extract surface using Dual Contouring
+    const meshData = dualContouring(
+      grid,
+      (p) => mouldManager.evaluateSDF(p),
+      0
+    );
 
     console.log("Generated mesh:", meshData.vertices.length / 3, "vertices");
 
