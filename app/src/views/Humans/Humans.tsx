@@ -1,4 +1,4 @@
-import { createSignal, For, Switch, Match } from "solid-js";
+import { createSignal, createEffect, For, Switch, Match } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
@@ -42,8 +42,30 @@ const Humans = () => {
   const [debouncedMouldRadius, setDebouncedMouldRadius] = createSignal(0.5);
   const [voxelResolution, setVoxelResolution] = createSignal<32 | 48 | 64>(64);
   const [jointMovement, setJointMovement] = createSignal<{ jointId: string; offset: [number, number, number] } | null>(null);
+  const [jointRotation, setJointRotation] = createSignal<{ jointId: string; euler: [number, number, number] } | null>(null);
   const [showSkeleton, setShowSkeleton] = createSignal(true);
   const [selectedJointId, setSelectedJointId] = createSignal<string | null>(null);
+  const [skeletonJoints, setSkeletonJoints] = createSignal<Array<{ id: string; parentId?: string; children: string[] }>>([]);
+  const [moulds, setMoulds] = createSignal<Array<{ id: string; shape: "sphere" | "capsule"; parentJointId?: string }>>([]);
+
+  // Auto-expand skeleton nodes when skeleton loads
+  createEffect(() => {
+    const joints = skeletonJoints();
+    if (joints.length > 0) {
+      setExpandedNodes(prev => {
+        const newSet = new Set(prev);
+        newSet.add('human-1'); // Expand first human
+        newSet.add('skeleton-1'); // Expand skeleton
+        // Auto-expand all joint nodes with children
+        joints.forEach(j => {
+          if (j.children.length > 0) {
+            newSet.add(`joint-${j.id}`);
+          }
+        });
+        return newSet;
+      });
+    }
+  });
 
   // Debounce mould radius updates for better performance
   let radiusDebounceTimer: number | undefined;
@@ -188,14 +210,64 @@ const Humans = () => {
     setJointMovement({ jointId, offset });
   };
 
+  const rotateJoint = (jointId: string, axis: 'x' | 'y' | 'z', degrees: number) => {
+    const radians = degrees * (Math.PI / 180);
+    const euler: [number, number, number] = [0, 0, 0];
+    if (axis === 'x') euler[0] = radians;
+    if (axis === 'y') euler[1] = radians;
+    if (axis === 'z') euler[2] = radians;
+    setJointRotation({ jointId, euler });
+  };
+
+  // Recursive component to render joint hierarchy
+  const JointTreeNode = (props: { joint: { id: string; parentId?: string; children: string[] }; indent: number }) => {
+    const nodeId = `joint-${props.joint.id}`;
+    const hasChildren = props.joint.children.length > 0;
+
+    return (
+      <>
+        <div
+          class={`tree-item tree-indent-${props.indent} ${selectedJointId() === props.joint.id ? 'active' : ''}`}
+          onClick={() => setSelectedJointId(props.joint.id)}
+        >
+          {hasChildren && (
+            <span
+              class={`tree-icon tree-arrow ${expandedNodes().has(nodeId) ? "expanded" : ""}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleNode(nodeId);
+              }}
+            >
+              ▶
+            </span>
+          )}
+          {!hasChildren && <span class="tree-icon" style="width: 12px; display: inline-block;"></span>}
+          <span class="tree-icon">🦴</span>
+          <span class="tree-label">{props.joint.id}</span>
+        </div>
+        {hasChildren && expandedNodes().has(nodeId) && (
+          <For each={props.joint.children}>
+            {(childId) => {
+              const childJoint = skeletonJoints().find(j => j.id === childId);
+              return childJoint ? <JointTreeNode joint={childJoint} indent={props.indent + 1} /> : null;
+            }}
+          </For>
+        )}
+      </>
+    );
+  };
+
   return (
     <div class="three-d-editor">
       <ThreeDViewport
         onAddHuman={addHuman}
         mouldRadius={debouncedMouldRadius()}
         jointMovement={jointMovement()}
+        jointRotation={jointRotation()}
         showSkeleton={showSkeleton()}
         selectedJointId={selectedJointId()}
+        onSkeletonReady={setSkeletonJoints}
+        onMouldsReady={setMoulds}
       />
 
       <div class="inspector">
@@ -309,61 +381,9 @@ const Humans = () => {
                                     <span class="tree-label">Skeleton</span>
                                   </div>
                                   {expandedNodes().has(skeletonNodeId) && (
-                                    <>
-                                      {/* Torso (root joint) */}
-                                      <div
-                                        class={`tree-item tree-indent-4 ${selectedJointId() === 'torso' ? 'active' : ''}`}
-                                        onClick={() => setSelectedJointId('torso')}
-                                      >
-                                        <span class="tree-icon">🦴</span>
-                                        <span class="tree-label">torso</span>
-                                      </div>
-
-                                      {/* Head */}
-                                      <div
-                                        class={`tree-item tree-indent-5 ${selectedJointId() === 'head' ? 'active' : ''}`}
-                                        onClick={() => setSelectedJointId('head')}
-                                      >
-                                        <span class="tree-icon">🦴</span>
-                                        <span class="tree-label">head</span>
-                                      </div>
-
-                                      {/* Left shoulder */}
-                                      <div
-                                        class={`tree-item tree-indent-5 ${selectedJointId() === 'shoulder-left' ? 'active' : ''}`}
-                                        onClick={() => setSelectedJointId('shoulder-left')}
-                                      >
-                                        <span class="tree-icon">🦴</span>
-                                        <span class="tree-label">shoulder-left</span>
-                                      </div>
-
-                                      {/* Right shoulder */}
-                                      <div
-                                        class={`tree-item tree-indent-5 ${selectedJointId() === 'shoulder-right' ? 'active' : ''}`}
-                                        onClick={() => setSelectedJointId('shoulder-right')}
-                                      >
-                                        <span class="tree-icon">🦴</span>
-                                        <span class="tree-label">shoulder-right</span>
-                                      </div>
-
-                                      {/* Left hip */}
-                                      <div
-                                        class={`tree-item tree-indent-5 ${selectedJointId() === 'hip-left' ? 'active' : ''}`}
-                                        onClick={() => setSelectedJointId('hip-left')}
-                                      >
-                                        <span class="tree-icon">🦴</span>
-                                        <span class="tree-label">hip-left</span>
-                                      </div>
-
-                                      {/* Right hip */}
-                                      <div
-                                        class={`tree-item tree-indent-5 ${selectedJointId() === 'hip-right' ? 'active' : ''}`}
-                                        onClick={() => setSelectedJointId('hip-right')}
-                                      >
-                                        <span class="tree-icon">🦴</span>
-                                        <span class="tree-label">hip-right</span>
-                                      </div>
-                                    </>
+                                    <For each={skeletonJoints().filter(j => !j.parentId)}>
+                                      {(rootJoint) => <JointTreeNode joint={rootJoint} indent={4} />}
+                                    </For>
                                   )}
 
                                   {/* Moulds hierarchy */}
@@ -377,32 +397,14 @@ const Humans = () => {
                                     <span class="tree-label">Moulds</span>
                                   </div>
                                   {expandedNodes().has(mouldsNodeId) && (
-                                    <>
-                                      <div class="tree-item tree-indent-4">
-                                        <span class="tree-icon">●</span>
-                                        <span class="tree-label">head (sphere)</span>
-                                      </div>
-                                      <div class="tree-item tree-indent-4">
-                                        <span class="tree-icon">●</span>
-                                        <span class="tree-label">torso (sphere)</span>
-                                      </div>
-                                      <div class="tree-item tree-indent-4">
-                                        <span class="tree-icon">⬭</span>
-                                        <span class="tree-label">arm-left (capsule)</span>
-                                      </div>
-                                      <div class="tree-item tree-indent-4">
-                                        <span class="tree-icon">⬭</span>
-                                        <span class="tree-label">arm-right (capsule)</span>
-                                      </div>
-                                      <div class="tree-item tree-indent-4">
-                                        <span class="tree-icon">⬭</span>
-                                        <span class="tree-label">leg-left (capsule)</span>
-                                      </div>
-                                      <div class="tree-item tree-indent-4">
-                                        <span class="tree-icon">⬭</span>
-                                        <span class="tree-label">leg-right (capsule)</span>
-                                      </div>
-                                    </>
+                                    <For each={moulds()}>
+                                      {(mould) => (
+                                        <div class="tree-item tree-indent-4">
+                                          <span class="tree-icon">{mould.shape === 'sphere' ? '●' : '⬭'}</span>
+                                          <span class="tree-label">{mould.id} ({mould.shape})</span>
+                                        </div>
+                                      )}
+                                    </For>
                                   )}
                                 </>
                               )}
@@ -472,39 +474,39 @@ const Humans = () => {
                     </div>
                   </div>
 
-                  <div class="property-section">
-                    <h4>Skeleton Test (Phase 4)</h4>
+                  {selectedJointId() && (
+                    <div class="property-section">
+                      <h4>Joint: {selectedJointId()}</h4>
 
-                    <div class="property-group">
-                      <label>Left Arm</label>
-                      <div style="display: flex; gap: 4px;">
-                        <button onClick={() => moveJoint('shoulder-left', 'x', -0.05)} style="flex: 1;">← X</button>
-                        <button onClick={() => moveJoint('shoulder-left', 'x', 0.05)} style="flex: 1;">X →</button>
-                        <button onClick={() => moveJoint('shoulder-left', 'y', -0.05)} style="flex: 1;">↓ Y</button>
-                        <button onClick={() => moveJoint('shoulder-left', 'y', 0.05)} style="flex: 1;">Y ↑</button>
+                      <div class="property-group">
+                        <label>Rotation</label>
+                        <div style="display: flex; gap: 4px; margin-bottom: 4px;">
+                          <button onClick={() => rotateJoint(selectedJointId()!, 'x', -15)} style="flex: 1;">↻ X</button>
+                          <button onClick={() => rotateJoint(selectedJointId()!, 'x', 15)} style="flex: 1;">↺ X</button>
+                          <button onClick={() => rotateJoint(selectedJointId()!, 'y', -15)} style="flex: 1;">↻ Y</button>
+                          <button onClick={() => rotateJoint(selectedJointId()!, 'y', 15)} style="flex: 1;">↺ Y</button>
+                        </div>
+                        <div style="display: flex; gap: 4px;">
+                          <button onClick={() => rotateJoint(selectedJointId()!, 'z', -15)} style="flex: 1;">↻ Z</button>
+                          <button onClick={() => rotateJoint(selectedJointId()!, 'z', 15)} style="flex: 1;">↺ Z</button>
+                        </div>
+                      </div>
+
+                      <div class="property-group">
+                        <label>Translation</label>
+                        <div style="display: flex; gap: 4px; margin-bottom: 4px;">
+                          <button onClick={() => moveJoint(selectedJointId()!, 'x', -0.05)} style="flex: 1;">← X</button>
+                          <button onClick={() => moveJoint(selectedJointId()!, 'x', 0.05)} style="flex: 1;">X →</button>
+                          <button onClick={() => moveJoint(selectedJointId()!, 'y', -0.05)} style="flex: 1;">↓ Y</button>
+                          <button onClick={() => moveJoint(selectedJointId()!, 'y', 0.05)} style="flex: 1;">Y ↑</button>
+                        </div>
+                        <div style="display: flex; gap: 4px;">
+                          <button onClick={() => moveJoint(selectedJointId()!, 'z', -0.05)} style="flex: 1;">← Z</button>
+                          <button onClick={() => moveJoint(selectedJointId()!, 'z', 0.05)} style="flex: 1;">Z →</button>
+                        </div>
                       </div>
                     </div>
-
-                    <div class="property-group">
-                      <label>Right Arm</label>
-                      <div style="display: flex; gap: 4px;">
-                        <button onClick={() => moveJoint('shoulder-right', 'x', -0.05)} style="flex: 1;">← X</button>
-                        <button onClick={() => moveJoint('shoulder-right', 'x', 0.05)} style="flex: 1;">X →</button>
-                        <button onClick={() => moveJoint('shoulder-right', 'y', -0.05)} style="flex: 1;">↓ Y</button>
-                        <button onClick={() => moveJoint('shoulder-right', 'y', 0.05)} style="flex: 1;">Y ↑</button>
-                      </div>
-                    </div>
-
-                    <div class="property-group">
-                      <label>Head</label>
-                      <div style="display: flex; gap: 4px;">
-                        <button onClick={() => moveJoint('head', 'x', -0.05)} style="flex: 1;">← X</button>
-                        <button onClick={() => moveJoint('head', 'x', 0.05)} style="flex: 1;">X →</button>
-                        <button onClick={() => moveJoint('head', 'y', -0.05)} style="flex: 1;">↓ Y</button>
-                        <button onClick={() => moveJoint('head', 'y', 0.05)} style="flex: 1;">Y ↑</button>
-                      </div>
-                    </div>
-                  </div>
+                  )}
 
                   <div class="property-section">
                     <h4>Basic Parameters</h4>

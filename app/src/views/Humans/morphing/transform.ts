@@ -109,3 +109,53 @@ export function addVec3(a: Vec3, b: Vec3): Vec3 {
 export function subVec3(a: Vec3, b: Vec3): Vec3 {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 }
+
+/**
+ * Create quaternion from Euler angles (in radians)
+ * Order: ZYX (yaw, pitch, roll)
+ */
+export function eulerToQuat(x: number, y: number, z: number): Quat {
+  const cx = Math.cos(x * 0.5);
+  const cy = Math.cos(y * 0.5);
+  const cz = Math.cos(z * 0.5);
+  const sx = Math.sin(x * 0.5);
+  const sy = Math.sin(y * 0.5);
+  const sz = Math.sin(z * 0.5);
+
+  return [
+    sx * cy * cz - cx * sy * sz,
+    cx * sy * cz + sx * cy * sz,
+    cx * cy * sz - sx * sy * cz,
+    cx * cy * cz + sx * sy * sz
+  ];
+}
+
+/**
+ * Multiply two quaternions (combine rotations)
+ * Result = a * b (applies b first, then a)
+ */
+export function multiplyQuat(a: Quat, b: Quat): Quat {
+  const [ax, ay, az, aw] = a;
+  const [bx, by, bz, bw] = b;
+
+  return [
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw,
+    aw * bw - ax * bx - ay * by - az * bz
+  ];
+}
+
+/**
+ * Normalize a quaternion
+ */
+export function normalizeQuat(q: Quat): Quat {
+  const [x, y, z, w] = q;
+  const len = Math.sqrt(x * x + y * y + z * z + w * w);
+
+  if (len === 0) {
+    return identityQuat();
+  }
+
+  return [x / len, y / len, z / len, w / len];
+}

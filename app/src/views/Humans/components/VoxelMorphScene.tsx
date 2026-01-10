@@ -5,14 +5,17 @@ import { VoxelGrid } from "../morphing/voxel-grid";
 import { dualContouring } from "../morphing/dual-contouring";
 import { MouldManager } from "../morphing/mould-manager";
 import { Skeleton } from "../morphing/skeleton";
-import { identityQuat } from "../morphing/transform";
+import { identityQuat, eulerToQuat, multiplyQuat } from "../morphing/transform";
 
 type VoxelMorphSceneProps = {
   mouldRadius: number;
   jointMovement: { jointId: string; offset: [number, number, number] } | null;
+  jointRotation: { jointId: string; euler: [number, number, number] } | null;
   showWireframe: boolean;
   showSkeleton: boolean;
   selectedJointId: string | null;
+  onSkeletonReady?: (joints: Array<{ id: string; parentId?: string; children: string[] }>) => void;
+  onMouldsReady?: (moulds: Array<{ id: string; shape: "sphere" | "capsule"; parentJointId?: string }>) => void;
 };
 
 export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
@@ -39,61 +42,190 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
     console.log("Initializing skeleton and moulds with bone transforms");
 
-    // Create skeleton with joints for a simple humanoid
+    // Create skeleton with joints for a more complete humanoid
     // Joints now use localOffset (parent-relative) and localRotation
     const skeleton = new Skeleton();
     const identityRot = identityQuat();
 
-    // Root joint (pelvis/torso center) - world position [0,0,0]
+    // Root joint (pelvis) - world position [0,0,0]
     skeleton.addJoint({
-      id: "torso",
-      localOffset: [0, 0, 0], // Root has no parent, so local = world
+      id: "pelvis",
+      localOffset: [0, 0, 0],
       localRotation: identityRot,
-      children: ["head", "shoulder-left", "shoulder-right", "hip-left", "hip-right"],
+      children: ["spine-lower", "hip-left", "hip-right"],
     });
 
-    // Head joint - offset UP from torso
+    // Spine chain
+    skeleton.addJoint({
+      id: "spine-lower",
+      localOffset: [0, 0.15, 0],
+      localRotation: identityRot,
+      parentId: "pelvis",
+      children: ["spine-upper"],
+    });
+
+    skeleton.addJoint({
+      id: "spine-upper",
+      localOffset: [0, 0.15, 0],
+      localRotation: identityRot,
+      parentId: "spine-lower",
+      children: ["chest"],
+    });
+
+    skeleton.addJoint({
+      id: "chest",
+      localOffset: [0, 0.15, 0],
+      localRotation: identityRot,
+      parentId: "spine-upper",
+      children: ["neck", "shoulder-left", "shoulder-right"],
+    });
+
+    // Neck and head
+    skeleton.addJoint({
+      id: "neck",
+      localOffset: [0, 0.15, 0],
+      localRotation: identityRot,
+      parentId: "chest",
+      children: ["head"],
+    });
+
     skeleton.addJoint({
       id: "head",
-      localOffset: [0, 0.5, 0], // 0.5 units up in torso's local space
+      localOffset: [0, 0.1, 0],
       localRotation: identityRot,
-      parentId: "torso",
+      parentId: "neck",
       children: [],
     });
 
-    // Left shoulder - offset LEFT and slightly UP from torso
+    // Left arm chain
     skeleton.addJoint({
       id: "shoulder-left",
-      localOffset: [-0.4, 0.1, 0], // Left in torso's local space
+      localOffset: [-0.15, 0.05, 0],
       localRotation: identityRot,
-      parentId: "torso",
+      parentId: "chest",
+      children: ["elbow-left"],
+    });
+
+    skeleton.addJoint({
+      id: "elbow-left",
+      localOffset: [-0.25, 0, 0],
+      localRotation: identityRot,
+      parentId: "shoulder-left",
+      children: ["wrist-left"],
+    });
+
+    skeleton.addJoint({
+      id: "wrist-left",
+      localOffset: [-0.2, 0, 0],
+      localRotation: identityRot,
+      parentId: "elbow-left",
+      children: ["hand-left"],
+    });
+
+    skeleton.addJoint({
+      id: "hand-left",
+      localOffset: [-0.08, 0, 0],
+      localRotation: identityRot,
+      parentId: "wrist-left",
       children: [],
     });
 
-    // Right shoulder - offset RIGHT and slightly UP from torso
+    // Right arm chain
     skeleton.addJoint({
       id: "shoulder-right",
-      localOffset: [0.4, 0.1, 0], // Right in torso's local space
+      localOffset: [0.15, 0.05, 0],
       localRotation: identityRot,
-      parentId: "torso",
+      parentId: "chest",
+      children: ["elbow-right"],
+    });
+
+    skeleton.addJoint({
+      id: "elbow-right",
+      localOffset: [0.25, 0, 0],
+      localRotation: identityRot,
+      parentId: "shoulder-right",
+      children: ["wrist-right"],
+    });
+
+    skeleton.addJoint({
+      id: "wrist-right",
+      localOffset: [0.2, 0, 0],
+      localRotation: identityRot,
+      parentId: "elbow-right",
+      children: ["hand-right"],
+    });
+
+    skeleton.addJoint({
+      id: "hand-right",
+      localOffset: [0.08, 0, 0],
+      localRotation: identityRot,
+      parentId: "wrist-right",
       children: [],
     });
 
-    // Left hip - offset LEFT and DOWN from torso
+    // Left leg chain
     skeleton.addJoint({
       id: "hip-left",
-      localOffset: [-0.15, -0.5, 0], // Down in torso's local space
+      localOffset: [-0.1, 0, 0],
       localRotation: identityRot,
-      parentId: "torso",
+      parentId: "pelvis",
+      children: ["knee-left"],
+    });
+
+    skeleton.addJoint({
+      id: "knee-left",
+      localOffset: [0, -0.4, 0],
+      localRotation: identityRot,
+      parentId: "hip-left",
+      children: ["ankle-left"],
+    });
+
+    skeleton.addJoint({
+      id: "ankle-left",
+      localOffset: [0, -0.35, 0],
+      localRotation: identityRot,
+      parentId: "knee-left",
+      children: ["foot-left"],
+    });
+
+    skeleton.addJoint({
+      id: "foot-left",
+      localOffset: [0, -0.05, 0.08],
+      localRotation: identityRot,
+      parentId: "ankle-left",
       children: [],
     });
 
-    // Right hip - offset RIGHT and DOWN from torso
+    // Right leg chain
     skeleton.addJoint({
       id: "hip-right",
-      localOffset: [0.15, -0.5, 0], // Down in torso's local space
+      localOffset: [0.1, 0, 0],
       localRotation: identityRot,
-      parentId: "torso",
+      parentId: "pelvis",
+      children: ["knee-right"],
+    });
+
+    skeleton.addJoint({
+      id: "knee-right",
+      localOffset: [0, -0.4, 0],
+      localRotation: identityRot,
+      parentId: "hip-right",
+      children: ["ankle-right"],
+    });
+
+    skeleton.addJoint({
+      id: "ankle-right",
+      localOffset: [0, -0.35, 0],
+      localRotation: identityRot,
+      parentId: "knee-right",
+      children: ["foot-right"],
+    });
+
+    skeleton.addJoint({
+      id: "foot-right",
+      localOffset: [0, -0.05, 0.08],
+      localRotation: identityRot,
+      parentId: "ankle-right",
       children: [],
     });
 
@@ -105,73 +237,211 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     currentSkeleton = skeleton;
     currentMouldManager = mouldManager;
 
-    // Create moulds structure in BONE-LOCAL space
-    // Moulds are now attached to bone frames, not world positions
+    // Notify parent of skeleton structure
+    if (props.onSkeletonReady) {
+      const joints = skeleton.getJoints().map(j => ({
+        id: j.id,
+        parentId: j.parentId,
+        children: j.children
+      }));
+      props.onSkeletonReady(joints);
+    }
+
+    // Create moulds structure following bone hierarchy
+    // Capsules connect parent joints to child joints along bone tangents
     const blendRadius = 0.2;
 
-    // Head sphere - centered on head joint
+    // Head sphere
     mouldManager.addMould({
       id: "head",
       shape: "sphere",
-      center: [0, 0, 0], // At head joint origin (bone-local)
-      radius: 0.5 * 0.4,
+      center: [0, 0.05, 0],
+      radius: 0.5 * 0.15,
       blendRadius,
       parentJointId: "head",
     });
 
-    // Torso sphere - centered on torso joint
+    // Neck capsule (connects chest to head through neck joint)
     mouldManager.addMould({
-      id: "torso",
-      shape: "sphere",
-      center: [0, 0, 0], // At torso joint origin (bone-local)
-      radius: 0.5 * 0.6,
+      id: "neck",
+      shape: "capsule",
+      center: [0, 0, 0],
+      endPoint: [0, 0.1, 0], // To head joint (local offset)
+      radius: 0.5 * 0.08,
       blendRadius,
-      parentJointId: "torso",
+      parentJointId: "neck",
     });
 
-    // Left arm capsule - extends down and left from shoulder
+    // Chest/Upper torso
     mouldManager.addMould({
-      id: "arm-left",
+      id: "chest",
+      shape: "sphere",
+      center: [0, 0, 0],
+      radius: 0.5 * 0.18,
+      blendRadius,
+      parentJointId: "chest",
+    });
+
+    // Spine segments (capsules following bone chain)
+    mouldManager.addMould({
+      id: "spine-upper",
       shape: "capsule",
-      center: [0, 0, 0], // Start at shoulder joint (bone-local)
-      endPoint: [-0.3, -0.2, 0], // End point in shoulder's local space
+      center: [0, 0, 0],
+      endPoint: [0, 0.15, 0], // To chest
       radius: 0.5 * 0.15,
+      blendRadius,
+      parentJointId: "spine-upper",
+    });
+
+    mouldManager.addMould({
+      id: "spine-lower",
+      shape: "capsule",
+      center: [0, 0, 0],
+      endPoint: [0, 0.15, 0], // To spine-upper
+      radius: 0.5 * 0.16,
+      blendRadius,
+      parentJointId: "spine-lower",
+    });
+
+    // Pelvis
+    mouldManager.addMould({
+      id: "pelvis",
+      shape: "sphere",
+      center: [0, 0, 0],
+      radius: 0.5 * 0.17,
+      blendRadius,
+      parentJointId: "pelvis",
+    });
+
+    // Left arm chain (capsules follow bone direction)
+    mouldManager.addMould({
+      id: "upper-arm-left",
+      shape: "capsule",
+      center: [0, 0, 0],
+      endPoint: [-0.25, 0, 0], // To elbow (shoulder's local offset to elbow)
+      radius: 0.5 * 0.07,
       blendRadius,
       parentJointId: "shoulder-left",
     });
 
-    // Right arm capsule - extends down and right from shoulder
     mouldManager.addMould({
-      id: "arm-right",
+      id: "forearm-left",
       shape: "capsule",
-      center: [0, 0, 0], // Start at shoulder joint (bone-local)
-      endPoint: [0.3, -0.2, 0], // End point in shoulder's local space
-      radius: 0.5 * 0.15,
+      center: [0, 0, 0],
+      endPoint: [-0.2, 0, 0], // To wrist
+      radius: 0.5 * 0.06,
+      blendRadius,
+      parentJointId: "elbow-left",
+    });
+
+    mouldManager.addMould({
+      id: "hand-left",
+      shape: "sphere",
+      center: [-0.04, 0, 0], // Midpoint of hand
+      radius: 0.5 * 0.05,
+      blendRadius,
+      parentJointId: "hand-left",
+    });
+
+    // Right arm chain
+    mouldManager.addMould({
+      id: "upper-arm-right",
+      shape: "capsule",
+      center: [0, 0, 0],
+      endPoint: [0.25, 0, 0], // To elbow
+      radius: 0.5 * 0.07,
       blendRadius,
       parentJointId: "shoulder-right",
     });
 
-    // Left leg capsule - extends down from hip
     mouldManager.addMould({
-      id: "leg-left",
+      id: "forearm-right",
       shape: "capsule",
-      center: [0, 0, 0], // Start at hip joint (bone-local)
-      endPoint: [0, -0.4, 0], // Extend down in hip's local space
-      radius: 0.5 * 0.2,
+      center: [0, 0, 0],
+      endPoint: [0.2, 0, 0], // To wrist
+      radius: 0.5 * 0.06,
+      blendRadius,
+      parentJointId: "elbow-right",
+    });
+
+    mouldManager.addMould({
+      id: "hand-right",
+      shape: "sphere",
+      center: [0.04, 0, 0], // Midpoint of hand
+      radius: 0.5 * 0.05,
+      blendRadius,
+      parentJointId: "hand-right",
+    });
+
+    // Left leg chain
+    mouldManager.addMould({
+      id: "thigh-left",
+      shape: "capsule",
+      center: [0, 0, 0],
+      endPoint: [0, -0.4, 0], // To knee
+      radius: 0.5 * 0.1,
       blendRadius,
       parentJointId: "hip-left",
     });
 
-    // Right leg capsule - extends down from hip
     mouldManager.addMould({
-      id: "leg-right",
+      id: "shin-left",
       shape: "capsule",
-      center: [0, 0, 0], // Start at hip joint (bone-local)
-      endPoint: [0, -0.4, 0], // Extend down in hip's local space
-      radius: 0.5 * 0.2,
+      center: [0, 0, 0],
+      endPoint: [0, -0.35, 0], // To ankle
+      radius: 0.5 * 0.08,
+      blendRadius,
+      parentJointId: "knee-left",
+    });
+
+    mouldManager.addMould({
+      id: "foot-left",
+      shape: "sphere",
+      center: [0, 0, 0.04],
+      radius: 0.5 * 0.06,
+      blendRadius,
+      parentJointId: "foot-left",
+    });
+
+    // Right leg chain
+    mouldManager.addMould({
+      id: "thigh-right",
+      shape: "capsule",
+      center: [0, 0, 0],
+      endPoint: [0, -0.4, 0], // To knee
+      radius: 0.5 * 0.1,
       blendRadius,
       parentJointId: "hip-right",
     });
+
+    mouldManager.addMould({
+      id: "shin-right",
+      shape: "capsule",
+      center: [0, 0, 0],
+      endPoint: [0, -0.35, 0], // To ankle
+      radius: 0.5 * 0.08,
+      blendRadius,
+      parentJointId: "knee-right",
+    });
+
+    mouldManager.addMould({
+      id: "foot-right",
+      shape: "sphere",
+      center: [0, 0, 0.04],
+      radius: 0.5 * 0.06,
+      blendRadius,
+      parentJointId: "foot-right",
+    });
+
+    // Notify parent of moulds structure
+    if (props.onMouldsReady) {
+      const moulds = mouldManager.getMoulds().map(m => ({
+        id: m.id,
+        shape: m.shape,
+        parentJointId: m.parentJointId
+      }));
+      props.onMouldsReady(moulds);
+    }
 
     isInitialized = true;
   };
@@ -180,26 +450,34 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   const updateMouldSizes = () => {
     if (!currentMouldManager) return;
 
-    const baseRadius = props.mouldRadius;
+    const r = props.mouldRadius;
 
-    // Update each mould's radius
-    const headMould = currentMouldManager.getMould("head");
-    if (headMould) headMould.radius = baseRadius * 0.4;
+    // Update each mould's radius (preserving relative proportions)
+    const moulds = [
+      { id: "head", radius: r * 0.15 },
+      { id: "neck", radius: r * 0.08 },
+      { id: "chest", radius: r * 0.18 },
+      { id: "spine-upper", radius: r * 0.15 },
+      { id: "spine-lower", radius: r * 0.16 },
+      { id: "pelvis", radius: r * 0.17 },
+      { id: "upper-arm-left", radius: r * 0.07 },
+      { id: "forearm-left", radius: r * 0.06 },
+      { id: "hand-left", radius: r * 0.05 },
+      { id: "upper-arm-right", radius: r * 0.07 },
+      { id: "forearm-right", radius: r * 0.06 },
+      { id: "hand-right", radius: r * 0.05 },
+      { id: "thigh-left", radius: r * 0.1 },
+      { id: "shin-left", radius: r * 0.08 },
+      { id: "foot-left", radius: r * 0.06 },
+      { id: "thigh-right", radius: r * 0.1 },
+      { id: "shin-right", radius: r * 0.08 },
+      { id: "foot-right", radius: r * 0.06 },
+    ];
 
-    const torsoMould = currentMouldManager.getMould("torso");
-    if (torsoMould) torsoMould.radius = baseRadius * 0.6;
-
-    const armLeftMould = currentMouldManager.getMould("arm-left");
-    if (armLeftMould) armLeftMould.radius = baseRadius * 0.15;
-
-    const armRightMould = currentMouldManager.getMould("arm-right");
-    if (armRightMould) armRightMould.radius = baseRadius * 0.15;
-
-    const legLeftMould = currentMouldManager.getMould("leg-left");
-    if (legLeftMould) legLeftMould.radius = baseRadius * 0.2;
-
-    const legRightMould = currentMouldManager.getMould("leg-right");
-    if (legRightMould) legRightMould.radius = baseRadius * 0.2;
+    moulds.forEach(({ id, radius }) => {
+      const mould = currentMouldManager!.getMould(id);
+      if (mould) mould.radius = radius;
+    });
   };
 
   // Regenerate mesh geometry
@@ -274,7 +552,10 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
     // Remove existing skeleton visualization
     if (skeletonGroup) {
-      currentScene.remove(skeletonGroup);
+      // Remove from actual parent (sceneMesh or currentScene)
+      if (skeletonGroup.parent) {
+        skeletonGroup.parent.remove(skeletonGroup);
+      }
       skeletonGroup.traverse((child) => {
         if (child instanceof THREE.Mesh || child instanceof THREE.Line) {
           child.geometry.dispose();
@@ -400,6 +681,63 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     );
 
     console.log("Regenerated mesh:", meshData.vertices.length / 3, "vertices");
+
+    // Update Three.js geometry
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(meshData.vertices), 3)
+    );
+    geometry.setIndex(meshData.indices);
+    geometry.computeVertexNormals();
+
+    sceneMesh.geometry.dispose();
+    sceneMesh.geometry = geometry;
+
+    // Update wireframe mesh
+    updateWireframe(geometry);
+
+    // Update skeleton visualization
+    createSkeletonVisualization();
+  });
+
+  // Handle joint rotations
+  createEffect(() => {
+    const rotation = props.jointRotation;
+    if (!rotation || !currentSkeleton || !sceneMesh || !currentMouldManager) return;
+
+    console.log("Rotating joint:", rotation.jointId, "by", rotation.euler);
+
+    // Get current joint rotation
+    const joint = currentSkeleton.getJoint(rotation.jointId);
+    if (!joint) return;
+
+    // Convert euler angles to quaternion
+    const deltaQuat = eulerToQuat(rotation.euler[0], rotation.euler[1], rotation.euler[2]);
+
+    // Multiply current rotation by delta rotation
+    const newRotation = multiplyQuat(joint.localRotation, deltaQuat);
+
+    // Apply the new rotation
+    currentSkeleton.setJointLocalRotation(rotation.jointId, newRotation);
+
+    // Regenerate mesh with updated skeleton rotations
+    const grid = new VoxelGrid(64, {
+      min: [-1, -1, -1],
+      max: [1, 1, 1],
+    });
+
+    // Evaluate SDF with updated rotations
+    grid.evaluate(currentMouldManager);
+
+    // Extract surface
+    const meshData = dualContouring(
+      grid,
+      (p) => currentMouldManager!.evaluateSDF(p),
+      0
+    );
+
+    console.log("Regenerated mesh after rotation:", meshData.vertices.length / 3, "vertices");
 
     // Update Three.js geometry
     const geometry = new THREE.BufferGeometry();

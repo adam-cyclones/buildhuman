@@ -668,6 +668,26 @@ html, body, #root {
   padding-left: 5rem;
 }
 
+.tree-indent-6 {
+  padding-left: 6rem;
+}
+
+.tree-indent-7 {
+  padding-left: 7rem;
+}
+
+.tree-indent-8 {
+  padding-left: 8rem;
+}
+
+.tree-indent-9 {
+  padding-left: 9rem;
+}
+
+.tree-indent-10 {
+  padding-left: 10rem;
+}
+
 .tree-rename-input {
   flex: 1;
   background: var(--light-gray);

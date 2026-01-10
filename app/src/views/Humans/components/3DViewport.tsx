@@ -6,8 +6,11 @@ type ThreeDViewportProps = {
   onAddHuman: () => void;
   mouldRadius: number;
   jointMovement: { jointId: string; offset: [number, number, number] } | null;
+  jointRotation: { jointId: string; euler: [number, number, number] } | null;
   showSkeleton: boolean;
   selectedJointId: string | null;
+  onSkeletonReady?: (joints: Array<{ id: string; parentId?: string; children: string[] }>) => void;
+  onMouldsReady?: (moulds: Array<{ id: string; shape: "sphere" | "capsule"; parentJointId?: string }>) => void;
 }
 
 const ThreeDViewport = (props: ThreeDViewportProps) => {
@@ -48,9 +51,12 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
         <VoxelMorphScene
           mouldRadius={props.mouldRadius}
           jointMovement={props.jointMovement}
+          jointRotation={props.jointRotation}
           showWireframe={showWireframe()}
           showSkeleton={props.showSkeleton}
           selectedJointId={props.selectedJointId}
+          onSkeletonReady={props.onSkeletonReady}
+          onMouldsReady={props.onMouldsReady}
         />
       </div>
     </div>
