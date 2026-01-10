@@ -42,8 +42,31 @@ export class Skeleton {
   }
 
   /**
+   * Update a joint's local position
+   */
+  setJointPosition(jointId: string, position: Vec3): void {
+    const joint = this.joints.get(jointId);
+    if (joint) {
+      joint.position = position;
+    }
+  }
+
+  /**
+   * Move a joint by an offset (relative movement)
+   */
+  moveJoint(jointId: string, offset: Vec3): void {
+    const joint = this.joints.get(jointId);
+    if (joint) {
+      joint.position = [
+        joint.position[0] + offset[0],
+        joint.position[1] + offset[1],
+        joint.position[2] + offset[2],
+      ];
+    }
+  }
+
+  /**
    * Get world position of a joint (accounting for parent transforms)
-   * For Phase 2, this is simple position inheritance
    */
   getWorldPosition(jointId: string): Vec3 {
     const joint = this.joints.get(jointId);

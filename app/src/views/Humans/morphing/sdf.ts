@@ -18,6 +18,42 @@ export function sphereSDF(point: Vec3, center: Vec3, radius: number): number {
 }
 
 /**
+ * Signed distance function for a capsule (line segment with rounded ends)
+ * @param point - Point to evaluate
+ * @param a - Start point of line segment
+ * @param b - End point of line segment
+ * @param radius - Radius of rounded ends
+ * @returns Distance from point to capsule surface (negative = inside)
+ */
+export function capsuleSDF(point: Vec3, a: Vec3, b: Vec3, radius: number): number {
+  // Vector from a to b
+  const ba = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+
+  // Vector from a to point
+  const pa = [point[0] - a[0], point[1] - a[1], point[2] - a[2]];
+
+  // Project point onto line segment (clamped to [0, 1])
+  const baDot = ba[0] * ba[0] + ba[1] * ba[1] + ba[2] * ba[2];
+  const paDot = pa[0] * ba[0] + pa[1] * ba[1] + pa[2] * ba[2];
+  const h = Math.max(0, Math.min(1, paDot / baDot));
+
+  // Closest point on line segment
+  const closest = [
+    a[0] + ba[0] * h,
+    a[1] + ba[1] * h,
+    a[2] + ba[2] * h,
+  ];
+
+  // Distance from point to closest point on segment
+  const dx = point[0] - closest[0];
+  const dy = point[1] - closest[1];
+  const dz = point[2] - closest[2];
+  const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+  return distance - radius;
+}
+
+/**
  * Polynomial smooth minimum for organic blending between SDFs
  * Creates smooth, natural transitions between shapes
  *

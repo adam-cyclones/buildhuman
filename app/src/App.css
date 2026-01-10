@@ -660,6 +660,14 @@ html, body, #root {
   padding-left: 3rem;
 }
 
+.tree-indent-4 {
+  padding-left: 4rem;
+}
+
+.tree-indent-5 {
+  padding-left: 5rem;
+}
+
 .tree-rename-input {
   flex: 1;
   background: var(--light-gray);

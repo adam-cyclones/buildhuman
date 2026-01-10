@@ -39,6 +39,18 @@ const Humans = () => {
   const [sceneTab, setSceneTab] = createSignal("Scene");
   const sceneTabs = ["Scene", "Properties"];
   const [mouldRadius, setMouldRadius] = createSignal(0.5);
+  const [debouncedMouldRadius, setDebouncedMouldRadius] = createSignal(0.5);
+  const [jointMovement, setJointMovement] = createSignal<{ jointId: string; offset: [number, number, number] } | null>(null);
+
+  // Debounce mould radius updates for better performance
+  let radiusDebounceTimer: number | undefined;
+  const updateMouldRadius = (value: number) => {
+    setMouldRadius(value);
+    if (radiusDebounceTimer) clearTimeout(radiusDebounceTimer);
+    radiusDebounceTimer = setTimeout(() => {
+      setDebouncedMouldRadius(value);
+    }, 150) as unknown as number;
+  };
 
   const selectedHuman = () => humans().find((h) => h.id === selectedHumanId());
 
@@ -165,9 +177,21 @@ const Humans = () => {
   // Expose exportGltf globally for File menu
   (window as any).exportGltf = exportGltf;
 
+  const moveJoint = (jointId: string, axis: 'x' | 'y' | 'z', amount: number) => {
+    const offset: [number, number, number] = [0, 0, 0];
+    if (axis === 'x') offset[0] = amount;
+    if (axis === 'y') offset[1] = amount;
+    if (axis === 'z') offset[2] = amount;
+    setJointMovement({ jointId, offset });
+  };
+
   return (
     <div class="three-d-editor">
-      <ThreeDViewport onAddHuman={addHuman} mouldRadius={mouldRadius()} />
+      <ThreeDViewport
+        onAddHuman={addHuman}
+        mouldRadius={debouncedMouldRadius()}
+        jointMovement={jointMovement()}
+      />
 
       <div class="inspector">
         <div class="inspector-header">
@@ -201,6 +225,10 @@ const Humans = () => {
                     {expandedNodes().has("humans") && (
                       <For each={humans()}>
                         {(human) => {
+                          const humanNodeId = `human-${human.id}`;
+                          const skeletonNodeId = `skeleton-${human.id}`;
+                          const mouldsNodeId = `moulds-${human.id}`;
+
                           const [tempName, setTempName] = createSignal(human.name);
 
                           const startRename = () => {
@@ -220,36 +248,142 @@ const Humans = () => {
                           };
 
                           return (
-                            <div
-                              class={`tree-item tree-indent-2 ${
-                                selectedHumanId() === human.id ? "active" : ""
-                              }`}
-                              onClick={() => setSelectedHumanId(human.id)}
-                              onDblClick={startRename}
-                            >
-                              <span class="tree-icon">•</span>
-                              <Icon name="user" size={16} class="tree-icon-svg" />
-                              {renamingId() === human.id ? (
-                                <input
-                                  type="text"
-                                  class="tree-rename-input"
-                                  value={tempName()}
-                                  onInput={(e) => setTempName(e.currentTarget.value)}
-                                  onBlur={finishRename}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") {
-                                      finishRename();
-                                    } else if (e.key === "Escape") {
-                                      setRenamingId(null);
-                                    }
+                            <>
+                              <div
+                                class={`tree-item tree-indent-2 ${
+                                  selectedHumanId() === human.id ? "active" : ""
+                                }`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedHumanId(human.id);
+                                }}
+                                onDblClick={startRename}
+                              >
+                                <span
+                                  class={`tree-icon tree-arrow ${expandedNodes().has(humanNodeId) ? "expanded" : ""}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleNode(humanNodeId);
                                   }}
-                                  autofocus
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                              ) : (
-                                <span class="tree-label">{human.name}</span>
+                                >
+                                  ▶
+                                </span>
+                                <Icon name="user" size={16} class="tree-icon-svg" />
+                                {renamingId() === human.id ? (
+                                  <input
+                                    type="text"
+                                    class="tree-rename-input"
+                                    value={tempName()}
+                                    onInput={(e) => setTempName(e.currentTarget.value)}
+                                    onBlur={finishRename}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        finishRename();
+                                      } else if (e.key === "Escape") {
+                                        setRenamingId(null);
+                                      }
+                                    }}
+                                    autofocus
+                                    onClick={(e) => e.stopPropagation()}
+                                  />
+                                ) : (
+                                  <span class="tree-label">{human.name}</span>
+                                )}
+                              </div>
+
+                              {expandedNodes().has(humanNodeId) && (
+                                <>
+                                  {/* Skeleton hierarchy */}
+                                  <div class="tree-item tree-category tree-indent-3">
+                                    <span
+                                      class={`tree-icon tree-arrow ${expandedNodes().has(skeletonNodeId) ? "expanded" : ""}`}
+                                      onClick={() => toggleNode(skeletonNodeId)}
+                                    >
+                                      ▶
+                                    </span>
+                                    <span class="tree-label">Skeleton</span>
+                                  </div>
+                                  {expandedNodes().has(skeletonNodeId) && (
+                                    <>
+                                      {/* Torso (root joint) */}
+                                      <div class="tree-item tree-indent-4">
+                                        <span class="tree-icon">🦴</span>
+                                        <span class="tree-label">torso</span>
+                                      </div>
+
+                                      {/* Head */}
+                                      <div class="tree-item tree-indent-5">
+                                        <span class="tree-icon">🦴</span>
+                                        <span class="tree-label">head</span>
+                                      </div>
+
+                                      {/* Left shoulder */}
+                                      <div class="tree-item tree-indent-5">
+                                        <span class="tree-icon">🦴</span>
+                                        <span class="tree-label">shoulder-left</span>
+                                      </div>
+
+                                      {/* Right shoulder */}
+                                      <div class="tree-item tree-indent-5">
+                                        <span class="tree-icon">🦴</span>
+                                        <span class="tree-label">shoulder-right</span>
+                                      </div>
+
+                                      {/* Left hip */}
+                                      <div class="tree-item tree-indent-5">
+                                        <span class="tree-icon">🦴</span>
+                                        <span class="tree-label">hip-left</span>
+                                      </div>
+
+                                      {/* Right hip */}
+                                      <div class="tree-item tree-indent-5">
+                                        <span class="tree-icon">🦴</span>
+                                        <span class="tree-label">hip-right</span>
+                                      </div>
+                                    </>
+                                  )}
+
+                                  {/* Moulds hierarchy */}
+                                  <div class="tree-item tree-category tree-indent-3">
+                                    <span
+                                      class={`tree-icon tree-arrow ${expandedNodes().has(mouldsNodeId) ? "expanded" : ""}`}
+                                      onClick={() => toggleNode(mouldsNodeId)}
+                                    >
+                                      ▶
+                                    </span>
+                                    <span class="tree-label">Moulds</span>
+                                  </div>
+                                  {expandedNodes().has(mouldsNodeId) && (
+                                    <>
+                                      <div class="tree-item tree-indent-4">
+                                        <span class="tree-icon">●</span>
+                                        <span class="tree-label">head (sphere)</span>
+                                      </div>
+                                      <div class="tree-item tree-indent-4">
+                                        <span class="tree-icon">●</span>
+                                        <span class="tree-label">torso (sphere)</span>
+                                      </div>
+                                      <div class="tree-item tree-indent-4">
+                                        <span class="tree-icon">⬭</span>
+                                        <span class="tree-label">arm-left (capsule)</span>
+                                      </div>
+                                      <div class="tree-item tree-indent-4">
+                                        <span class="tree-icon">⬭</span>
+                                        <span class="tree-label">arm-right (capsule)</span>
+                                      </div>
+                                      <div class="tree-item tree-indent-4">
+                                        <span class="tree-icon">⬭</span>
+                                        <span class="tree-label">leg-left (capsule)</span>
+                                      </div>
+                                      <div class="tree-item tree-indent-4">
+                                        <span class="tree-icon">⬭</span>
+                                        <span class="tree-label">leg-right (capsule)</span>
+                                      </div>
+                                    </>
+                                  )}
+                                </>
                               )}
-                            </div>
+                            </>
                           );
                         }}
                       </For>
@@ -283,7 +417,7 @@ const Humans = () => {
                     </div>
                   </div>
                   <div class="property-section">
-                    <h4>Mould System (Phase 1)</h4>
+                    <h4>Mould System</h4>
 
                     <div class="property-group">
                       <div class="property-label-row">
@@ -298,9 +432,43 @@ const Humans = () => {
                         max="1.0"
                         step="0.01"
                         value={mouldRadius()}
-                        onInput={(e) => setMouldRadius(parseFloat(e.currentTarget.value))}
+                        onInput={(e) => updateMouldRadius(parseFloat(e.currentTarget.value))}
                         class="property-slider"
                       />
+                    </div>
+                  </div>
+
+                  <div class="property-section">
+                    <h4>Skeleton Test (Phase 4)</h4>
+
+                    <div class="property-group">
+                      <label>Left Arm</label>
+                      <div style="display: flex; gap: 4px;">
+                        <button onClick={() => moveJoint('shoulder-left', 'x', -0.05)} style="flex: 1;">← X</button>
+                        <button onClick={() => moveJoint('shoulder-left', 'x', 0.05)} style="flex: 1;">X →</button>
+                        <button onClick={() => moveJoint('shoulder-left', 'y', -0.05)} style="flex: 1;">↓ Y</button>
+                        <button onClick={() => moveJoint('shoulder-left', 'y', 0.05)} style="flex: 1;">Y ↑</button>
+                      </div>
+                    </div>
+
+                    <div class="property-group">
+                      <label>Right Arm</label>
+                      <div style="display: flex; gap: 4px;">
+                        <button onClick={() => moveJoint('shoulder-right', 'x', -0.05)} style="flex: 1;">← X</button>
+                        <button onClick={() => moveJoint('shoulder-right', 'x', 0.05)} style="flex: 1;">X →</button>
+                        <button onClick={() => moveJoint('shoulder-right', 'y', -0.05)} style="flex: 1;">↓ Y</button>
+                        <button onClick={() => moveJoint('shoulder-right', 'y', 0.05)} style="flex: 1;">Y ↑</button>
+                      </div>
+                    </div>
+
+                    <div class="property-group">
+                      <label>Head</label>
+                      <div style="display: flex; gap: 4px;">
+                        <button onClick={() => moveJoint('head', 'x', -0.05)} style="flex: 1;">← X</button>
+                        <button onClick={() => moveJoint('head', 'x', 0.05)} style="flex: 1;">X →</button>
+                        <button onClick={() => moveJoint('head', 'y', -0.05)} style="flex: 1;">↓ Y</button>
+                        <button onClick={() => moveJoint('head', 'y', 0.05)} style="flex: 1;">Y ↑</button>
+                      </div>
                     </div>
                   </div>
 
