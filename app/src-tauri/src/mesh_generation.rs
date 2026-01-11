@@ -3,8 +3,8 @@
 // and generate meshes using Rust-based dual contouring
 
 use crate::mesh::{
-    dual_contouring, JointData, MouldData, MouldManager, Skeleton, VoxelGrid,
-    MeshData, Pt3, AABB,
+    dual_contouring, dual_contouring_fast, JointData, MouldData, MouldManager, Skeleton,
+    VoxelGrid, MeshData, Pt3, AABB,
 };
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
@@ -71,15 +71,26 @@ pub fn update_moulds(moulds: Vec<MouldData>) {
 }
 
 /// Generate mesh from current state using dual contouring
-pub fn generate_mesh_from_state(resolution: u32) -> Result<MeshData, String> {
-    let state = MESH_STATE.lock().unwrap();
+/// Use fast_mode=true for realtime interaction (skips Newton projection)
+pub fn generate_mesh_from_state_with_quality(
+    resolution: u32,
+    fast_mode: bool,
+) -> Result<MeshData, String> {
+    let mut state = MESH_STATE.lock().unwrap();
 
     let mould_manager = state
         .mould_manager
-        .as_ref()
+        .as_mut()
         .ok_or("No mould manager initialized")?;
 
-    println!("Generating mesh with resolution {}", resolution);
+    println!(
+        "Generating mesh with resolution {} (fast_mode: {})",
+        resolution, fast_mode
+    );
+
+    // CRITICAL OPTIMIZATION: Rebuild transform cache before grid evaluation
+    // This caches all skeleton transforms once instead of recalculating per-voxel
+    mould_manager.rebuild_cache();
 
     // Define bounds for the mesh (slightly larger than character)
     let bounds = AABB {
@@ -93,8 +104,12 @@ pub fn generate_mesh_from_state(resolution: u32) -> Result<MeshData, String> {
 
     println!("Voxel grid evaluated, extracting surface...");
 
-    // Extract mesh using dual contouring
-    let mesh = dual_contouring(&grid, mould_manager, 0.0);
+    // Extract mesh using dual contouring (fast or quality mode)
+    let mesh = if fast_mode {
+        dual_contouring_fast(&grid, mould_manager, 0.0)
+    } else {
+        dual_contouring(&grid, mould_manager, 0.0)
+    };
 
     println!(
         "Mesh generated: {} vertices, {} triangles",
@@ -103,4 +118,9 @@ pub fn generate_mesh_from_state(resolution: u32) -> Result<MeshData, String> {
     );
 
     Ok(mesh)
+}
+
+/// Legacy API - uses quality mode
+pub fn generate_mesh_from_state(resolution: u32) -> Result<MeshData, String> {
+    generate_mesh_from_state_with_quality(resolution, false)
 }

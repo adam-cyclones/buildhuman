@@ -16,10 +16,30 @@ struct CellVertex {
 /// - Placing one vertex per cell (not per edge)
 /// - Projecting vertices onto the actual isosurface
 /// - Generating quads that triangulate cleanly
+///
+/// Set `fast_mode` to true for interactive previews (skips Newton projection)
 pub fn dual_contouring(
     grid: &VoxelGrid,
     mould_manager: &MouldManager,
     iso_value: f32,
+) -> MeshData {
+    dual_contouring_impl(grid, mould_manager, iso_value, false)
+}
+
+/// Fast preview version for realtime interaction
+pub fn dual_contouring_fast(
+    grid: &VoxelGrid,
+    mould_manager: &MouldManager,
+    iso_value: f32,
+) -> MeshData {
+    dual_contouring_impl(grid, mould_manager, iso_value, true)
+}
+
+fn dual_contouring_impl(
+    grid: &VoxelGrid,
+    mould_manager: &MouldManager,
+    iso_value: f32,
+    fast_mode: bool,
 ) -> MeshData {
     let mut vertices: Vec<f32> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -38,7 +58,12 @@ pub fn dual_contouring(
                 }
 
                 // Find best vertex position for this cell
-                let vertex_pos = find_cell_vertex(grid, mould_manager, x, y, z, iso_value);
+                let vertex_pos = if fast_mode {
+                    // Fast mode: just use cell center (no Newton iteration)
+                    grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5)
+                } else {
+                    find_cell_vertex(grid, mould_manager, x, y, z, iso_value)
+                };
 
                 // Add to vertex array
                 let vertex_index = (vertices.len() / 3) as u32;
@@ -139,8 +164,9 @@ fn find_cell_vertex(
     let mut pos = cell_center;
 
     // Use Newton's method for fast convergence to isosurface
-    let max_iterations = 20;
-    let tolerance = 0.0001;
+    // Reduced iterations for better performance (was 20, now 8)
+    let max_iterations = 8;
+    let tolerance = 0.001; // Slightly relaxed tolerance
 
     for _ in 0..max_iterations {
         let dist = mould_manager.evaluate_sdf(&pos) - iso_value;

@@ -40,13 +40,17 @@ fn serialize_mesh_to_bytes(mesh: MeshData) -> Vec<u8> {
 }
 
 #[tauri::command]
-async fn generate_mesh_binary(resolution: Option<u32>) -> Result<tauri::ipc::Response, String> {
+async fn generate_mesh_binary(
+    resolution: Option<u32>,
+    fast_mode: Option<bool>,
+) -> Result<tauri::ipc::Response, String> {
     // Use default resolution of 32 if not provided
     let res = resolution.unwrap_or(32);
+    let fast = fast_mode.unwrap_or(false);
 
     // Run mesh generation in a background thread to avoid blocking
     let mesh = tokio::task::spawn_blocking(move || {
-        mesh_generation::generate_mesh_from_state(res)
+        mesh_generation::generate_mesh_from_state_with_quality(res, fast)
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))??;

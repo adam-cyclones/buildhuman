@@ -34,6 +34,15 @@ impl From<MouldData> for Mould {
 pub struct MouldManager {
     moulds: HashMap<String, Mould>,
     skeleton: Option<Skeleton>,
+    /// Cached world-space positions for fast SDF evaluation
+    mould_cache: HashMap<String, CachedMouldTransform>,
+    cache_valid: bool,
+}
+
+#[derive(Debug, Clone)]
+struct CachedMouldTransform {
+    world_center: Pt3,
+    world_end: Option<Pt3>,
 }
 
 impl Default for MouldManager {
@@ -47,66 +56,85 @@ impl MouldManager {
         Self {
             moulds: HashMap::new(),
             skeleton: None,
+            mould_cache: HashMap::new(),
+            cache_valid: false,
         }
     }
 
     pub fn add_mould(&mut self, mould: Mould) {
         self.moulds.insert(mould.id.clone(), mould);
+        self.cache_valid = false;
     }
 
     pub fn set_skeleton(&mut self, skeleton: Skeleton) {
         self.skeleton = Some(skeleton);
+        self.cache_valid = false;
+    }
+
+    /// Rebuild the transform cache - call this before evaluating grid
+    pub fn rebuild_cache(&mut self) {
+        if self.cache_valid {
+            return;
+        }
+
+        self.mould_cache.clear();
+
+        let skeleton = match self.skeleton.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
+
+        for (id, mould) in &self.moulds {
+            let (world_center, world_end) = if let Some(ref joint_id) = mould.parent_joint_id {
+                let center = skeleton.transform_point_to_world(joint_id, &mould.center);
+                let end = mould
+                    .end_point
+                    .map(|ep| skeleton.transform_point_to_world(joint_id, &ep));
+                (center, end)
+            } else {
+                (mould.center, mould.end_point)
+            };
+
+            self.mould_cache.insert(
+                id.clone(),
+                CachedMouldTransform {
+                    world_center,
+                    world_end,
+                },
+            );
+        }
+
+        self.cache_valid = true;
     }
 
     pub fn get_moulds(&self) -> Vec<&Mould> {
         self.moulds.values().collect()
     }
 
-    /// Evaluate the SDF at a given world-space point
+    /// Evaluate the SDF at a given world-space point using cached transforms
     /// This must be immutable (&self) for parallel iteration with rayon
     pub fn evaluate_sdf(&self, point: &Pt3) -> f32 {
         if self.moulds.is_empty() {
             return 1.0; // Outside
         }
 
-        let skeleton = self
-            .skeleton
-            .as_ref()
-            .expect("Skeleton not set on MouldManager");
-
-        // Blend all moulds with smooth min
+        // Blend all moulds with smooth min using CACHED transforms
         let mut result = f32::INFINITY;
 
-        for mould in self.moulds.values() {
+        for (id, mould) in &self.moulds {
+            // Use cached world-space positions - HUGE performance win!
+            let cached = self.mould_cache.get(id).expect("Cache not built");
+
             let sdf_value = match mould.shape {
                 MouldShape::Sphere => {
-                    let world_center = if let Some(ref joint_id) = mould.parent_joint_id {
-                        skeleton.transform_point_to_world(joint_id, &mould.center)
-                    } else {
-                        mould.center
-                    };
-                    sphere_sdf(point, &world_center, mould.radius)
+                    sphere_sdf(point, &cached.world_center, mould.radius)
                 }
                 MouldShape::Capsule => {
-                    if let Some(end_point) = mould.end_point {
-                        let (world_start, world_end) =
-                            if let Some(ref joint_id) = mould.parent_joint_id {
-                                let start =
-                                    skeleton.transform_point_to_world(joint_id, &mould.center);
-                                let end = skeleton.transform_point_to_world(joint_id, &end_point);
-                                (start, end)
-                            } else {
-                                (mould.center, end_point)
-                            };
-                        capsule_sdf(point, &world_start, &world_end, mould.radius)
+                    if let Some(world_end) = cached.world_end {
+                        capsule_sdf(point, &cached.world_center, &world_end, mould.radius)
                     } else {
                         // Degenerate capsule, treat as sphere
-                        let world_center = if let Some(ref joint_id) = mould.parent_joint_id {
-                            skeleton.transform_point_to_world(joint_id, &mould.center)
-                        } else {
-                            mould.center
-                        };
-                        sphere_sdf(point, &world_center, mould.radius)
+                        sphere_sdf(point, &cached.world_center, mould.radius)
                     }
                 }
             };

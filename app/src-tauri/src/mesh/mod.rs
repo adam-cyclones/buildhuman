@@ -6,7 +6,7 @@ pub mod types;
 pub mod voxel_grid;
 
 // Re-export commonly used items
-pub use dual_contouring::dual_contouring;
+pub use dual_contouring::{dual_contouring, dual_contouring_fast};
 pub use mould::MouldManager;
 pub use skeleton::Skeleton;
 pub use types::{JointData, MeshData, MouldData, Pt3, AABB};
