@@ -148,8 +148,6 @@ impl BrickMap {
     /// 1. Sample SDF on coarse grid to find surface regions
     /// 2. Allocate and evaluate only bricks near the surface
     pub fn allocate_surface_bricks(&mut self, mould_manager: &MouldManager, surface_thickness: f32) {
-        println!("Allocating surface bricks (two-pass algorithm)...");
-
         // Capture values needed in closures
         let brick_count = self.brick_count;
         let voxel_size = self.voxel_size;
@@ -202,10 +200,6 @@ impl BrickMap {
             })
             .collect();
 
-        println!("Found {} surface bricks out of {} total bricks",
-                 surface_bricks.len(),
-                 self.brick_count.pow(3));
-
         // Pass 2: Allocate and evaluate surface bricks
         for brick_coord in surface_bricks {
             self.bricks.insert(brick_coord, Brick::new());
@@ -213,9 +207,6 @@ impl BrickMap {
 
         // Evaluate all voxels in allocated bricks (in parallel)
         self.evaluate_allocated_bricks(mould_manager);
-
-        println!("Brick map memory: {:.2} MB",
-                 self.bricks.len() as f32 * BRICK_SIZE.pow(3) as f32 * 4.0 / 1_000_000.0);
     }
 
     /// Evaluate SDF at all voxels in allocated bricks

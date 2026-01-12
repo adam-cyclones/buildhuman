@@ -102,11 +102,6 @@ fn generate_mesh_from_state_dense(
         .as_mut()
         .ok_or("No mould manager initialized")?;
 
-    println!(
-        "Generating mesh with dense grid, resolution {} (fast_mode: {})",
-        resolution, fast_mode
-    );
-
     // CRITICAL OPTIMIZATION: Rebuild transform cache before grid evaluation
     // This caches all skeleton transforms once instead of recalculating per-voxel
     mould_manager.rebuild_cache();
@@ -121,20 +116,12 @@ fn generate_mesh_from_state_dense(
     let mut grid = VoxelGrid::new(resolution, bounds);
     grid.evaluate(mould_manager);
 
-    println!("Voxel grid evaluated, extracting surface...");
-
     // Extract mesh using dual contouring (fast or quality mode)
     let mesh = if fast_mode {
         dual_contouring_fast(&grid, mould_manager, 0.0)
     } else {
         dual_contouring(&grid, mould_manager, 0.0)
     };
-
-    println!(
-        "Mesh generated: {} vertices, {} triangles",
-        mesh.vertices.len() / 3,
-        mesh.indices.len() / 3
-    );
 
     Ok(mesh)
 }
@@ -158,11 +145,6 @@ pub fn generate_mesh_from_state_brick_map(
         .as_mut()
         .ok_or("No mould manager initialized")?;
 
-    println!(
-        "Generating high-res mesh with brick map, resolution {} (fast_mode: {})",
-        resolution, fast_mode
-    );
-
     // Rebuild transform cache before grid evaluation
     mould_manager.rebuild_cache();
 
@@ -180,18 +162,8 @@ pub fn generate_mesh_from_state_brick_map(
     let surface_thickness = 0.2; // Allocate bricks within 0.2 units of surface
     brick_map.allocate_surface_bricks(mould_manager, surface_thickness);
 
-    println!("Brick map allocated: {} bricks, {:.2} MB",
-             brick_map.brick_count(),
-             brick_map.memory_usage() as f32 / 1_000_000.0);
-
     // Extract mesh using dual contouring
     let mesh = dual_contouring_brick_map(&brick_map, mould_manager, 0.0, fast_mode);
-
-    println!(
-        "High-res mesh generated: {} vertices, {} triangles",
-        mesh.vertices.len() / 3,
-        mesh.indices.len() / 3
-    );
 
     Ok(mesh)
 }
