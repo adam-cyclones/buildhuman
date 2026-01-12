@@ -250,7 +250,22 @@ const Humans = () => {
     setJointRotation({ jointId, euler });
   };
 
-  const handleRotation = (e: Event, axis: 'x' | 'y' | 'z') => {
+  // Handle rotation input (continuous during drag)
+  const handleRotationInput = (e: Event, axis: 'x' | 'y' | 'z') => {
+    const target = e.currentTarget as HTMLInputElement;
+    const value = parseFloat(target.value);
+
+    // Calculate delta from current slider position
+    const currentValue = axis === 'x' ? sliderRotX() : axis === 'y' ? sliderRotY() : sliderRotZ();
+    const delta = value - currentValue;
+
+    if (Math.abs(delta) > 0.1 && selectedJointId()) { // Only update if meaningful change
+      rotateJoint(selectedJointId()!, axis, delta);
+    }
+  };
+
+  // Handle rotation change (on release)
+  const handleRotationChange = (e: Event, axis: 'x' | 'y' | 'z') => {
     const target = e.currentTarget as HTMLInputElement;
     const value = parseFloat(target.value);
 
@@ -258,13 +273,24 @@ const Humans = () => {
     if (axis === 'x') setSliderRotX(value);
     if (axis === 'y') setSliderRotY(value);
     if (axis === 'z') setSliderRotZ(value);
+  };
 
-    if (selectedJointId()) {
-      rotateJoint(selectedJointId()!, axis, value);
+  // Handle translation input (continuous during drag)
+  const handleTranslationInput = (e: Event, axis: 'x' | 'y' | 'z') => {
+    const target = e.currentTarget as HTMLInputElement;
+    const value = parseFloat(target.value);
+
+    // Calculate delta from current slider position
+    const currentValue = axis === 'x' ? sliderTransX() : axis === 'y' ? sliderTransY() : sliderTransZ();
+    const delta = value - currentValue;
+
+    if (Math.abs(delta) > 0.001 && selectedJointId()) { // Only update if meaningful change
+      moveJoint(selectedJointId()!, axis, delta);
     }
   };
 
-  const handleTranslation = (e: Event, axis: 'x' | 'y' | 'z') => {
+  // Handle translation change (on release)
+  const handleTranslationChange = (e: Event, axis: 'x' | 'y' | 'z') => {
     const target = e.currentTarget as HTMLInputElement;
     const value = parseFloat(target.value);
 
@@ -272,10 +298,6 @@ const Humans = () => {
     if (axis === 'x') setSliderTransX(value);
     if (axis === 'y') setSliderTransY(value);
     if (axis === 'z') setSliderTransZ(value);
-
-    if (selectedJointId()) {
-      moveJoint(selectedJointId()!, axis, value);
-    }
   };
 
   // Recursive component to render joint hierarchy
@@ -559,21 +581,48 @@ const Humans = () => {
                           <label>Rotation X</label>
                           <span class="property-value">{sliderRotX().toFixed(1)}°</span>
                         </div>
-                        <input type="range" min="-45" max="45" step="0.5" value={sliderRotX()} class="property-slider" onInput={(e) => handleRotation(e, 'x')} />
+                        <input
+                          type="range"
+                          min="-45"
+                          max="45"
+                          step="0.5"
+                          value={sliderRotX()}
+                          class="property-slider"
+                          onInput={(e) => handleRotationInput(e, 'x')}
+                          onChange={(e) => handleRotationChange(e, 'x')}
+                        />
                       </div>
                       <div class="property-group">
                         <div class="property-label-row">
                           <label>Rotation Y</label>
                           <span class="property-value">{sliderRotY().toFixed(1)}°</span>
                         </div>
-                        <input type="range" min="-45" max="45" step="0.5" value={sliderRotY()} class="property-slider" onInput={(e) => handleRotation(e, 'y')} />
+                        <input
+                          type="range"
+                          min="-45"
+                          max="45"
+                          step="0.5"
+                          value={sliderRotY()}
+                          class="property-slider"
+                          onInput={(e) => handleRotationInput(e, 'y')}
+                          onChange={(e) => handleRotationChange(e, 'y')}
+                        />
                       </div>
                       <div class="property-group">
                         <div class="property-label-row">
                           <label>Rotation Z</label>
                           <span class="property-value">{sliderRotZ().toFixed(1)}°</span>
                         </div>
-                        <input type="range" min="-45" max="45" step="0.5" value={sliderRotZ()} class="property-slider" onInput={(e) => handleRotation(e, 'z')} />
+                        <input
+                          type="range"
+                          min="-45"
+                          max="45"
+                          step="0.5"
+                          value={sliderRotZ()}
+                          class="property-slider"
+                          onInput={(e) => handleRotationInput(e, 'z')}
+                          onChange={(e) => handleRotationChange(e, 'z')}
+                        />
                       </div>
 
                       <div class="property-group">
@@ -581,21 +630,48 @@ const Humans = () => {
                           <label>Translation X</label>
                           <span class="property-value">{sliderTransX().toFixed(3)}m</span>
                         </div>
-                        <input type="range" min="-0.2" max="0.2" step="0.005" value={sliderTransX()} class="property-slider" onInput={(e) => handleTranslation(e, 'x')} />
+                        <input
+                          type="range"
+                          min="-0.2"
+                          max="0.2"
+                          step="0.005"
+                          value={sliderTransX()}
+                          class="property-slider"
+                          onInput={(e) => handleTranslationInput(e, 'x')}
+                          onChange={(e) => handleTranslationChange(e, 'x')}
+                        />
                       </div>
                       <div class="property-group">
                         <div class="property-label-row">
                           <label>Translation Y</label>
                           <span class="property-value">{sliderTransY().toFixed(3)}m</span>
                         </div>
-                        <input type="range" min="-0.2" max="0.2" step="0.005" value={sliderTransY()} class="property-slider" onInput={(e) => handleTranslation(e, 'y')} />
+                        <input
+                          type="range"
+                          min="-0.2"
+                          max="0.2"
+                          step="0.005"
+                          value={sliderTransY()}
+                          class="property-slider"
+                          onInput={(e) => handleTranslationInput(e, 'y')}
+                          onChange={(e) => handleTranslationChange(e, 'y')}
+                        />
                       </div>
                       <div class="property-group">
                         <div class="property-label-row">
                           <label>Translation Z</label>
                           <span class="property-value">{sliderTransZ().toFixed(3)}m</span>
                         </div>
-                        <input type="range" min="-0.2" max="0.2" step="0.005" value={sliderTransZ()} class="property-slider" onInput={(e) => handleTranslation(e, 'z')} />
+                        <input
+                          type="range"
+                          min="-0.2"
+                          max="0.2"
+                          step="0.005"
+                          value={sliderTransZ()}
+                          class="property-slider"
+                          onInput={(e) => handleTranslationInput(e, 'z')}
+                          onChange={(e) => handleTranslationChange(e, 'z')}
+                        />
                       </div>
                     </div>
                   )}
