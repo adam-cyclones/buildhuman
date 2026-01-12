@@ -100,8 +100,6 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       geometry.computeBoundingSphere();
       geometry.computeBoundingBox();
 
-      console.log("Successfully updated mesh from Rust data.");
-
       // Create/update wireframe mesh
       updateWireframe(geometry);
     } catch (e) {
@@ -112,8 +110,6 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   // Initialize skeleton and mould structure (only once)
   const initializeSkeletonAndMoulds = async () => {
     if (isInitialized) return;
-
-    console.log("Initializing skeleton and moulds with bone transforms");
 
     // Create skeleton with joints for a more complete humanoid
     // Joints now use localOffset (parent-relative) and localRotation
@@ -574,8 +570,6 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       // Send to Rust backend
       await invoke("update_skeleton", { joints });
       await invoke("update_moulds", { moulds });
-
-      console.log("Successfully synced skeleton and moulds to Rust backend");
     } catch (e) {
       console.error("Error syncing to Rust backend:", e);
     }
@@ -794,7 +788,6 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   const debouncedUpscale = () => {
     if (upscaleDebounceTimer) clearTimeout(upscaleDebounceTimer);
     upscaleDebounceTimer = setTimeout(() => {
-      console.log("Upscaling to high resolution...");
       updateMesh(false);
       createSkeletonVisualization(); // Update skeleton after interaction
     }, 300); // 300ms after last interaction (reduced from 500ms)
@@ -805,8 +798,6 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     const movement = props.jointMovement;
     if (!movement || !currentSkeleton || !sceneMesh || !currentMouldManager)
       return;
-
-    console.log("Moving joint:", movement.jointId, "by", movement.offset);
 
     // Move the joint
     currentSkeleton.moveJoint(movement.jointId, movement.offset);
@@ -826,8 +817,6 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     const rotation = props.jointRotation;
     if (!rotation || !currentSkeleton || !sceneMesh || !currentMouldManager)
       return;
-
-    console.log("Rotating joint:", rotation.jointId, "by", rotation.euler);
 
     // Get current joint rotation
     const joint = currentSkeleton.getJoint(rotation.jointId);
