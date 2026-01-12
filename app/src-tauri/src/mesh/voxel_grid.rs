@@ -1,3 +1,4 @@
+use crate::mesh::grid_trait::Grid;
 use crate::mesh::mould::MouldManager;
 use crate::mesh::types::{Pt3, Vec3, AABB};
 use rayon::prelude::*;
@@ -68,5 +69,20 @@ impl VoxelGrid {
                 y * self.cell_size,
                 z * self.cell_size,
             )
+    }
+}
+
+// Implement Grid trait for VoxelGrid
+impl Grid for VoxelGrid {
+    fn resolution(&self) -> u32 {
+        self.resolution
+    }
+
+    fn get(&self, x: u32, y: u32, z: u32) -> f32 {
+        self.get(x, y, z)
+    }
+
+    fn get_position(&self, x: f32, y: f32, z: f32) -> Pt3 {
+        self.get_position(x, y, z)
     }
 }

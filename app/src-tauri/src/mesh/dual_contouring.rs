@@ -1,3 +1,5 @@
+use crate::mesh::brick_map::BrickMap;
+use crate::mesh::grid_trait::Grid;
 use crate::mesh::mould::MouldManager;
 use crate::mesh::sdf::compute_gradient;
 use crate::mesh::types::{MeshData, Pt3, Vec3};
@@ -401,4 +403,183 @@ fn compute_normals(vertices: &[f32], indices: &[u32]) -> Vec<f32> {
     }
 
     normals
+}
+
+/// Dual contouring for BrickMap (high-resolution sparse grids)
+pub fn dual_contouring_brick_map(
+    brick_map: &BrickMap,
+    mould_manager: &MouldManager,
+    iso_value: f32,
+    fast_mode: bool,
+) -> MeshData {
+    // Use the generic Grid trait implementation
+    dual_contouring_generic(brick_map, mould_manager, iso_value, fast_mode)
+}
+
+/// Generic dual contouring that works with any Grid implementation
+fn dual_contouring_generic<G: Grid>(
+    grid: &G,
+    mould_manager: &MouldManager,
+    iso_value: f32,
+    fast_mode: bool,
+) -> MeshData {
+    let mut vertices: Vec<f32> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let res = grid.resolution();
+
+    // Store vertex index for each cell that contains the surface
+    let mut cell_vertices: HashMap<(u32, u32, u32), CellVertex> = HashMap::new();
+
+    // Step 1: Create vertices for cells that intersect the isosurface
+    for z in 0..res - 1 {
+        for y in 0..res - 1 {
+            for x in 0..res - 1 {
+                // Check if this cell intersects the isosurface
+                if !cell_intersects_surface_generic(grid, x, y, z, iso_value) {
+                    continue;
+                }
+
+                // Find best vertex position for this cell
+                let vertex_pos = if fast_mode {
+                    // Fast mode: just use cell center (no Newton iteration)
+                    grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5)
+                } else {
+                    find_cell_vertex_generic(grid, mould_manager, x, y, z, iso_value)
+                };
+
+                // Add to vertex array
+                let vertex_index = (vertices.len() / 3) as u32;
+                vertices.push(vertex_pos.x);
+                vertices.push(vertex_pos.y);
+                vertices.push(vertex_pos.z);
+
+                cell_vertices.insert(
+                    (x, y, z),
+                    CellVertex {
+                        position: vertex_pos,
+                        index: vertex_index,
+                    },
+                );
+            }
+        }
+    }
+
+    // Step 2: Generate faces between adjacent cells
+    for z in 0..res - 1 {
+        for y in 0..res - 1 {
+            for x in 0..res - 1 {
+                if !cell_vertices.contains_key(&(x, y, z)) {
+                    continue;
+                }
+
+                // Create face in +X direction (YZ plane)
+                if x < res - 2 {
+                    create_face_x(&cell_vertices, &mut indices, x, y, z);
+                }
+
+                // Create face in +Y direction (XZ plane)
+                if y < res - 2 {
+                    create_face_y(&cell_vertices, &mut indices, x, y, z);
+                }
+
+                // Create face in +Z direction (XY plane)
+                if z < res - 2 {
+                    create_face_z(&cell_vertices, &mut indices, x, y, z);
+                }
+            }
+        }
+    }
+
+    // Compute normals
+    let normals = compute_normals(&vertices, &indices);
+
+    MeshData {
+        vertices,
+        indices,
+        normals,
+    }
+}
+
+/// Check if a voxel cell intersects the isosurface (generic version)
+fn cell_intersects_surface_generic<G: Grid>(
+    grid: &G,
+    x: u32,
+    y: u32,
+    z: u32,
+    iso_value: f32,
+) -> bool {
+    // Get 8 corner values
+    let corners = [
+        grid.get(x, y, z),
+        grid.get(x + 1, y, z),
+        grid.get(x + 1, y, z + 1),
+        grid.get(x, y, z + 1),
+        grid.get(x, y + 1, z),
+        grid.get(x + 1, y + 1, z),
+        grid.get(x + 1, y + 1, z + 1),
+        grid.get(x, y + 1, z + 1),
+    ];
+
+    // Check if any corner is inside (< isoValue) and any is outside (>= isoValue)
+    let mut has_inside = false;
+    let mut has_outside = false;
+
+    for &value in &corners {
+        if value < iso_value {
+            has_inside = true;
+        } else {
+            has_outside = true;
+        }
+    }
+
+    has_inside && has_outside
+}
+
+/// Find optimal vertex position for a cell (generic version)
+fn find_cell_vertex_generic<G: Grid>(
+    grid: &G,
+    mould_manager: &MouldManager,
+    x: u32,
+    y: u32,
+    z: u32,
+    iso_value: f32,
+) -> Pt3 {
+    // Start at cell center
+    let cell_center = grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
+    let mut pos = cell_center;
+
+    // Use Newton's method for fast convergence to isosurface
+    let max_iterations = 8;
+    let tolerance = 0.001;
+
+    for _ in 0..max_iterations {
+        let dist = mould_manager.evaluate_sdf(&pos) - iso_value;
+
+        // Close enough to surface
+        if dist.abs() < tolerance {
+            break;
+        }
+
+        // Compute gradient at current position
+        let grad = compute_gradient(&pos, |p| mould_manager.evaluate_sdf(p));
+
+        // Gradient magnitude for normalization
+        let grad_len = grad.magnitude();
+
+        if grad_len < 0.0001 {
+            // Gradient too small, can't make progress
+            break;
+        }
+
+        // Newton's method: move exactly to the surface along gradient direction
+        let step_size = dist / grad_len;
+
+        pos = Pt3::new(
+            pos.x - grad.x * step_size,
+            pos.y - grad.y * step_size,
+            pos.z - grad.z * step_size,
+        );
+    }
+
+    pos
 }

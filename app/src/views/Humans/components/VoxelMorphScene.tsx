@@ -8,6 +8,7 @@ import { identityQuat, eulerToQuat, multiplyQuat } from "../morphing/transform";
 
 type VoxelMorphSceneProps = {
   mouldRadius: number;
+  voxelResolution: 32 | 48 | 64 | 96 | 128 | 256;
   jointMovement: { jointId: string; offset: [number, number, number] } | null;
   jointRotation: { jointId: string; euler: [number, number, number] } | null;
   showWireframe: boolean;
@@ -580,8 +581,8 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   // Regenerate mesh geometry
   const updateMesh = (lowRes: boolean = false) => {
     // Use lower resolution during interaction for responsiveness
-    // High res (32) for final, low res (16) for interactive updates
-    const resolution = lowRes ? 16 : 32;
+    // Use half the target resolution for interactive updates
+    const resolution = lowRes ? Math.max(16, props.voxelResolution / 2) : props.voxelResolution;
     regenerateMeshFromRust(resolution);
 
     /*
@@ -733,6 +734,14 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   createEffect(() => {
     // This will run whenever props.mouldRadius changes
     props.mouldRadius; // Track the dependency
+    if (isInitialized) {
+      updateMesh();
+    }
+  });
+
+  // Update mesh when voxel resolution changes
+  createEffect(() => {
+    props.voxelResolution; // Track the dependency
     if (isInitialized) {
       updateMesh();
     }

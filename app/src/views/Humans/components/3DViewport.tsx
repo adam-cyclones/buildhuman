@@ -5,6 +5,7 @@ import Icon from "../../../components/Icon";
 type ThreeDViewportProps = {
   onAddHuman: () => void;
   mouldRadius: number;
+  voxelResolution: 32 | 48 | 64 | 96 | 128 | 256;
   jointMovement: { jointId: string; offset: [number, number, number] } | null;
   jointRotation: { jointId: string; euler: [number, number, number] } | null;
   showSkeleton: boolean;
@@ -50,6 +51,7 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
       <div class="viewport-content">
         <VoxelMorphScene
           mouldRadius={props.mouldRadius}
+          voxelResolution={props.voxelResolution}
           jointMovement={props.jointMovement}
           jointRotation={props.jointRotation}
           showWireframe={showWireframe()}
