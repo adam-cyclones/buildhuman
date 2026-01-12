@@ -30,7 +30,12 @@ pub fn dual_contouring(
     dual_contouring_impl(grid, mould_manager, iso_value, false)
 }
 
-/// Fast preview version for realtime interaction
+/// Fast preview version for realtime interaction.
+///
+/// This provides a "topological preview" by using the center of each cell that
+/// crosses the isosurface, rather than calculating a feature-preserving vertex.
+/// It is much faster but not geometrically accurate, as vertices will not lie on
+/// the surface. It is suitable for quick previews during interactive editing.
 pub fn dual_contouring_fast(
     grid: &VoxelGrid,
     mould_manager: &MouldManager,
@@ -48,19 +53,20 @@ fn dual_contouring_impl(
     let res = grid.resolution;
 
     // Step 1: Create vertices for cells that intersect the isosurface (PARALLEL)
-    // Generate all cell coordinates
-    let cell_coords: Vec<(u32, u32, u32)> = (0..res - 1)
-        .flat_map(|z| {
-            (0..res - 1).flat_map(move |y| {
-                (0..res - 1).map(move |x| (x, y, z))
-            })
+    // Create a parallel iterator directly over the grid of cells
+    let surface_cells: Vec<((u32, u32, u32), Pt3)> = (0..res - 1)
+        .into_par_iter()
+        .flat_map(move |z| {
+            (0..res - 1)
+                .into_par_iter()
+                .map(move |y| (y, z))
         })
-        .collect();
-
-    // Parallel vertex creation
-    let surface_cells: Vec<((u32, u32, u32), Pt3)> = cell_coords
-        .par_iter()
-        .filter_map(|&(x, y, z)| {
+        .flat_map(move |(y, z)| {
+            (0..res - 1)
+                .into_par_iter()
+                .map(move |x| (x, y, z))
+        })
+        .filter_map(|(x, y, z)| {
             // Check if this cell intersects the isosurface
             if !cell_intersects_surface(grid, x, y, z, iso_value) {
                 return None;
@@ -68,7 +74,9 @@ fn dual_contouring_impl(
 
             // Find best vertex position for this cell
             let vertex_pos = if fast_mode {
-                // Fast mode: just use cell center (no Newton iteration)
+                // In fast mode, use the cell center directly. This is quick but doesn't project
+                // the vertex onto the isosurface or solve the QEF, so it's topologically correct
+                // but not geometrically accurate.
                 grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5)
             } else {
                 find_cell_vertex(grid, mould_manager, x, y, z, iso_value)
@@ -98,47 +106,82 @@ fn dual_contouring_impl(
     }
 
     // Step 2: Generate faces between adjacent cells (PARALLEL)
-    // Create a face when exactly one of two neighboring cells has a vertex
     let face_coords: Vec<(u32, u32, u32)> = cell_vertices.keys().copied().collect();
 
-    let indices = Mutex::new(Vec::new());
+    let indices: Vec<u32> = face_coords
+        .par_iter()
+        .flat_map(|&(x, y, z)| {
+            let mut local_indices = Vec::new();
 
-    face_coords.par_iter().for_each(|&(x, y, z)| {
-        let mut local_indices = Vec::new();
+            // Create face in +X direction (YZ plane)
+            // Check for edge crossing along X between (x,y,z) and (x+1,y,z)
+            if x < res - 1 && y < res - 2 && z < res - 2 {
+                let s0 = grid.get(x, y, z) < iso_value;
+                let s1 = grid.get(x + 1, y, z) < iso_value;
+                if s0 != s1 { // Sign change along X-axis
+                    create_face_x(&cell_vertices, &mut local_indices, x, y, z);
+                }
+            }
 
-        // Create face in +X direction (YZ plane)
-        // Needs cells: (x,y,z), (x,y,z+1), (x,y+1,z+1), (x,y+1,z)
-        if y < res - 2 && z < res - 2 {
-            create_face_x(&cell_vertices, &mut local_indices, x, y, z);
-        }
+            // Create face in +Y direction (XZ plane)
+            // Check for edge crossing along Y between (x,y,z) and (x,y+1,z)
+            if y < res - 1 && x < res - 2 && z < res - 2 {
+                let s0 = grid.get(x, y, z) < iso_value;
+                let s1 = grid.get(x, y + 1, z) < iso_value;
+                if s0 != s1 { // Sign change along Y-axis
+                    create_face_y(&cell_vertices, &mut local_indices, x, y, z);
+                }
+            }
 
-        // Create face in +Y direction (XZ plane)
-        // Needs cells: (x,y,z), (x+1,y,z), (x+1,y,z+1), (x,y,z+1)
-        if x < res - 2 && z < res - 2 {
-            create_face_y(&cell_vertices, &mut local_indices, x, y, z);
-        }
+            // Create face in +Z direction (XY plane)
+            // Check for edge crossing along Z between (x,y,z) and (x,y,z+1)
+            if z < res - 1 && x < res - 2 && y < res - 2 {
+                let s0 = grid.get(x, y, z) < iso_value;
+                let s1 = grid.get(x, y, z + 1) < iso_value;
+                if s0 != s1 { // Sign change along Z-axis
+                    create_face_z(&cell_vertices, &mut local_indices, x, y, z);
+                }
+            }
 
-        // Create face in +Z direction (XY plane)
-        // Needs cells: (x,y,z), (x+1,y,z), (x+1,y+1,z), (x,y+1,z)
-        if x < res - 2 && y < res - 2 {
-            create_face_z(&cell_vertices, &mut local_indices, x, y, z);
-        }
+            local_indices
+        })
+        .collect();
 
-        if !local_indices.is_empty() {
-            indices.lock().unwrap().extend(local_indices);
-        }
-    });
-
-    let indices = indices.into_inner().unwrap();
-
-    // Compute normals (simple per-face normals for now)
-    let normals = compute_normals(&vertices, &indices);
+    // Compute normals from SDF gradient for high quality, or face normals for fast mode
+    let normals = if fast_mode {
+        compute_normals(&vertices, &indices)
+    } else {
+        compute_normals_from_sdf(&vertices, mould_manager)
+    };
 
     MeshData {
         vertices,
         indices,
         normals,
     }
+}
+
+/// Compute per-vertex normals from the SDF gradient at the vertex position
+fn compute_normals_from_sdf(vertices: &[f32], mould_manager: &MouldManager) -> Vec<f32> {
+    let num_vertices = vertices.len() / 3;
+    let mut normals = Vec::with_capacity(vertices.len());
+
+    for i in 0..num_vertices {
+        let pos = Pt3::new(
+            vertices[i * 3],
+            vertices[i * 3 + 1],
+            vertices[i * 3 + 2],
+        );
+
+        let grad = compute_gradient(&pos, |p| mould_manager.evaluate_sdf(p));
+        let normal = grad.normalize();
+
+        normals.push(normal.x);
+        normals.push(normal.y);
+        normals.push(normal.z);
+    }
+
+    normals
 }
 
 /// Check if a voxel cell intersects the isosurface
@@ -171,8 +214,10 @@ fn cell_intersects_surface(grid: &VoxelGrid, x: u32, y: u32, z: u32, iso_value: 
     has_inside && has_outside
 }
 
-/// Find optimal vertex position for a cell using surface projection
-/// Uses Newton's method to find the closest point on the isosurface to the cell center
+use nalgebra::{SMatrix, SVector};
+
+/// Find optimal vertex position for a cell using a QEF solver
+/// This produces much higher quality results than simple surface projection
 fn find_cell_vertex(
     grid: &VoxelGrid,
     mould_manager: &MouldManager,
@@ -181,38 +226,121 @@ fn find_cell_vertex(
     z: u32,
     iso_value: f32,
 ) -> Pt3 {
-    // Start at cell center
     let cell_center = grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
-    let mut pos = cell_center;
+
+    // Solve QEF to get the feature-preserving vertex position
+    if let Some(pos) = solve_qef(grid, mould_manager, x, y, z, iso_value) {
+        // Clamp vertex to be within the cell to avoid artifacts
+        let min_bound = grid.get_position(x as f32, y as f32, z as f32);
+        let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
+
+        Pt3::new(
+            pos.x.clamp(min_bound.x, max_bound.x),
+            pos.y.clamp(min_bound.y, max_bound.y),
+            pos.z.clamp(min_bound.z, max_bound.z),
+        )
+    } else {
+        // Fallback to simple projection if QEF fails
+        project_to_surface_newton(cell_center, mould_manager, iso_value)
+    }
+}
+
+/// Solves the Quadratic Error Function for a cell to find the optimal vertex position.
+fn solve_qef<G: Grid>(
+    grid: &G,
+    mould_manager: &MouldManager,
+    x: u32,
+    y: u32,
+    z: u32,
+    iso_value: f32,
+) -> Option<Pt3> {
+    let mut ata = SMatrix::<f32, 3, 3>::zeros();
+    let mut atb = SVector::<f32, 3>::zeros();
+    let mut points_count = 0;
+
+    let corners = [
+        (x, y, z), (x + 1, y, z), (x, y + 1, z), (x + 1, y + 1, z),
+        (x, y, z + 1), (x + 1, y, z + 1), (x, y + 1, z + 1), (x + 1, y + 1, z + 1),
+    ];
+
+    let corner_values: Vec<_> = corners.iter().map(|&(cx, cy, cz)| grid.get(cx, cy, cz)).collect();
+
+    // Edges of the cell
+    let edges = [
+        (0, 1), (2, 3), (4, 5), (6, 7), // X-aligned
+        (0, 2), (1, 3), (4, 6), (5, 7), // Y-aligned
+        (0, 4), (1, 5), (2, 6), (3, 7), // Z-aligned
+    ];
+
+    for &(i0, i1) in &edges {
+        let v0 = corner_values[i0];
+        let v1 = corner_values[i1];
+
+        // Check if edge crosses the isosurface
+        if (v0 < iso_value) != (v1 < iso_value) {
+            let p0 = grid.get_position(corners[i0].0 as f32, corners[i0].1 as f32, corners[i0].2 as f32);
+            let p1 = grid.get_position(corners[i1].0 as f32, corners[i1].1 as f32, corners[i1].2 as f32);
+            
+            // Linear interpolation to find intersection point
+            let t = (iso_value - v0) / (v1 - v0);
+            let intersection_pos = p0.lerp(&p1, t);
+
+            // Compute gradient at intersection point
+            let normal = compute_gradient(&intersection_pos, |p| mould_manager.evaluate_sdf(p));
+            if normal.magnitude_squared() < 1e-6 { continue; }
+            let normal = normal.normalize();
+            
+            let n_vec = SVector::new(normal.x, normal.y, normal.z);
+            let p_vec = SVector::new(intersection_pos.x, intersection_pos.y, intersection_pos.z);
+            
+            ata += n_vec * n_vec.transpose();
+            atb += n_vec * n_vec.dot(&p_vec);
+            points_count += 1;
+        }
+    }
+
+    if points_count == 0 {
+        return None;
+    }
+
+    // Solve the system ATA * v = ATb
+    if let Some(inv_ata) = ata.try_inverse() {
+        let v = inv_ata * atb;
+        Some(Pt3::new(v.x, v.y, v.z))
+    } else {
+        None
+    }
+}
+
+
+/// Projects a point to the isosurface using Newton's method.
+/// This is a fallback for when the QEF solver fails.
+fn project_to_surface_newton<G: Grid>(
+    start_pos: Pt3,
+    mould_manager: &MouldManager,
+    iso_value: f32,
+) -> Pt3 {
+    let mut pos = start_pos;
 
     // Use Newton's method for fast convergence to isosurface
-    // Reduced iterations for better performance (was 20, now 8)
     let max_iterations = 8;
-    let tolerance = 0.001; // Slightly relaxed tolerance
+    let tolerance = 0.001; 
 
     for _ in 0..max_iterations {
         let dist = mould_manager.evaluate_sdf(&pos) - iso_value;
 
-        // Close enough to surface
         if dist.abs() < tolerance {
             break;
         }
 
-        // Compute gradient at current position
         let grad = compute_gradient(&pos, |p| mould_manager.evaluate_sdf(p));
-
-        // Gradient magnitude for normalization
         let grad_len = grad.magnitude();
 
-        if grad_len < 0.0001 {
-            // Gradient too small, can't make progress
+        if grad_len < 1e-4 {
             break;
         }
 
-        // Newton's method: move exactly to the surface along gradient direction
-        // Distance to surface divided by gradient magnitude gives step size
         let step_size = dist / grad_len;
-
         pos = Pt3::new(
             pos.x - grad.x * step_size,
             pos.y - grad.y * step_size,
@@ -327,27 +455,52 @@ fn create_face_y(
     let v2 = v2.unwrap();
     let v3 = v3.unwrap();
 
+    // Compute face normal using cross product
+    // Edge from v0 to v1, edge from v0 to v3
+    let e1 = v1.position - v0.position;
+    let e2 = v3.position - v0.position;
+    let face_normal = e1.cross(&e2);
+
+    // Check if face normal points in +Y or -Y direction
+    let flip = face_normal.y < 0.0;
+
     let diag02 = distance(&v0.position, &v2.position);
     let diag13 = distance(&v1.position, &v3.position);
 
     if diag02 < diag13 {
         // Diagonal from v0 to v2
-        indices.push(v0.index);
-        indices.push(v1.index);
-        indices.push(v2.index);
-
-        indices.push(v0.index);
-        indices.push(v2.index);
-        indices.push(v3.index);
+        if flip {
+            indices.push(v0.index);
+            indices.push(v2.index);
+            indices.push(v1.index);
+            indices.push(v0.index);
+            indices.push(v3.index);
+            indices.push(v2.index);
+        } else {
+            indices.push(v0.index);
+            indices.push(v1.index);
+            indices.push(v2.index);
+            indices.push(v0.index);
+            indices.push(v2.index);
+            indices.push(v3.index);
+        }
     } else {
         // Diagonal from v1 to v3
-        indices.push(v0.index);
-        indices.push(v1.index);
-        indices.push(v3.index);
-
-        indices.push(v1.index);
-        indices.push(v2.index);
-        indices.push(v3.index);
+        if flip {
+            indices.push(v0.index);
+            indices.push(v3.index);
+            indices.push(v1.index);
+            indices.push(v1.index);
+            indices.push(v3.index);
+            indices.push(v2.index);
+        } else {
+            indices.push(v0.index);
+            indices.push(v1.index);
+            indices.push(v3.index);
+            indices.push(v1.index);
+            indices.push(v2.index);
+            indices.push(v3.index);
+        }
     }
 }
 
@@ -378,27 +531,52 @@ fn create_face_z(
     let v2 = v2.unwrap();
     let v3 = v3.unwrap();
 
+    // Compute face normal using cross product
+    // Edge from v0 to v1, edge from v0 to v3
+    let e1 = v1.position - v0.position;
+    let e2 = v3.position - v0.position;
+    let face_normal = e1.cross(&e2);
+
+    // Check if face normal points in +Z or -Z direction
+    let flip = face_normal.z < 0.0;
+
     let diag02 = distance(&v0.position, &v2.position);
     let diag13 = distance(&v1.position, &v3.position);
 
     if diag02 < diag13 {
         // Diagonal from v0 to v2
-        indices.push(v0.index);
-        indices.push(v1.index);
-        indices.push(v2.index);
-
-        indices.push(v0.index);
-        indices.push(v2.index);
-        indices.push(v3.index);
+        if flip {
+            indices.push(v0.index);
+            indices.push(v2.index);
+            indices.push(v1.index);
+            indices.push(v0.index);
+            indices.push(v3.index);
+            indices.push(v2.index);
+        } else {
+            indices.push(v0.index);
+            indices.push(v1.index);
+            indices.push(v2.index);
+            indices.push(v0.index);
+            indices.push(v2.index);
+            indices.push(v3.index);
+        }
     } else {
         // Diagonal from v1 to v3
-        indices.push(v0.index);
-        indices.push(v1.index);
-        indices.push(v3.index);
-
-        indices.push(v1.index);
-        indices.push(v2.index);
-        indices.push(v3.index);
+        if flip {
+            indices.push(v0.index);
+            indices.push(v3.index);
+            indices.push(v1.index);
+            indices.push(v1.index);
+            indices.push(v3.index);
+            indices.push(v2.index);
+        } else {
+            indices.push(v0.index);
+            indices.push(v1.index);
+            indices.push(v3.index);
+            indices.push(v1.index);
+            indices.push(v2.index);
+            indices.push(v3.index);
+        }
     }
 }
 
@@ -486,19 +664,20 @@ fn dual_contouring_generic<G: Grid + Sync>(
     let res = grid.resolution();
 
     // Step 1: Create vertices for cells that intersect the isosurface (PARALLEL)
-    // Generate all cell coordinates
-    let cell_coords: Vec<(u32, u32, u32)> = (0..res - 1)
-        .flat_map(|z| {
-            (0..res - 1).flat_map(move |y| {
-                (0..res - 1).map(move |x| (x, y, z))
-            })
+    // Create a parallel iterator directly over the grid of cells
+    let surface_cells: Vec<((u32, u32, u32), Pt3)> = (0..res - 1)
+        .into_par_iter()
+        .flat_map(move |z| {
+            (0..res - 1)
+                .into_par_iter()
+                .map(move |y| (y, z))
         })
-        .collect();
-
-    // Parallel vertex creation
-    let surface_cells: Vec<((u32, u32, u32), Pt3)> = cell_coords
-        .par_iter()
-        .filter_map(|&(x, y, z)| {
+        .flat_map(move |(y, z)| {
+            (0..res - 1)
+                .into_par_iter()
+                .map(move |x| (x, y, z))
+        })
+        .filter_map(|(x, y, z)| {
             // Check if this cell intersects the isosurface
             if !cell_intersects_surface_generic(grid, x, y, z, iso_value) {
                 return None;
@@ -506,7 +685,9 @@ fn dual_contouring_generic<G: Grid + Sync>(
 
             // Find best vertex position for this cell
             let vertex_pos = if fast_mode {
-                // Fast mode: just use cell center (no Newton iteration)
+                // In fast mode, use the cell center directly. This is quick but doesn't project
+                // the vertex onto the isosurface or solve the QEF, so it's topologically correct
+                // but not geometrically accurate.
                 grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5)
             } else {
                 find_cell_vertex_generic(grid, mould_manager, x, y, z, iso_value)
@@ -538,35 +719,51 @@ fn dual_contouring_generic<G: Grid + Sync>(
     // Step 2: Generate faces between adjacent cells (PARALLEL)
     let face_coords: Vec<(u32, u32, u32)> = cell_vertices.keys().copied().collect();
 
-    let indices = Mutex::new(Vec::new());
+    let indices: Vec<u32> = face_coords
+        .par_iter()
+        .flat_map(|&(x, y, z)| {
+            let mut local_indices = Vec::new();
 
-    face_coords.par_iter().for_each(|&(x, y, z)| {
-        let mut local_indices = Vec::new();
+            // Create face in +X direction (YZ plane)
+            // Check for edge crossing along X between (x,y,z) and (x+1,y,z)
+            if x < res - 1 && y < res - 2 && z < res - 2 {
+                let s0 = grid.get(x, y, z) < iso_value;
+                let s1 = grid.get(x + 1, y, z) < iso_value;
+                if s0 != s1 { // Sign change along X-axis
+                    create_face_x(&cell_vertices, &mut local_indices, x, y, z);
+                }
+            }
 
-        // Create face in +X direction (YZ plane)
-        if y < res - 2 && z < res - 2 {
-            create_face_x(&cell_vertices, &mut local_indices, x, y, z);
-        }
+            // Create face in +Y direction (XZ plane)
+            // Check for edge crossing along Y between (x,y,z) and (x,y+1,z)
+            if y < res - 1 && x < res - 2 && z < res - 2 {
+                let s0 = grid.get(x, y, z) < iso_value;
+                let s1 = grid.get(x, y + 1, z) < iso_value;
+                if s0 != s1 { // Sign change along Y-axis
+                    create_face_y(&cell_vertices, &mut local_indices, x, y, z);
+                }
+            }
 
-        // Create face in +Y direction (XZ plane)
-        if x < res - 2 && z < res - 2 {
-            create_face_y(&cell_vertices, &mut local_indices, x, y, z);
-        }
+            // Create face in +Z direction (XY plane)
+            // Check for edge crossing along Z between (x,y,z) and (x,y,z+1)
+            if z < res - 1 && x < res - 2 && y < res - 2 {
+                let s0 = grid.get(x, y, z) < iso_value;
+                let s1 = grid.get(x, y, z + 1) < iso_value;
+                if s0 != s1 { // Sign change along Z-axis
+                    create_face_z(&cell_vertices, &mut local_indices, x, y, z);
+                }
+            }
 
-        // Create face in +Z direction (XY plane)
-        if x < res - 2 && y < res - 2 {
-            create_face_z(&cell_vertices, &mut local_indices, x, y, z);
-        }
+            local_indices
+        })
+        .collect();
 
-        if !local_indices.is_empty() {
-            indices.lock().unwrap().extend(local_indices);
-        }
-    });
-
-    let indices = indices.into_inner().unwrap();
-
-    // Compute normals
-    let normals = compute_normals(&vertices, &indices);
+    // Compute normals from SDF gradient for high quality, or face normals for fast mode
+    let normals = if fast_mode {
+        compute_normals(&vertices, &indices)
+    } else {
+        compute_normals_from_sdf(&vertices, mould_manager)
+    };
 
     MeshData {
         vertices,
@@ -619,42 +816,21 @@ fn find_cell_vertex_generic<G: Grid>(
     z: u32,
     iso_value: f32,
 ) -> Pt3 {
-    // Start at cell center
     let cell_center = grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
-    let mut pos = cell_center;
 
-    // Use Newton's method for fast convergence to isosurface
-    let max_iterations = 8;
-    let tolerance = 0.001;
+    // Solve QEF to get the feature-preserving vertex position
+    if let Some(pos) = solve_qef(grid, mould_manager, x, y, z, iso_value) {
+        // Clamp vertex to be within the cell to avoid artifacts
+        let min_bound = grid.get_position(x as f32, y as f32, z as f32);
+        let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
 
-    for _ in 0..max_iterations {
-        let dist = mould_manager.evaluate_sdf(&pos) - iso_value;
-
-        // Close enough to surface
-        if dist.abs() < tolerance {
-            break;
-        }
-
-        // Compute gradient at current position
-        let grad = compute_gradient(&pos, |p| mould_manager.evaluate_sdf(p));
-
-        // Gradient magnitude for normalization
-        let grad_len = grad.magnitude();
-
-        if grad_len < 0.0001 {
-            // Gradient too small, can't make progress
-            break;
-        }
-
-        // Newton's method: move exactly to the surface along gradient direction
-        let step_size = dist / grad_len;
-
-        pos = Pt3::new(
-            pos.x - grad.x * step_size,
-            pos.y - grad.y * step_size,
-            pos.z - grad.z * step_size,
-        );
+        Pt3::new(
+            pos.x.clamp(min_bound.x, max_bound.x),
+            pos.y.clamp(min_bound.y, max_bound.y),
+            pos.z.clamp(min_bound.z, max_bound.z),
+        )
+    } else {
+        // Fallback to simple projection if QEF fails
+        project_to_surface_newton(cell_center, mould_manager, iso_value)
     }
-
-    pos
 }
