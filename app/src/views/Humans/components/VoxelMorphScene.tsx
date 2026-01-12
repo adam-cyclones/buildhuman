@@ -811,15 +811,14 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     // Move the joint
     currentSkeleton.moveJoint(movement.jointId, movement.offset);
 
+    // Update skeleton visualization immediately (instant feedback)
+    createSkeletonVisualization();
+
     // Sync updated skeleton to Rust backend
     syncToRustBackend();
 
-    // Regenerate mesh with updated skeleton positions (use low-res for responsiveness)
-    updateMesh(true); // Low-res during interaction
-    debouncedUpscale(); // Schedule high-res update
-
-    // Update skeleton visualization
-    createSkeletonVisualization();
+    // Debounce mesh regeneration - only update after user stops dragging
+    debouncedUpscale();
   });
 
   // Handle joint rotations
@@ -847,15 +846,14 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     // Apply the new rotation
     currentSkeleton.setJointLocalRotation(rotation.jointId, newRotation);
 
+    // Update skeleton visualization immediately (instant feedback)
+    createSkeletonVisualization();
+
     // Sync updated skeleton to Rust backend
     syncToRustBackend();
 
-    // Regenerate mesh with updated skeleton rotations (use low-res for responsiveness)
-    updateMesh(true); // Low-res during interaction
-    debouncedUpscale(); // Schedule high-res update
-
-    // Update skeleton visualization
-    createSkeletonVisualization();
+    // Debounce mesh regeneration - only update after user stops dragging
+    debouncedUpscale();
   });
 
   return <ThreeScene onSceneReady={handleSceneReady} />;
