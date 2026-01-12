@@ -56,16 +56,35 @@ const Humans = () => {
   const [sliderTransY, setSliderTransY] = createSignal(0);
   const [sliderTransZ, setSliderTransZ] = createSignal(0);
 
-  // Reset sliders when joint selection changes
-  createEffect(() => {
-    selectedJointId();
+  // Track base offset when joint is selected (for relative translation)
+  const [baseOffsetX, setBaseOffsetX] = createSignal(0);
+  const [baseOffsetY, setBaseOffsetY] = createSignal(0);
+  const [baseOffsetZ, setBaseOffsetZ] = createSignal(0);
+
+  // Handle joint selection - capture initial values for base offsets and mould radius
+  const handleJointSelected = (
+    jointId: string,
+    offset: [number, number, number],
+    rotation: [number, number, number, number],
+    mouldRadius: number
+  ) => {
+    // Reset sliders to zero (user sees centered sliders)
     setSliderRotX(0);
     setSliderRotY(0);
     setSliderRotZ(0);
     setSliderTransX(0);
     setSliderTransY(0);
     setSliderTransZ(0);
-  });
+
+    // Store base offset (sliders will be relative to this)
+    setBaseOffsetX(offset[0]);
+    setBaseOffsetY(offset[1]);
+    setBaseOffsetZ(offset[2]);
+
+    // Set mould radius slider to the joint's current mould radius
+    setMouldRadius(mouldRadius);
+    setDebouncedMouldRadius(mouldRadius);
+  };
 
   createEffect(() => {
     if (jointRotation()) {
@@ -233,21 +252,22 @@ const Humans = () => {
   // Expose exportGltf globally for File menu
   (window as any).exportGltf = exportGltf;
 
-  const moveJoint = (jointId: string, axis: 'x' | 'y' | 'z', amount: number) => {
-    const offset: [number, number, number] = [0, 0, 0];
-    if (axis === 'x') offset[0] = amount;
-    if (axis === 'y') offset[1] = amount;
-    if (axis === 'z') offset[2] = amount;
-    setJointMovement({ jointId, offset });
+  // Set joint offset to absolute value (base + slider delta)
+  const setJointOffsetAbsolute = (jointId: string, offsetX: number, offsetY: number, offsetZ: number) => {
+    const offset: [number, number, number] = [offsetX, offsetY, offsetZ];
+    // Signal uses 'absolute' flag to indicate this is not a delta
+    setJointMovement({ jointId, offset, absolute: true } as any);
   };
 
-  const rotateJoint = (jointId: string, axis: 'x' | 'y' | 'z', degrees: number) => {
-    const radians = degrees * (Math.PI / 180);
-    const euler: [number, number, number] = [0, 0, 0];
-    if (axis === 'x') euler[0] = radians;
-    if (axis === 'y') euler[1] = radians;
-    if (axis === 'z') euler[2] = radians;
-    setJointRotation({ jointId, euler });
+  // Set joint rotation to absolute Euler angles (not delta)
+  const setJointRotationAbsolute = (jointId: string, eulerX: number, eulerY: number, eulerZ: number) => {
+    const euler: [number, number, number] = [
+      eulerX * (Math.PI / 180),
+      eulerY * (Math.PI / 180),
+      eulerZ * (Math.PI / 180)
+    ];
+    // Signal uses 'absolute' flag to indicate this is not a delta
+    setJointRotation({ jointId, euler, absolute: true } as any);
   };
 
   // Throttle updates during drag for better performance
@@ -259,14 +279,22 @@ const Humans = () => {
     const target = e.currentTarget as HTMLInputElement;
     const value = parseFloat(target.value);
 
-    // Calculate delta from current slider position
-    const currentValue = axis === 'x' ? sliderRotX() : axis === 'y' ? sliderRotY() : sliderRotZ();
-    const delta = value - currentValue;
-
-    if (Math.abs(delta) > 0.1 && selectedJointId()) {
+    if (selectedJointId()) {
       // Throttle updates to every 50ms during drag for smoothness
       if (!rotationThrottleTimer) {
-        rotateJoint(selectedJointId()!, axis, delta);
+        // Update slider state immediately for smooth visual tracking
+        if (axis === 'x') setSliderRotX(value);
+        if (axis === 'y') setSliderRotY(value);
+        if (axis === 'z') setSliderRotZ(value);
+
+        // Set absolute rotation using all three slider values
+        setJointRotationAbsolute(
+          selectedJointId()!,
+          axis === 'x' ? value : sliderRotX(),
+          axis === 'y' ? value : sliderRotY(),
+          axis === 'z' ? value : sliderRotZ()
+        );
+
         rotationThrottleTimer = setTimeout(() => {
           rotationThrottleTimer = undefined;
         }, 50) as unknown as number;
@@ -279,10 +307,19 @@ const Humans = () => {
     const target = e.currentTarget as HTMLInputElement;
     const value = parseFloat(target.value);
 
-    // Update the corresponding slider signal
+    // Update slider signal and apply final rotation
     if (axis === 'x') setSliderRotX(value);
     if (axis === 'y') setSliderRotY(value);
     if (axis === 'z') setSliderRotZ(value);
+
+    if (selectedJointId()) {
+      setJointRotationAbsolute(
+        selectedJointId()!,
+        sliderRotX(),
+        sliderRotY(),
+        sliderRotZ()
+      );
+    }
   };
 
   // Handle translation input (continuous during drag)
@@ -290,14 +327,22 @@ const Humans = () => {
     const target = e.currentTarget as HTMLInputElement;
     const value = parseFloat(target.value);
 
-    // Calculate delta from current slider position
-    const currentValue = axis === 'x' ? sliderTransX() : axis === 'y' ? sliderTransY() : sliderTransZ();
-    const delta = value - currentValue;
-
-    if (Math.abs(delta) > 0.001 && selectedJointId()) {
+    if (selectedJointId()) {
       // Throttle updates to every 50ms during drag for smoothness
       if (!translationThrottleTimer) {
-        moveJoint(selectedJointId()!, axis, delta);
+        // Update slider state immediately for smooth visual tracking
+        if (axis === 'x') setSliderTransX(value);
+        if (axis === 'y') setSliderTransY(value);
+        if (axis === 'z') setSliderTransZ(value);
+
+        // Set absolute offset using base + slider values
+        setJointOffsetAbsolute(
+          selectedJointId()!,
+          baseOffsetX() + (axis === 'x' ? value : sliderTransX()),
+          baseOffsetY() + (axis === 'y' ? value : sliderTransY()),
+          baseOffsetZ() + (axis === 'z' ? value : sliderTransZ())
+        );
+
         translationThrottleTimer = setTimeout(() => {
           translationThrottleTimer = undefined;
         }, 50) as unknown as number;
@@ -310,10 +355,19 @@ const Humans = () => {
     const target = e.currentTarget as HTMLInputElement;
     const value = parseFloat(target.value);
 
-    // Update the corresponding slider signal
+    // Update slider signal and apply final offset
     if (axis === 'x') setSliderTransX(value);
     if (axis === 'y') setSliderTransY(value);
     if (axis === 'z') setSliderTransZ(value);
+
+    if (selectedJointId()) {
+      setJointOffsetAbsolute(
+        selectedJointId()!,
+        baseOffsetX() + sliderTransX(),
+        baseOffsetY() + sliderTransY(),
+        baseOffsetZ() + sliderTransZ()
+      );
+    }
   };
 
   // Recursive component to render joint hierarchy
@@ -366,6 +420,8 @@ const Humans = () => {
         selectedJointId={selectedJointId()}
         onSkeletonReady={setSkeletonJoints}
         onMouldsReady={setMoulds}
+        onJointSelected={handleJointSelected}
+        onJointClicked={setSelectedJointId}
       />
 
       <div class="inspector">

@@ -4,7 +4,9 @@ use crate::mesh::mould::MouldManager;
 use crate::mesh::sdf::compute_gradient;
 use crate::mesh::types::{MeshData, Pt3, Vec3};
 use crate::mesh::voxel_grid::VoxelGrid;
+use rayon::prelude::*;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// Cell vertex with position and index
 #[derive(Debug, Clone)]
@@ -43,73 +45,91 @@ fn dual_contouring_impl(
     iso_value: f32,
     fast_mode: bool,
 ) -> MeshData {
-    let mut vertices: Vec<f32> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
     let res = grid.resolution;
 
-    // Store vertex index for each cell that contains the surface
-    let mut cell_vertices: HashMap<(u32, u32, u32), CellVertex> = HashMap::new();
+    // Step 1: Create vertices for cells that intersect the isosurface (PARALLEL)
+    // Generate all cell coordinates
+    let cell_coords: Vec<(u32, u32, u32)> = (0..res - 1)
+        .flat_map(|z| {
+            (0..res - 1).flat_map(move |y| {
+                (0..res - 1).map(move |x| (x, y, z))
+            })
+        })
+        .collect();
 
-    // Step 1: Create vertices for cells that intersect the isosurface
-    for z in 0..res - 1 {
-        for y in 0..res - 1 {
-            for x in 0..res - 1 {
-                // Check if this cell intersects the isosurface
-                if !cell_intersects_surface(grid, x, y, z, iso_value) {
-                    continue;
-                }
-
-                // Find best vertex position for this cell
-                let vertex_pos = if fast_mode {
-                    // Fast mode: just use cell center (no Newton iteration)
-                    grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5)
-                } else {
-                    find_cell_vertex(grid, mould_manager, x, y, z, iso_value)
-                };
-
-                // Add to vertex array
-                let vertex_index = (vertices.len() / 3) as u32;
-                vertices.push(vertex_pos.x);
-                vertices.push(vertex_pos.y);
-                vertices.push(vertex_pos.z);
-
-                cell_vertices.insert(
-                    (x, y, z),
-                    CellVertex {
-                        position: vertex_pos,
-                        index: vertex_index,
-                    },
-                );
+    // Parallel vertex creation
+    let surface_cells: Vec<((u32, u32, u32), Pt3)> = cell_coords
+        .par_iter()
+        .filter_map(|&(x, y, z)| {
+            // Check if this cell intersects the isosurface
+            if !cell_intersects_surface(grid, x, y, z, iso_value) {
+                return None;
             }
-        }
+
+            // Find best vertex position for this cell
+            let vertex_pos = if fast_mode {
+                // Fast mode: just use cell center (no Newton iteration)
+                grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5)
+            } else {
+                find_cell_vertex(grid, mould_manager, x, y, z, iso_value)
+            };
+
+            Some(((x, y, z), vertex_pos))
+        })
+        .collect();
+
+    // Build vertices array and cell_vertices map
+    let mut vertices: Vec<f32> = Vec::with_capacity(surface_cells.len() * 3);
+    let mut cell_vertices: HashMap<(u32, u32, u32), CellVertex> = HashMap::with_capacity(surface_cells.len());
+
+    for ((x, y, z), vertex_pos) in surface_cells {
+        let vertex_index = (vertices.len() / 3) as u32;
+        vertices.push(vertex_pos.x);
+        vertices.push(vertex_pos.y);
+        vertices.push(vertex_pos.z);
+
+        cell_vertices.insert(
+            (x, y, z),
+            CellVertex {
+                position: vertex_pos,
+                index: vertex_index,
+            },
+        );
     }
 
-    // Step 2: Generate faces between adjacent cells
-    // Connect cells that both have vertices and share a face
-    for z in 0..res - 1 {
-        for y in 0..res - 1 {
-            for x in 0..res - 1 {
-                if !cell_vertices.contains_key(&(x, y, z)) {
-                    continue;
-                }
+    // Step 2: Generate faces between adjacent cells (PARALLEL)
+    // Create a face when exactly one of two neighboring cells has a vertex
+    let face_coords: Vec<(u32, u32, u32)> = cell_vertices.keys().copied().collect();
 
-                // Create face in +X direction (YZ plane)
-                if x < res - 2 {
-                    create_face_x(&cell_vertices, &mut indices, x, y, z);
-                }
+    let indices = Mutex::new(Vec::new());
 
-                // Create face in +Y direction (XZ plane)
-                if y < res - 2 {
-                    create_face_y(&cell_vertices, &mut indices, x, y, z);
-                }
+    face_coords.par_iter().for_each(|&(x, y, z)| {
+        let mut local_indices = Vec::new();
 
-                // Create face in +Z direction (XY plane)
-                if z < res - 2 {
-                    create_face_z(&cell_vertices, &mut indices, x, y, z);
-                }
-            }
+        // Create face in +X direction (YZ plane)
+        // Needs cells: (x,y,z), (x,y,z+1), (x,y+1,z+1), (x,y+1,z)
+        if y < res - 2 && z < res - 2 {
+            create_face_x(&cell_vertices, &mut local_indices, x, y, z);
         }
-    }
+
+        // Create face in +Y direction (XZ plane)
+        // Needs cells: (x,y,z), (x+1,y,z), (x+1,y,z+1), (x,y,z+1)
+        if x < res - 2 && z < res - 2 {
+            create_face_y(&cell_vertices, &mut local_indices, x, y, z);
+        }
+
+        // Create face in +Z direction (XY plane)
+        // Needs cells: (x,y,z), (x+1,y,z), (x+1,y+1,z), (x,y+1,z)
+        if x < res - 2 && y < res - 2 {
+            create_face_z(&cell_vertices, &mut local_indices, x, y, z);
+        }
+
+        if !local_indices.is_empty() {
+            indices.lock().unwrap().extend(local_indices);
+        }
+    });
+
+    let indices = indices.into_inner().unwrap();
 
     // Compute normals (simple per-face normals for now)
     let normals = compute_normals(&vertices, &indices);
@@ -203,8 +223,9 @@ fn find_cell_vertex(
     pos
 }
 
-/// Create face between cells in X direction
+/// Create face between cells in X direction (perpendicular to X-axis)
 /// Connects 4 cells in a 2x2 grid in the YZ plane
+/// Winding order determined by face normal pointing outward
 fn create_face_x(
     cell_vertices: &HashMap<(u32, u32, u32), CellVertex>,
     indices: &mut Vec<u32>,
@@ -212,103 +233,10 @@ fn create_face_x(
     y: u32,
     z: u32,
 ) {
-    // Four cells in YZ plane: (x,y,z), (x,y+1,z), (x,y,z+1), (x,y+1,z+1)
+    // Four cells form a quad in the YZ plane perpendicular to X-axis
     let v0 = cell_vertices.get(&(x, y, z));
-    let v1 = cell_vertices.get(&(x, y + 1, z));
+    let v1 = cell_vertices.get(&(x, y, z + 1));
     let v2 = cell_vertices.get(&(x, y + 1, z + 1));
-    let v3 = cell_vertices.get(&(x, y, z + 1));
-
-    if v0.is_none() || v1.is_none() || v2.is_none() || v3.is_none() {
-        return;
-    }
-
-    let v0 = v0.unwrap();
-    let v1 = v1.unwrap();
-    let v2 = v2.unwrap();
-    let v3 = v3.unwrap();
-
-    // Triangulate quad along shortest diagonal
-    let diag02 = distance(&v0.position, &v2.position);
-    let diag13 = distance(&v1.position, &v3.position);
-
-    if diag02 < diag13 {
-        indices.push(v0.index);
-        indices.push(v1.index);
-        indices.push(v2.index);
-
-        indices.push(v0.index);
-        indices.push(v2.index);
-        indices.push(v3.index);
-    } else {
-        indices.push(v0.index);
-        indices.push(v1.index);
-        indices.push(v3.index);
-
-        indices.push(v1.index);
-        indices.push(v2.index);
-        indices.push(v3.index);
-    }
-}
-
-/// Create face between cells in Y direction
-/// Connects 4 cells in a 2x2 grid in the XZ plane
-fn create_face_y(
-    cell_vertices: &HashMap<(u32, u32, u32), CellVertex>,
-    indices: &mut Vec<u32>,
-    x: u32,
-    y: u32,
-    z: u32,
-) {
-    // Four cells in XZ plane: (x,y,z), (x+1,y,z), (x,y,z+1), (x+1,y,z+1)
-    let v0 = cell_vertices.get(&(x, y, z));
-    let v1 = cell_vertices.get(&(x + 1, y, z));
-    let v2 = cell_vertices.get(&(x + 1, y, z + 1));
-    let v3 = cell_vertices.get(&(x, y, z + 1));
-
-    if v0.is_none() || v1.is_none() || v2.is_none() || v3.is_none() {
-        return;
-    }
-
-    let v0 = v0.unwrap();
-    let v1 = v1.unwrap();
-    let v2 = v2.unwrap();
-    let v3 = v3.unwrap();
-
-    let diag02 = distance(&v0.position, &v2.position);
-    let diag13 = distance(&v1.position, &v3.position);
-
-    if diag02 < diag13 {
-        indices.push(v0.index);
-        indices.push(v1.index);
-        indices.push(v2.index);
-
-        indices.push(v0.index);
-        indices.push(v2.index);
-        indices.push(v3.index);
-    } else {
-        indices.push(v0.index);
-        indices.push(v1.index);
-        indices.push(v3.index);
-
-        indices.push(v1.index);
-        indices.push(v2.index);
-        indices.push(v3.index);
-    }
-}
-
-/// Create face between cells in Z direction
-/// Connects 4 cells in a 2x2 grid in the XY plane
-fn create_face_z(
-    cell_vertices: &HashMap<(u32, u32, u32), CellVertex>,
-    indices: &mut Vec<u32>,
-    x: u32,
-    y: u32,
-    z: u32,
-) {
-    // Four cells in XY plane: (x,y,z), (x+1,y,z), (x,y+1,z), (x+1,y+1,z)
-    let v0 = cell_vertices.get(&(x, y, z));
-    let v1 = cell_vertices.get(&(x + 1, y, z));
-    let v2 = cell_vertices.get(&(x + 1, y + 1, z));
     let v3 = cell_vertices.get(&(x, y + 1, z));
 
     if v0.is_none() || v1.is_none() || v2.is_none() || v3.is_none() {
@@ -320,10 +248,90 @@ fn create_face_z(
     let v2 = v2.unwrap();
     let v3 = v3.unwrap();
 
+    // Compute face normal using cross product
+    // Edge from v0 to v1, edge from v0 to v3
+    let e1 = v1.position - v0.position;
+    let e2 = v3.position - v0.position;
+    let face_normal = e1.cross(&e2);
+
+    // Check if face normal points in +X or -X direction
+    // If normal.x > 0, we want CCW from +X view
+    // If normal.x < 0, we want CW from +X view (which is CCW from -X view)
+    let flip = face_normal.x < 0.0;
+
+    // Triangulate quad along shortest diagonal
     let diag02 = distance(&v0.position, &v2.position);
     let diag13 = distance(&v1.position, &v3.position);
 
     if diag02 < diag13 {
+        // Diagonal from v0 to v2
+        if flip {
+            indices.push(v0.index);
+            indices.push(v2.index);
+            indices.push(v1.index);
+            indices.push(v0.index);
+            indices.push(v3.index);
+            indices.push(v2.index);
+        } else {
+            indices.push(v0.index);
+            indices.push(v1.index);
+            indices.push(v2.index);
+            indices.push(v0.index);
+            indices.push(v2.index);
+            indices.push(v3.index);
+        }
+    } else {
+        // Diagonal from v1 to v3
+        if flip {
+            indices.push(v0.index);
+            indices.push(v3.index);
+            indices.push(v1.index);
+            indices.push(v1.index);
+            indices.push(v3.index);
+            indices.push(v2.index);
+        } else {
+            indices.push(v0.index);
+            indices.push(v1.index);
+            indices.push(v3.index);
+            indices.push(v1.index);
+            indices.push(v2.index);
+            indices.push(v3.index);
+        }
+    }
+}
+
+/// Create face between cells in Y direction (perpendicular to Y-axis)
+/// Connects 4 cells in a 2x2 grid in the XZ plane
+/// This face is created when the Y-axis edge crosses the isosurface
+/// Winding order is CCW when viewed from +Y direction (outside)
+fn create_face_y(
+    cell_vertices: &HashMap<(u32, u32, u32), CellVertex>,
+    indices: &mut Vec<u32>,
+    x: u32,
+    y: u32,
+    z: u32,
+) {
+    // Four cells form a quad in the XZ plane perpendicular to Y-axis
+    // The quad surrounds the Y-axis edge at (x,y,z) going to (x,y+1,z)
+    let v0 = cell_vertices.get(&(x, y, z));         // (-X, -Z) relative to edge
+    let v1 = cell_vertices.get(&(x + 1, y, z));     // (+X, -Z)
+    let v2 = cell_vertices.get(&(x + 1, y, z + 1)); // (+X, +Z)
+    let v3 = cell_vertices.get(&(x, y, z + 1));     // (-X, +Z)
+
+    if v0.is_none() || v1.is_none() || v2.is_none() || v3.is_none() {
+        return;
+    }
+
+    let v0 = v0.unwrap();
+    let v1 = v1.unwrap();
+    let v2 = v2.unwrap();
+    let v3 = v3.unwrap();
+
+    let diag02 = distance(&v0.position, &v2.position);
+    let diag13 = distance(&v1.position, &v3.position);
+
+    if diag02 < diag13 {
+        // Diagonal from v0 to v2
         indices.push(v0.index);
         indices.push(v1.index);
         indices.push(v2.index);
@@ -332,6 +340,58 @@ fn create_face_z(
         indices.push(v2.index);
         indices.push(v3.index);
     } else {
+        // Diagonal from v1 to v3
+        indices.push(v0.index);
+        indices.push(v1.index);
+        indices.push(v3.index);
+
+        indices.push(v1.index);
+        indices.push(v2.index);
+        indices.push(v3.index);
+    }
+}
+
+/// Create face between cells in Z direction (perpendicular to Z-axis)
+/// Connects 4 cells in a 2x2 grid in the XY plane
+/// This face is created when the Z-axis edge crosses the isosurface
+/// Winding order is CCW when viewed from +Z direction (outside)
+fn create_face_z(
+    cell_vertices: &HashMap<(u32, u32, u32), CellVertex>,
+    indices: &mut Vec<u32>,
+    x: u32,
+    y: u32,
+    z: u32,
+) {
+    // Four cells form a quad in the XY plane perpendicular to Z-axis
+    // The quad surrounds the Z-axis edge at (x,y,z) going to (x,y,z+1)
+    let v0 = cell_vertices.get(&(x, y, z));         // (-X, -Y) relative to edge
+    let v1 = cell_vertices.get(&(x + 1, y, z));     // (+X, -Y)
+    let v2 = cell_vertices.get(&(x + 1, y + 1, z)); // (+X, +Y)
+    let v3 = cell_vertices.get(&(x, y + 1, z));     // (-X, +Y)
+
+    if v0.is_none() || v1.is_none() || v2.is_none() || v3.is_none() {
+        return;
+    }
+
+    let v0 = v0.unwrap();
+    let v1 = v1.unwrap();
+    let v2 = v2.unwrap();
+    let v3 = v3.unwrap();
+
+    let diag02 = distance(&v0.position, &v2.position);
+    let diag13 = distance(&v1.position, &v3.position);
+
+    if diag02 < diag13 {
+        // Diagonal from v0 to v2
+        indices.push(v0.index);
+        indices.push(v1.index);
+        indices.push(v2.index);
+
+        indices.push(v0.index);
+        indices.push(v2.index);
+        indices.push(v3.index);
+    } else {
+        // Diagonal from v1 to v3
         indices.push(v0.index);
         indices.push(v1.index);
         indices.push(v3.index);
@@ -417,78 +477,93 @@ pub fn dual_contouring_brick_map(
 }
 
 /// Generic dual contouring that works with any Grid implementation
-fn dual_contouring_generic<G: Grid>(
+fn dual_contouring_generic<G: Grid + Sync>(
     grid: &G,
     mould_manager: &MouldManager,
     iso_value: f32,
     fast_mode: bool,
 ) -> MeshData {
-    let mut vertices: Vec<f32> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
     let res = grid.resolution();
 
-    // Store vertex index for each cell that contains the surface
-    let mut cell_vertices: HashMap<(u32, u32, u32), CellVertex> = HashMap::new();
+    // Step 1: Create vertices for cells that intersect the isosurface (PARALLEL)
+    // Generate all cell coordinates
+    let cell_coords: Vec<(u32, u32, u32)> = (0..res - 1)
+        .flat_map(|z| {
+            (0..res - 1).flat_map(move |y| {
+                (0..res - 1).map(move |x| (x, y, z))
+            })
+        })
+        .collect();
 
-    // Step 1: Create vertices for cells that intersect the isosurface
-    for z in 0..res - 1 {
-        for y in 0..res - 1 {
-            for x in 0..res - 1 {
-                // Check if this cell intersects the isosurface
-                if !cell_intersects_surface_generic(grid, x, y, z, iso_value) {
-                    continue;
-                }
-
-                // Find best vertex position for this cell
-                let vertex_pos = if fast_mode {
-                    // Fast mode: just use cell center (no Newton iteration)
-                    grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5)
-                } else {
-                    find_cell_vertex_generic(grid, mould_manager, x, y, z, iso_value)
-                };
-
-                // Add to vertex array
-                let vertex_index = (vertices.len() / 3) as u32;
-                vertices.push(vertex_pos.x);
-                vertices.push(vertex_pos.y);
-                vertices.push(vertex_pos.z);
-
-                cell_vertices.insert(
-                    (x, y, z),
-                    CellVertex {
-                        position: vertex_pos,
-                        index: vertex_index,
-                    },
-                );
+    // Parallel vertex creation
+    let surface_cells: Vec<((u32, u32, u32), Pt3)> = cell_coords
+        .par_iter()
+        .filter_map(|&(x, y, z)| {
+            // Check if this cell intersects the isosurface
+            if !cell_intersects_surface_generic(grid, x, y, z, iso_value) {
+                return None;
             }
-        }
+
+            // Find best vertex position for this cell
+            let vertex_pos = if fast_mode {
+                // Fast mode: just use cell center (no Newton iteration)
+                grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5)
+            } else {
+                find_cell_vertex_generic(grid, mould_manager, x, y, z, iso_value)
+            };
+
+            Some(((x, y, z), vertex_pos))
+        })
+        .collect();
+
+    // Build vertices array and cell_vertices map
+    let mut vertices: Vec<f32> = Vec::with_capacity(surface_cells.len() * 3);
+    let mut cell_vertices: HashMap<(u32, u32, u32), CellVertex> = HashMap::with_capacity(surface_cells.len());
+
+    for ((x, y, z), vertex_pos) in surface_cells {
+        let vertex_index = (vertices.len() / 3) as u32;
+        vertices.push(vertex_pos.x);
+        vertices.push(vertex_pos.y);
+        vertices.push(vertex_pos.z);
+
+        cell_vertices.insert(
+            (x, y, z),
+            CellVertex {
+                position: vertex_pos,
+                index: vertex_index,
+            },
+        );
     }
 
-    // Step 2: Generate faces between adjacent cells
-    for z in 0..res - 1 {
-        for y in 0..res - 1 {
-            for x in 0..res - 1 {
-                if !cell_vertices.contains_key(&(x, y, z)) {
-                    continue;
-                }
+    // Step 2: Generate faces between adjacent cells (PARALLEL)
+    let face_coords: Vec<(u32, u32, u32)> = cell_vertices.keys().copied().collect();
 
-                // Create face in +X direction (YZ plane)
-                if x < res - 2 {
-                    create_face_x(&cell_vertices, &mut indices, x, y, z);
-                }
+    let indices = Mutex::new(Vec::new());
 
-                // Create face in +Y direction (XZ plane)
-                if y < res - 2 {
-                    create_face_y(&cell_vertices, &mut indices, x, y, z);
-                }
+    face_coords.par_iter().for_each(|&(x, y, z)| {
+        let mut local_indices = Vec::new();
 
-                // Create face in +Z direction (XY plane)
-                if z < res - 2 {
-                    create_face_z(&cell_vertices, &mut indices, x, y, z);
-                }
-            }
+        // Create face in +X direction (YZ plane)
+        if y < res - 2 && z < res - 2 {
+            create_face_x(&cell_vertices, &mut local_indices, x, y, z);
         }
-    }
+
+        // Create face in +Y direction (XZ plane)
+        if x < res - 2 && z < res - 2 {
+            create_face_y(&cell_vertices, &mut local_indices, x, y, z);
+        }
+
+        // Create face in +Z direction (XY plane)
+        if x < res - 2 && y < res - 2 {
+            create_face_z(&cell_vertices, &mut local_indices, x, y, z);
+        }
+
+        if !local_indices.is_empty() {
+            indices.lock().unwrap().extend(local_indices);
+        }
+    });
+
+    let indices = indices.into_inner().unwrap();
 
     // Compute normals
     let normals = compute_normals(&vertices, &indices);

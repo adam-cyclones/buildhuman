@@ -12,6 +12,8 @@ type ThreeDViewportProps = {
   selectedJointId: string | null;
   onSkeletonReady?: (joints: Array<{ id: string; parentId?: string; children: string[] }>) => void;
   onMouldsReady?: (moulds: Array<{ id: string; shape: "sphere" | "capsule"; parentJointId?: string }>) => void;
+  onJointSelected?: (jointId: string, offset: [number, number, number], rotation: [number, number, number, number], mouldRadius: number) => void;
+  onJointClicked?: (jointId: string) => void;
 }
 
 const ThreeDViewport = (props: ThreeDViewportProps) => {
@@ -59,6 +61,8 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
           selectedJointId={props.selectedJointId}
           onSkeletonReady={props.onSkeletonReady}
           onMouldsReady={props.onMouldsReady}
+          onJointSelected={props.onJointSelected}
+          onJointClicked={props.onJointClicked}
         />
       </div>
     </div>

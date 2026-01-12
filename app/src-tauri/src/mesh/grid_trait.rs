@@ -4,7 +4,8 @@
 use crate::mesh::types::Pt3;
 
 /// Common interface for voxel grids (dense or sparse)
-pub trait Grid {
+/// Must be Sync for parallel dual contouring
+pub trait Grid: Sync {
     /// Get the resolution of the grid
     fn resolution(&self) -> u32;
 

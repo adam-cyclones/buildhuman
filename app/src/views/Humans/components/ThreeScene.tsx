@@ -2,7 +2,7 @@ import { onMount, onCleanup } from "solid-js";
 import * as THREE from "three";
 
 type ThreeSceneProps = {
-  onSceneReady?: (scene: THREE.Scene, mesh: THREE.Mesh) => void;
+  onSceneReady?: (scene: THREE.Scene, mesh: THREE.Mesh, camera: THREE.Camera, canvas: HTMLCanvasElement) => void;
 };
 
 export default function ThreeScene(props: ThreeSceneProps) {
@@ -49,8 +49,8 @@ export default function ThreeScene(props: ThreeSceneProps) {
     const geometry = new THREE.BufferGeometry();
     const material = new THREE.MeshStandardMaterial({
       color: 0x95c0d0,
-      flatShading: true,
-      side: THREE.DoubleSide, // TODO: Fix triangle winding in dual-contouring.ts, then use FrontSide
+      flatShading: false, // Use smooth shading for better appearance
+      side: THREE.FrontSide, // Single-sided rendering (much faster, no z-fighting)
       transparent: true,
       opacity: 0.8,
     });
@@ -58,8 +58,8 @@ export default function ThreeScene(props: ThreeSceneProps) {
     scene.add(mesh);
 
     // Call onSceneReady callback
-    if (props.onSceneReady && mesh) {
-      props.onSceneReady(scene, mesh);
+    if (props.onSceneReady && mesh && camera && canvasRef) {
+      props.onSceneReady(scene, mesh, camera, canvasRef);
     }
 
     // Animation loop

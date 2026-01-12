@@ -16,6 +16,8 @@ type VoxelMorphSceneProps = {
   selectedJointId: string | null;
   onSkeletonReady?: (joints: Array<{ id: string; parentId?: string; children: string[] }>) => void;
   onMouldsReady?: (moulds: Array<{ id: string; shape: "sphere" | "capsule"; parentJointId?: string }>) => void;
+  onJointSelected?: (jointId: string, offset: [number, number, number], rotation: [number, number, number, number], mouldRadius: number) => void;
+  onJointClicked?: (jointId: string) => void;
 };
 
 export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
@@ -24,16 +26,60 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   let skeletonGroup: THREE.Group | undefined;
   let jointSpheres: Map<string, THREE.Mesh> = new Map();
   let currentScene: THREE.Scene | undefined;
+  let currentCamera: THREE.Camera | undefined;
+  let currentCanvas: HTMLCanvasElement | undefined;
   let currentSkeleton: Skeleton | undefined;
   let currentMouldManager: MouldManager | undefined;
   let isInitialized = false;
 
-  const handleSceneReady = async (scene: THREE.Scene, mesh: THREE.Mesh) => {
+  const handleSceneReady = async (scene: THREE.Scene, mesh: THREE.Mesh, camera: THREE.Camera, canvas: HTMLCanvasElement) => {
     currentScene = scene;
     sceneMesh = mesh;
+    currentCamera = camera;
+    currentCanvas = canvas;
+
+    // Add click listener to canvas for joint selection
+    canvas.addEventListener('click', handleCanvasClick);
+
     await initializeSkeletonAndMoulds();
     updateMesh();
     createSkeletonVisualization();
+  };
+
+  // Handle canvas clicks to select joints
+  const handleCanvasClick = (event: MouseEvent) => {
+    if (!currentCanvas || !currentCamera || !currentScene || jointSpheres.size === 0) return;
+
+    // Calculate mouse position in normalized device coordinates (-1 to +1)
+    const rect = currentCanvas.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    // Create raycaster
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, currentCamera);
+
+    // Get all joint sphere meshes as an array
+    const jointMeshes = Array.from(jointSpheres.values());
+
+    // Check for intersections
+    const intersects = raycaster.intersectObjects(jointMeshes);
+
+    if (intersects.length > 0) {
+      // Find which joint was clicked
+      const clickedMesh = intersects[0].object as THREE.Mesh;
+      for (const [jointId, mesh] of jointSpheres.entries()) {
+        if (mesh === clickedMesh) {
+          // Notify parent component
+          if (props.onJointClicked) {
+            props.onJointClicked(jointId);
+          }
+          break;
+        }
+      }
+    }
   };
 
   // ----------------------------------------------------------------
@@ -95,6 +141,12 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       }
       if (geometry.index) {
         geometry.index.needsUpdate = true;
+      }
+
+      // Smooth shading for lower resolutions - recompute normals to smooth appearance
+      // This averages normals across shared vertices, hiding faceting
+      if (resolution <= 64) {
+        geometry.computeVertexNormals();
       }
 
       geometry.computeBoundingSphere();
@@ -799,8 +851,16 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     if (!movement || !currentSkeleton || !sceneMesh || !currentMouldManager)
       return;
 
-    // Move the joint
-    currentSkeleton.moveJoint(movement.jointId, movement.offset);
+    // Check if this is an absolute offset (from slider) or delta movement
+    const isAbsolute = (movement as any).absolute;
+
+    if (isAbsolute) {
+      // Absolute: SET the joint's local offset directly
+      currentSkeleton.setJointLocalOffset(movement.jointId, movement.offset);
+    } else {
+      // Delta: ADD to current offset (legacy behavior)
+      currentSkeleton.moveJoint(movement.jointId, movement.offset);
+    }
 
     // Update skeleton visualization immediately (instant feedback)
     createSkeletonVisualization();
@@ -818,22 +878,27 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     if (!rotation || !currentSkeleton || !sceneMesh || !currentMouldManager)
       return;
 
-    // Get current joint rotation
     const joint = currentSkeleton.getJoint(rotation.jointId);
     if (!joint) return;
 
     // Convert euler angles to quaternion
-    const deltaQuat = eulerToQuat(
+    const quat = eulerToQuat(
       rotation.euler[0],
       rotation.euler[1],
       rotation.euler[2]
     );
 
-    // Multiply current rotation by delta rotation
-    const newRotation = multiplyQuat(joint.localRotation, deltaQuat);
+    // Check if this is an absolute rotation (from slider) or delta rotation
+    const isAbsolute = (rotation as any).absolute;
 
-    // Apply the new rotation
-    currentSkeleton.setJointLocalRotation(rotation.jointId, newRotation);
+    if (isAbsolute) {
+      // Absolute: SET the rotation directly
+      currentSkeleton.setJointLocalRotation(rotation.jointId, quat);
+    } else {
+      // Delta: MULTIPLY with current rotation (legacy behavior)
+      const newRotation = multiplyQuat(joint.localRotation, quat);
+      currentSkeleton.setJointLocalRotation(rotation.jointId, newRotation);
+    }
 
     // Update skeleton visualization immediately (instant feedback)
     createSkeletonVisualization();
@@ -843,6 +908,96 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
     // Debounce mesh regeneration - only update after user stops dragging
     debouncedUpscale();
+  });
+
+  // Notify parent when joint is selected (provides initial offset/rotation/mouldRadius for sliders)
+  let lastNotifiedJointId: string | null = null;
+
+  createEffect(() => {
+    const jointId = props.selectedJointId;
+
+    // Only notify if the joint actually changed (not on re-selection)
+    if (jointId === lastNotifiedJointId) return;
+
+    if (jointId && currentSkeleton && currentMouldManager && props.onJointSelected) {
+      const joint = currentSkeleton.getJoint(jointId);
+      if (joint) {
+        // Get the first mould attached to this joint to get its radius
+        const jointMoulds = currentMouldManager.getMouldsByJoint(jointId);
+        const mouldRadius = jointMoulds.length > 0 ? jointMoulds[0].radius : 0.1;
+
+        props.onJointSelected(jointId, joint.localOffset, joint.localRotation, mouldRadius);
+        lastNotifiedJointId = jointId;
+      }
+    }
+  });
+
+  // Update mould radius for selected joint's moulds
+  createEffect(() => {
+    const radius = props.mouldRadius;
+    const jointId = props.selectedJointId;
+
+    if (!jointId || !currentMouldManager) return;
+
+    const mouldManager = currentMouldManager;
+
+    // Get all moulds attached to this joint
+    const jointMoulds = mouldManager.getMouldsByJoint(jointId);
+
+    if (jointMoulds.length === 0) return;
+
+    // Check if ANY mould actually needs updating
+    // Compare against the ACTUAL mould radius, not a cached slider value
+    const needsUpdate = jointMoulds.some(mould =>
+      Math.abs(mould.radius - radius) > 0.0001
+    );
+
+    if (!needsUpdate) {
+      // All moulds already have this radius - skip update entirely
+      return;
+    }
+
+    // Update radius for all moulds on this joint
+    jointMoulds.forEach(mould => {
+      mouldManager.updateMouldRadius(mould.id, radius);
+    });
+
+    // Sync to Rust backend
+    syncToRustBackend();
+
+    // Regenerate mesh with updated radii
+    updateMesh(false);
+  });
+
+  // Reusable materials for joint highlighting (created once, reused)
+  const jointMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+  const selectedJointMaterial = new THREE.MeshBasicMaterial({ color: 0xff00ff });
+  let lastSelectedJointId: string | null = null;
+
+  // Update skeleton visualization when selected joint changes
+  createEffect(() => {
+    const jointId = props.selectedJointId;
+
+    // Only update the materials of the 2 joints that changed (old selected + new selected)
+    if (jointSpheres.size > 0) {
+      // Deselect previous joint
+      if (lastSelectedJointId && lastSelectedJointId !== jointId) {
+        const prevSphere = jointSpheres.get(lastSelectedJointId);
+        if (prevSphere) {
+          prevSphere.material = jointMaterial;
+        }
+      }
+
+      // Select new joint
+      if (jointId) {
+        const newSphere = jointSpheres.get(jointId);
+        if (newSphere) {
+          newSphere.material = selectedJointMaterial;
+        }
+      }
+
+      lastSelectedJointId = jointId;
+    }
   });
 
   return <ThreeScene onSceneReady={handleSceneReady} />;

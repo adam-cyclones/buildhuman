@@ -32,6 +32,25 @@ export class MouldManager {
   }
 
   /**
+   * Update a mould's radius
+   */
+  updateMouldRadius(id: string, radius: number): void {
+    const mould = this.moulds.get(id);
+    if (mould) {
+      mould.radius = radius;
+    }
+  }
+
+  /**
+   * Get all moulds attached to a specific joint
+   */
+  getMouldsByJoint(jointId: string): Mould[] {
+    return Array.from(this.moulds.values()).filter(
+      m => m.parentJointId === jointId
+    );
+  }
+
+  /**
    * Remove a mould by ID
    */
   removeMould(id: string): void {
