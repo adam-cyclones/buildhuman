@@ -39,12 +39,15 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   // ----------------------------------------------------------------
   // --- RUST MIGRATION: NEW MESH GENERATION FROM BACKEND
   // ----------------------------------------------------------------
-  async function regenerateMeshFromRust(resolution: number = 32) {
+  async function regenerateMeshFromRust(resolution: number = 32, fastMode: boolean = false) {
     if (!sceneMesh) return;
 
     try {
       // 1. Invoke the command. The result is automatically an ArrayBuffer.
-      const buffer = await invoke<ArrayBuffer>("generate_mesh_binary", { resolution });
+      const buffer = await invoke<ArrayBuffer>("generate_mesh_binary", {
+        resolution,
+        fast_mode: fastMode
+      });
 
       // 2. Parse the metadata header
       const dataView = new DataView(buffer);
@@ -582,8 +585,10 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   const updateMesh = (lowRes: boolean = false) => {
     // Use lower resolution during interaction for responsiveness
     // Use half the target resolution for interactive updates
-    const resolution = lowRes ? Math.max(16, props.voxelResolution / 2) : props.voxelResolution;
-    regenerateMeshFromRust(resolution);
+    const resolution = lowRes ? Math.max(32, Math.floor(props.voxelResolution / 2)) : props.voxelResolution;
+    // Use fast mode (skips Newton projection) during interaction for speed
+    const fastMode = lowRes;
+    regenerateMeshFromRust(resolution, fastMode);
 
     /*
     if (!sceneMesh || !currentMouldManager) return;
@@ -778,6 +783,17 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     });
   });
 
+  // Debounced high-res update
+  let upscaleDebounceTimer: number | undefined;
+  const debouncedUpscale = () => {
+    if (upscaleDebounceTimer) clearTimeout(upscaleDebounceTimer);
+    upscaleDebounceTimer = setTimeout(() => {
+      console.log("Upscaling to high resolution...");
+      updateMesh(false);
+      createSkeletonVisualization(); // Also update skeleton
+    }, 500); // 500ms after last interaction
+  };
+
   // Handle joint movements
   createEffect(() => {
     const movement = props.jointMovement;
@@ -794,6 +810,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
     // Regenerate mesh with updated skeleton positions (use low-res for responsiveness)
     updateMesh(true); // Low-res during interaction
+    debouncedUpscale(); // Schedule high-res update
 
     // Update skeleton visualization
     createSkeletonVisualization();
@@ -829,6 +846,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
     // Regenerate mesh with updated skeleton rotations (use low-res for responsiveness)
     updateMesh(true); // Low-res during interaction
+    debouncedUpscale(); // Schedule high-res update
 
     // Update skeleton visualization
     createSkeletonVisualization();

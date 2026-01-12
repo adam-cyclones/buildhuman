@@ -48,6 +48,37 @@ const Humans = () => {
   const [skeletonJoints, setSkeletonJoints] = createSignal<Array<{ id: string; parentId?: string; children: string[] }>>([]);
   const [moulds, setMoulds] = createSignal<Array<{ id: string; shape: "sphere" | "capsule"; parentJointId?: string }>>([]);
 
+  // Track slider values for joint transforms (reset when joint selection changes)
+  const [sliderRotX, setSliderRotX] = createSignal(0);
+  const [sliderRotY, setSliderRotY] = createSignal(0);
+  const [sliderRotZ, setSliderRotZ] = createSignal(0);
+  const [sliderTransX, setSliderTransX] = createSignal(0);
+  const [sliderTransY, setSliderTransY] = createSignal(0);
+  const [sliderTransZ, setSliderTransZ] = createSignal(0);
+
+  // Reset sliders when joint selection changes
+  createEffect(() => {
+    selectedJointId();
+    setSliderRotX(0);
+    setSliderRotY(0);
+    setSliderRotZ(0);
+    setSliderTransX(0);
+    setSliderTransY(0);
+    setSliderTransZ(0);
+  });
+
+  createEffect(() => {
+    if (jointRotation()) {
+      setTimeout(() => setJointRotation(null), 50);
+    }
+  });
+
+  createEffect(() => {
+    if (jointMovement()) {
+      setTimeout(() => setJointMovement(null), 50);
+    }
+  });
+
   // Auto-expand skeleton nodes when skeleton loads
   createEffect(() => {
     const joints = skeletonJoints();
@@ -217,6 +248,34 @@ const Humans = () => {
     if (axis === 'y') euler[1] = radians;
     if (axis === 'z') euler[2] = radians;
     setJointRotation({ jointId, euler });
+  };
+
+  const handleRotation = (e: Event, axis: 'x' | 'y' | 'z') => {
+    const target = e.currentTarget as HTMLInputElement;
+    const value = parseFloat(target.value);
+
+    // Update the corresponding slider signal
+    if (axis === 'x') setSliderRotX(value);
+    if (axis === 'y') setSliderRotY(value);
+    if (axis === 'z') setSliderRotZ(value);
+
+    if (selectedJointId()) {
+      rotateJoint(selectedJointId()!, axis, value);
+    }
+  };
+
+  const handleTranslation = (e: Event, axis: 'x' | 'y' | 'z') => {
+    const target = e.currentTarget as HTMLInputElement;
+    const value = parseFloat(target.value);
+
+    // Update the corresponding slider signal
+    if (axis === 'x') setSliderTransX(value);
+    if (axis === 'y') setSliderTransY(value);
+    if (axis === 'z') setSliderTransZ(value);
+
+    if (selectedJointId()) {
+      moveJoint(selectedJointId()!, axis, value);
+    }
   };
 
   // Recursive component to render joint hierarchy
@@ -473,6 +532,22 @@ const Humans = () => {
                         Show Skeleton
                       </label>
                     </div>
+
+                    <div class="property-group">
+                      <label>Voxel Resolution</label>
+                      <select
+                        class="property-input"
+                        value={voxelResolution()}
+                        onChange={(e) => setVoxelResolution(parseInt(e.currentTarget.value) as 32 | 48 | 64 | 96 | 128 | 256)}
+                      >
+                        <option value="32">32</option>
+                        <option value="48">48</option>
+                        <option value="64">64 (Default)</option>
+                        <option value="96">96</option>
+                        <option value="128">128 (High)</option>
+                        <option value="256">256 (Very High)</option>
+                      </select>
+                    </div>
                   </div>
 
                   {selectedJointId() && (
@@ -480,31 +555,47 @@ const Humans = () => {
                       <h4>Joint: {selectedJointId()}</h4>
 
                       <div class="property-group">
-                        <label>Rotation</label>
-                        <div style="display: flex; gap: 4px; margin-bottom: 4px;">
-                          <button onClick={() => rotateJoint(selectedJointId()!, 'x', -15)} style="flex: 1;">↻ X</button>
-                          <button onClick={() => rotateJoint(selectedJointId()!, 'x', 15)} style="flex: 1;">↺ X</button>
-                          <button onClick={() => rotateJoint(selectedJointId()!, 'y', -15)} style="flex: 1;">↻ Y</button>
-                          <button onClick={() => rotateJoint(selectedJointId()!, 'y', 15)} style="flex: 1;">↺ Y</button>
+                        <div class="property-label-row">
+                          <label>Rotation X</label>
+                          <span class="property-value">{sliderRotX().toFixed(1)}°</span>
                         </div>
-                        <div style="display: flex; gap: 4px;">
-                          <button onClick={() => rotateJoint(selectedJointId()!, 'z', -15)} style="flex: 1;">↻ Z</button>
-                          <button onClick={() => rotateJoint(selectedJointId()!, 'z', 15)} style="flex: 1;">↺ Z</button>
+                        <input type="range" min="-45" max="45" step="0.5" value={sliderRotX()} class="property-slider" onInput={(e) => handleRotation(e, 'x')} />
+                      </div>
+                      <div class="property-group">
+                        <div class="property-label-row">
+                          <label>Rotation Y</label>
+                          <span class="property-value">{sliderRotY().toFixed(1)}°</span>
                         </div>
+                        <input type="range" min="-45" max="45" step="0.5" value={sliderRotY()} class="property-slider" onInput={(e) => handleRotation(e, 'y')} />
+                      </div>
+                      <div class="property-group">
+                        <div class="property-label-row">
+                          <label>Rotation Z</label>
+                          <span class="property-value">{sliderRotZ().toFixed(1)}°</span>
+                        </div>
+                        <input type="range" min="-45" max="45" step="0.5" value={sliderRotZ()} class="property-slider" onInput={(e) => handleRotation(e, 'z')} />
                       </div>
 
                       <div class="property-group">
-                        <label>Translation</label>
-                        <div style="display: flex; gap: 4px; margin-bottom: 4px;">
-                          <button onClick={() => moveJoint(selectedJointId()!, 'x', -0.05)} style="flex: 1;">← X</button>
-                          <button onClick={() => moveJoint(selectedJointId()!, 'x', 0.05)} style="flex: 1;">X →</button>
-                          <button onClick={() => moveJoint(selectedJointId()!, 'y', -0.05)} style="flex: 1;">↓ Y</button>
-                          <button onClick={() => moveJoint(selectedJointId()!, 'y', 0.05)} style="flex: 1;">Y ↑</button>
+                        <div class="property-label-row">
+                          <label>Translation X</label>
+                          <span class="property-value">{sliderTransX().toFixed(3)}m</span>
                         </div>
-                        <div style="display: flex; gap: 4px;">
-                          <button onClick={() => moveJoint(selectedJointId()!, 'z', -0.05)} style="flex: 1;">← Z</button>
-                          <button onClick={() => moveJoint(selectedJointId()!, 'z', 0.05)} style="flex: 1;">Z →</button>
+                        <input type="range" min="-0.2" max="0.2" step="0.005" value={sliderTransX()} class="property-slider" onInput={(e) => handleTranslation(e, 'x')} />
+                      </div>
+                      <div class="property-group">
+                        <div class="property-label-row">
+                          <label>Translation Y</label>
+                          <span class="property-value">{sliderTransY().toFixed(3)}m</span>
                         </div>
+                        <input type="range" min="-0.2" max="0.2" step="0.005" value={sliderTransY()} class="property-slider" onInput={(e) => handleTranslation(e, 'y')} />
+                      </div>
+                      <div class="property-group">
+                        <div class="property-label-row">
+                          <label>Translation Z</label>
+                          <span class="property-value">{sliderTransZ().toFixed(3)}m</span>
+                        </div>
+                        <input type="range" min="-0.2" max="0.2" step="0.005" value={sliderTransZ()} class="property-slider" onInput={(e) => handleTranslation(e, 'z')} />
                       </div>
                     </div>
                   )}
