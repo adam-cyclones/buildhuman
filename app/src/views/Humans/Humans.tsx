@@ -250,6 +250,10 @@ const Humans = () => {
     setJointRotation({ jointId, euler });
   };
 
+  // Throttle updates during drag for better performance
+  let rotationThrottleTimer: number | undefined;
+  let translationThrottleTimer: number | undefined;
+
   // Handle rotation input (continuous during drag)
   const handleRotationInput = (e: Event, axis: 'x' | 'y' | 'z') => {
     const target = e.currentTarget as HTMLInputElement;
@@ -259,8 +263,14 @@ const Humans = () => {
     const currentValue = axis === 'x' ? sliderRotX() : axis === 'y' ? sliderRotY() : sliderRotZ();
     const delta = value - currentValue;
 
-    if (Math.abs(delta) > 0.1 && selectedJointId()) { // Only update if meaningful change
-      rotateJoint(selectedJointId()!, axis, delta);
+    if (Math.abs(delta) > 0.1 && selectedJointId()) {
+      // Throttle updates to every 50ms during drag for smoothness
+      if (!rotationThrottleTimer) {
+        rotateJoint(selectedJointId()!, axis, delta);
+        rotationThrottleTimer = setTimeout(() => {
+          rotationThrottleTimer = undefined;
+        }, 50) as unknown as number;
+      }
     }
   };
 
@@ -284,8 +294,14 @@ const Humans = () => {
     const currentValue = axis === 'x' ? sliderTransX() : axis === 'y' ? sliderTransY() : sliderTransZ();
     const delta = value - currentValue;
 
-    if (Math.abs(delta) > 0.001 && selectedJointId()) { // Only update if meaningful change
-      moveJoint(selectedJointId()!, axis, delta);
+    if (Math.abs(delta) > 0.001 && selectedJointId()) {
+      // Throttle updates to every 50ms during drag for smoothness
+      if (!translationThrottleTimer) {
+        moveJoint(selectedJointId()!, axis, delta);
+        translationThrottleTimer = setTimeout(() => {
+          translationThrottleTimer = undefined;
+        }, 50) as unknown as number;
+      }
     }
   };
 

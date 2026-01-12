@@ -584,8 +584,14 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   // Regenerate mesh geometry
   const updateMesh = (lowRes: boolean = false) => {
     // Use lower resolution during interaction for responsiveness
-    // Use half the target resolution for interactive updates
-    const resolution = lowRes ? Math.max(32, Math.floor(props.voxelResolution / 2)) : props.voxelResolution;
+    // VERY aggressive: use fixed 32 resolution during interaction for butter-smooth response
+    let resolution: number;
+    if (lowRes) {
+      // Always use 32 during interaction, regardless of target resolution
+      resolution = 32;
+    } else {
+      resolution = props.voxelResolution;
+    }
     // Use fast mode (skips Newton projection) during interaction for speed
     const fastMode = lowRes;
     regenerateMeshFromRust(resolution, fastMode);
@@ -790,8 +796,8 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     upscaleDebounceTimer = setTimeout(() => {
       console.log("Upscaling to high resolution...");
       updateMesh(false);
-      createSkeletonVisualization(); // Also update skeleton
-    }, 500); // 500ms after last interaction
+      createSkeletonVisualization(); // Update skeleton after interaction
+    }, 300); // 300ms after last interaction (reduced from 500ms)
   };
 
   // Handle joint movements
