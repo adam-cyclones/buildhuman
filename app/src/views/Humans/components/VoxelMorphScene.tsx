@@ -710,7 +710,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     }
 
     // Sync skeleton and moulds to Rust backend
-    await syncToRustBackend();
+    await runSyncToRustBackend();
 
     isInitialized = true;
   };
@@ -770,6 +770,44 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     } catch (e) {
       console.error("Error syncing to Rust backend:", e);
     }
+  };
+
+  let syncDebounceTimer: number | undefined;
+  let syncInFlight = false;
+  let syncQueued = false;
+
+  const runSyncToRustBackend = async () => {
+    if (syncInFlight) {
+      syncQueued = true;
+      return;
+    }
+    syncInFlight = true;
+    try {
+      await syncToRustBackend();
+    } finally {
+      syncInFlight = false;
+      if (syncQueued) {
+        syncQueued = false;
+        void runSyncToRustBackend();
+      }
+    }
+  };
+
+  const scheduleSyncToRustBackend = (immediate: boolean = false) => {
+    if (immediate) {
+      if (syncDebounceTimer) {
+        clearTimeout(syncDebounceTimer);
+        syncDebounceTimer = undefined;
+      }
+      void runSyncToRustBackend();
+      return;
+    }
+
+    if (syncDebounceTimer) return;
+    syncDebounceTimer = setTimeout(() => {
+      syncDebounceTimer = undefined;
+      void runSyncToRustBackend();
+    }, 80) as unknown as number;
   };
 
   // Regenerate mesh geometry
@@ -985,9 +1023,20 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   const debouncedUpscale = () => {
     if (upscaleDebounceTimer) clearTimeout(upscaleDebounceTimer);
     upscaleDebounceTimer = setTimeout(() => {
+      scheduleSyncToRustBackend(true);
       updateMesh(false);
       createSkeletonVisualization(); // Update skeleton after interaction
     }, 300); // 300ms after last interaction (reduced from 500ms)
+  };
+
+  // Throttled low-res updates during drag for responsiveness
+  let lowResThrottleTimer: number | undefined;
+  const throttledLowResUpdate = () => {
+    if (lowResThrottleTimer) return;
+    updateMesh(true);
+    lowResThrottleTimer = setTimeout(() => {
+      lowResThrottleTimer = undefined;
+    }, 100) as unknown as number;
   };
 
   // Handle joint movements
@@ -1011,9 +1060,10 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     createSkeletonVisualization();
 
     // Sync updated skeleton to Rust backend
-    syncToRustBackend();
+    scheduleSyncToRustBackend();
 
-    // Debounce mesh regeneration - only update after user stops dragging
+    // Low-res mesh updates during drag, then high-res after pause
+    throttledLowResUpdate();
     debouncedUpscale();
   });
 
@@ -1049,9 +1099,10 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     createSkeletonVisualization();
 
     // Sync updated skeleton to Rust backend
-    syncToRustBackend();
+    scheduleSyncToRustBackend();
 
-    // Debounce mesh regeneration - only update after user stops dragging
+    // Low-res mesh updates during drag, then high-res after pause
+    throttledLowResUpdate();
     debouncedUpscale();
   });
 
@@ -1108,10 +1159,11 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     });
 
     // Sync to Rust backend
-    syncToRustBackend();
+    scheduleSyncToRustBackend();
 
-    // Regenerate mesh with updated radii
-    updateMesh(false);
+    // Low-res mesh updates during drag, then high-res after pause
+    throttledLowResUpdate();
+    debouncedUpscale();
   });
 
   // Reusable materials for joint highlighting (created once, reused)

@@ -3,7 +3,7 @@
 
 use crate::mesh::grid_trait::Grid;
 use crate::mesh::mould::MouldManager;
-use crate::mesh::types::{Pt3, AABB};
+use crate::mesh::types::{Pt3, Vec3, AABB};
 use rayon::prelude::*;
 use std::collections::HashMap;
 
@@ -239,6 +239,78 @@ impl BrickMap {
             .collect();
 
         // Store results
+        for (x, y, z, sdf) in values {
+            self.set(x, y, z, sdf);
+        }
+    }
+
+    /// Update bricks that intersect a world-space bounds region.
+    /// This re-evaluates only the affected bricks instead of the entire grid.
+    pub fn update_surface_bricks_in_bounds(
+        &mut self,
+        mould_manager: &MouldManager,
+        bounds: &AABB,
+        surface_thickness: f32,
+    ) {
+        let brick_size_world = self.voxel_size * BRICK_SIZE as f32;
+        let expand = surface_thickness + brick_size_world;
+        let expand_vec = Vec3::new(expand, expand, expand);
+        let min = bounds.min - expand_vec;
+        let max = bounds.max + expand_vec;
+
+        let clamp = |v: i32, max: i32| v.max(0).min(max);
+        let max_index = self.brick_count as i32 - 1;
+
+        let min_coord = self.world_to_brick_coord(&min);
+        let max_coord = self.world_to_brick_coord(&max);
+
+        let min_x = clamp(min_coord.x, max_index);
+        let min_y = clamp(min_coord.y, max_index);
+        let min_z = clamp(min_coord.z, max_index);
+        let max_x = clamp(max_coord.x, max_index);
+        let max_y = clamp(max_coord.y, max_index);
+        let max_z = clamp(max_coord.z, max_index);
+
+        let mut bricks = Vec::new();
+        for bz in min_z..=max_z {
+            for by in min_y..=max_y {
+                for bx in min_x..=max_x {
+                    let coord = BrickCoord { x: bx, y: by, z: bz };
+                    self.bricks.entry(coord).or_insert_with(Brick::new);
+                    bricks.push(coord);
+                }
+            }
+        }
+
+        if bricks.is_empty() {
+            return;
+        }
+
+        let voxel_coords: Vec<_> = bricks
+            .iter()
+            .flat_map(|brick_coord| {
+                (0..BRICK_SIZE).flat_map(move |lz| {
+                    (0..BRICK_SIZE).flat_map(move |ly| {
+                        (0..BRICK_SIZE).map(move |lx| {
+                            let global_x = brick_coord.x as u32 * BRICK_SIZE + lx;
+                            let global_y = brick_coord.y as u32 * BRICK_SIZE + ly;
+                            let global_z = brick_coord.z as u32 * BRICK_SIZE + lz;
+                            (global_x, global_y, global_z)
+                        })
+                    })
+                })
+            })
+            .collect();
+
+        let values: Vec<_> = voxel_coords
+            .par_iter()
+            .map(|(x, y, z)| {
+                let pos = self.get_position(*x as f32 + 0.5, *y as f32 + 0.5, *z as f32 + 0.5);
+                let sdf = mould_manager.evaluate_sdf(&pos);
+                (*x, *y, *z, sdf)
+            })
+            .collect();
+
         for (x, y, z, sdf) in values {
             self.set(x, y, z, sdf);
         }

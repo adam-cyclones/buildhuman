@@ -60,7 +60,7 @@ pub struct MouldData {
     pub end_point: Option<Vec3Data>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MouldShape {
     Sphere,
     Capsule,
