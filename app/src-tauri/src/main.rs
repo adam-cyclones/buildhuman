@@ -7,6 +7,9 @@ mod mesh;
 mod mesh_generation;
 
 use mesh::MeshData;
+use tauri::{Manager, Listener, Emitter};
+use tokio::sync::oneshot;
+use tokio::time;
 
 // A helper function to serialize mesh data into a byte buffer
 fn serialize_mesh_to_bytes(mesh: MeshData) -> Vec<u8> {
@@ -62,6 +65,70 @@ async fn generate_mesh_binary(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Request the frontend to capture a snapshot and return the saved path.
+/// Emits `request-snapshot` and waits for a `snapshot-done` event carrying { path }.
+#[tauri::command]
+async fn request_snapshot(app: tauri::AppHandle, timeout_ms: Option<u64>) -> Result<Option<String>, String> {
+    // Prepare oneshot channel to receive the snapshot path. Wrap the sender
+    // in an Arc<Mutex<Option<_>>> so the `Fn` closure can attempt to send the
+    // result without taking ownership of the sender itself (listen requires
+    // an `Fn` handler, not `FnOnce`). The first successful send will consume
+    // the inner Sender and subsequent calls will be ignored.
+    let (tx, rx) = oneshot::channel::<Option<String>>();
+    let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+
+    // Listen for snapshot-done events. The handler receives a full `Event`;
+    // extract the optional payload string via `event.payload()`.
+    let app_clone = app.clone();
+    let listener_id = app.listen("snapshot-done", move |event: tauri::Event| {
+        let mut path_opt: Option<String> = None;
+        let payload = event.payload();
+        if !payload.is_empty() {
+            if payload.starts_with('{') {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+                    if let Some(s) = v.get("path").and_then(|v| v.as_str()) {
+                        path_opt = Some(s.to_string());
+                    }
+                }
+            } else {
+                path_opt = Some(payload.to_string());
+            }
+        }
+
+        // Try to take the sender and send the path; ignore if it's already
+        // been taken (duplicate events).
+        if let Ok(mut guard) = tx.lock() {
+            if let Some(s) = guard.take() {
+                let _ = s.send(path_opt);
+            }
+        }
+    });
+
+    // Emit request to the main window. If your app uses a different window
+    // label, change "main" accordingly. This avoids relying on the
+    // `windows()` helper which may not be available in all bindings.
+    if let Some(window) = app_clone.get_webview_window("main") {
+        if let Err(e) = window.emit::<String>("request-snapshot", "".to_string()) {
+            app_clone.unlisten(listener_id);
+            return Err(format!("emit failed: {}", e));
+        }
+    } else {
+        app_clone.unlisten(listener_id);
+        return Err("no main window to emit to".to_string());
+    }
+
+    // Wait for event with timeout
+    let to = timeout_ms.unwrap_or(15000);
+    let res = time::timeout(std::time::Duration::from_millis(to), rx).await
+        .map_err(|_| "timeout waiting for snapshot".to_string())
+        .and_then(|r| r.map_err(|_| "listener dropped".to_string()));
+
+    // cleanup listener
+    app_clone.unlisten(listener_id);
+
+    res
+}
+
 #[tauri::command]
 fn update_skeleton(joints: Vec<mesh::JointData>) -> Result<(), String> {
     mesh_generation::update_skeleton(joints);
@@ -81,7 +148,6 @@ pub fn generate_tauri_context() -> tauri::Context {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Just run a basic Tauri app without Bevy or wgpu
-    // 3D rendering is handled by Babylon.js in the frontend
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -105,6 +171,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settings::get_app_settings,
             settings::save_app_settings,
             generate_mesh_binary,
+            request_snapshot,
             update_skeleton,
             update_moulds,
         ])

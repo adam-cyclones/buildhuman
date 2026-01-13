@@ -1,6 +1,9 @@
-import { createEffect } from "solid-js";
+import { createEffect, onCleanup, onMount } from "solid-js";
 import * as THREE from "three";
 import { invoke } from "@tauri-apps/api/core";
+import { emit, listen } from "@tauri-apps/api/event";
+import { join } from "@tauri-apps/api/path";
+import { mkdir, readDir, remove, writeFile } from "@tauri-apps/plugin-fs";
 import ThreeScene from "./ThreeScene";
 import { MouldManager } from "../morphing/mould-manager";
 import { Skeleton } from "../morphing/skeleton";
@@ -28,15 +31,27 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   let currentScene: THREE.Scene | undefined;
   let currentCamera: THREE.Camera | undefined;
   let currentCanvas: HTMLCanvasElement | undefined;
+  let currentRenderer: THREE.WebGLRenderer | undefined;
   let currentSkeleton: Skeleton | undefined;
   let currentMouldManager: MouldManager | undefined;
   let isInitialized = false;
+  let meshReady = false;
+  let snapshotListener: (() => void) | undefined;
+  let snapshotTimeoutId: number | undefined;
+  let snapshotInitialized = false;
 
-  const handleSceneReady = async (scene: THREE.Scene, mesh: THREE.Mesh, camera: THREE.Camera, canvas: HTMLCanvasElement) => {
+  const handleSceneReady = async (
+    scene: THREE.Scene,
+    mesh: THREE.Mesh,
+    camera: THREE.Camera,
+    canvas: HTMLCanvasElement,
+    renderer: THREE.WebGLRenderer
+  ) => {
     currentScene = scene;
     sceneMesh = mesh;
     currentCamera = camera;
     currentCanvas = canvas;
+    currentRenderer = renderer;
 
     // Add click listener to canvas for joint selection
     canvas.addEventListener('click', handleCanvasClick);
@@ -44,6 +59,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     await initializeSkeletonAndMoulds();
     updateMesh();
     createSkeletonVisualization();
+    await setupSnapshotAutomation();
   };
 
   // Handle canvas clicks to select joints
@@ -81,6 +97,133 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       }
     }
   };
+
+  const SNAPSHOT_DELAY_MS = 10000;
+  const SNAPSHOT_READY_TIMEOUT_MS = 15000;
+  const SNAPSHOT_DIR_NAME = "debug-snapshots";
+
+  const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const waitForMeshReady = async (timeoutMs: number) => {
+    const start = Date.now();
+    while (!meshReady && Date.now() - start < timeoutMs) {
+      await delay(200);
+    }
+  };
+
+  const writeSnapshotStatus = async (message: string) => {
+    try {
+      const snapshotDir = await ensureSnapshotDir();
+      const statusPath = await join(snapshotDir, "snapshot-status.txt");
+      const payload = `${new Date().toISOString()} ${message}\n`;
+      const bytes = new TextEncoder().encode(payload);
+      await writeFile(statusPath, bytes);
+    } catch (error) {
+      console.warn("Failed to write snapshot status:", error);
+    }
+  };
+
+  const ensureSnapshotDir = async () => {
+    const appDataPath = await invoke<string>("get_app_data_path");
+    const snapshotDir = await join(appDataPath, SNAPSHOT_DIR_NAME);
+    await mkdir(snapshotDir, { recursive: true });
+    return snapshotDir;
+  };
+
+  const clearOldSnapshots = async (snapshotDir: string, keepPath?: string) => {
+    try {
+      const entries = await readDir(snapshotDir);
+      for (const entry of entries) {
+        if (entry.path && entry.name?.endsWith(".png") && entry.path !== keepPath) {
+          await remove(entry.path, { recursive: true });
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to clear old snapshots:", error);
+    }
+  };
+
+  const saveSnapshot = async (): Promise<string | null> => {
+    if (!currentCanvas) {
+      console.warn("Snapshot requested before canvas is ready.");
+      return null;
+    }
+
+    if (currentRenderer && currentScene && currentCamera) {
+      currentRenderer.render(currentScene, currentCamera);
+    }
+
+    // Wait for a couple of frames to ensure the WebGL backbuffer is populated.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+    const blob = await new Promise<Blob | null>((resolve) =>
+      currentCanvas?.toBlob((result) => resolve(result), "image/png")
+    );
+    if (!blob) {
+      console.warn("Failed to capture canvas snapshot.");
+      return null;
+    }
+
+    const snapshotDir = await ensureSnapshotDir();
+    await clearOldSnapshots(snapshotDir);
+
+    const filename = `snapshot-${Date.now()}.png`;
+    const filePath = await join(snapshotDir, filename);
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    await writeFile(filePath, bytes);
+    await clearOldSnapshots(snapshotDir, filePath);
+    return filePath;
+  };
+
+  const captureAndEmitSnapshot = async (source: "auto" | "request") => {
+    try {
+      await writeSnapshotStatus(`capture start source=${source} meshReady=${meshReady}`);
+      await waitForMeshReady(SNAPSHOT_READY_TIMEOUT_MS);
+      const filePath = await saveSnapshot();
+      if (filePath) {
+        await emit("snapshot-done", { path: filePath, source });
+        await writeSnapshotStatus(`capture done source=${source} path=${filePath}`);
+      } else {
+        await emit("snapshot-done", "");
+        await writeSnapshotStatus(`capture done source=${source} path=empty`);
+      }
+    } catch (error) {
+      console.error("Snapshot capture failed:", error);
+      await emit("snapshot-done", "");
+      await writeSnapshotStatus(`capture failed source=${source}`);
+    }
+  };
+
+  const setupSnapshotAutomation = async () => {
+    if (!import.meta.env.DEV || snapshotInitialized) {
+      return;
+    }
+    snapshotInitialized = true;
+    await writeSnapshotStatus(`automation initialized dev=${import.meta.env.DEV}`);
+
+    snapshotTimeoutId = window.setTimeout(() => {
+      void captureAndEmitSnapshot("auto");
+    }, SNAPSHOT_DELAY_MS);
+
+    snapshotListener = await listen("request-snapshot", async () => {
+      await delay(SNAPSHOT_DELAY_MS);
+      await captureAndEmitSnapshot("request");
+    });
+
+    onCleanup(() => {
+      if (snapshotTimeoutId !== undefined) {
+        clearTimeout(snapshotTimeoutId);
+      }
+      if (snapshotListener) {
+        snapshotListener();
+      }
+    });
+  };
+
+  onMount(() => {
+    void setupSnapshotAutomation();
+  });
 
   // ----------------------------------------------------------------
   // --- RUST MIGRATION: NEW MESH GENERATION FROM BACKEND
@@ -142,6 +285,8 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       if (geometry.index) {
         geometry.index.needsUpdate = true;
       }
+
+      meshReady = geometry.attributes.position.count > 0;
 
       // Smooth shading for lower resolutions - recompute normals to smooth appearance
       // This averages normals across shared vertices, hiding faceting

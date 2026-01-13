@@ -6,7 +6,7 @@ use crate::mesh::types::{MeshData, Pt3, Vec3};
 use crate::mesh::voxel_grid::VoxelGrid;
 use rayon::prelude::*;
 use std::collections::HashMap;
-use std::sync::Mutex;
+// std::sync::Mutex not required here
 
 /// Cell vertex with position and index
 #[derive(Debug, Clone)]
@@ -114,32 +114,32 @@ fn dual_contouring_impl(
             let mut local_indices = Vec::new();
 
             // Create face in +X direction (YZ plane)
-            // Check for edge crossing along X between (x,y,z) and (x+1,y,z)
+            // Check for edge crossing along X at the shared edge of the four cells.
             if x < res - 1 && y < res - 2 && z < res - 2 {
-                let s0 = grid.get(x, y, z) < iso_value;
-                let s1 = grid.get(x + 1, y, z) < iso_value;
+                let s0 = grid.get(x, y + 1, z + 1) < iso_value;
+                let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along X-axis
-                    create_face_x(&cell_vertices, &mut local_indices, x, y, z);
+                    create_face_x(&cell_vertices, &mut local_indices, x, y, z, s0);
                 }
             }
 
             // Create face in +Y direction (XZ plane)
-            // Check for edge crossing along Y between (x,y,z) and (x,y+1,z)
+            // Check for edge crossing along Y at the shared edge of the four cells.
             if y < res - 1 && x < res - 2 && z < res - 2 {
-                let s0 = grid.get(x, y, z) < iso_value;
-                let s1 = grid.get(x, y + 1, z) < iso_value;
+                let s0 = grid.get(x + 1, y, z + 1) < iso_value;
+                let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along Y-axis
-                    create_face_y(&cell_vertices, &mut local_indices, x, y, z);
+                    create_face_y(&cell_vertices, &mut local_indices, x, y, z, s0);
                 }
             }
 
             // Create face in +Z direction (XY plane)
-            // Check for edge crossing along Z between (x,y,z) and (x,y,z+1)
+            // Check for edge crossing along Z at the shared edge of the four cells.
             if z < res - 1 && x < res - 2 && y < res - 2 {
-                let s0 = grid.get(x, y, z) < iso_value;
-                let s1 = grid.get(x, y, z + 1) < iso_value;
+                let s0 = grid.get(x + 1, y + 1, z) < iso_value;
+                let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along Z-axis
-                    create_face_z(&cell_vertices, &mut local_indices, x, y, z);
+                    create_face_z(&cell_vertices, &mut local_indices, x, y, z, !s0);
                 }
             }
 
@@ -240,8 +240,18 @@ fn find_cell_vertex(
             pos.z.clamp(min_bound.z, max_bound.z),
         )
     } else {
-        // Fallback to simple projection if QEF fails
-        project_to_surface_newton(cell_center, mould_manager, iso_value)
+        // Fallback to simple projection if QEF fails. Project to the isosurface
+        // but clamp the result to the containing cell to avoid vertices escaping
+        // the cell (which can cause T-junctions / holes in the mesh).
+        let projected = project_to_surface_newton(cell_center, mould_manager, iso_value);
+        let min_bound = grid.get_position(x as f32, y as f32, z as f32);
+        let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
+
+        Pt3::new(
+            projected.x.clamp(min_bound.x, max_bound.x),
+            projected.y.clamp(min_bound.y, max_bound.y),
+            projected.z.clamp(min_bound.z, max_bound.z),
+        )
     }
 }
 
@@ -256,6 +266,7 @@ fn solve_qef<G: Grid>(
 ) -> Option<Pt3> {
     let mut ata = SMatrix::<f32, 3, 3>::zeros();
     let mut atb = SVector::<f32, 3>::zeros();
+    let mut intersection_sum = Vec3::new(0.0, 0.0, 0.0);
     let mut points_count = 0;
 
     let corners = [
@@ -290,11 +301,12 @@ fn solve_qef<G: Grid>(
             if normal.magnitude_squared() < 1e-6 { continue; }
             let normal = normal.normalize();
             
-            let n_vec = SVector::new(normal.x, normal.y, normal.z);
-            let p_vec = SVector::new(intersection_pos.x, intersection_pos.y, intersection_pos.z);
+            let n_vec = SVector::<f32, 3>::new(normal.x, normal.y, normal.z);
+            let p_vec = SVector::<f32, 3>::new(intersection_pos.x, intersection_pos.y, intersection_pos.z);
             
             ata += n_vec * n_vec.transpose();
             atb += n_vec * n_vec.dot(&p_vec);
+            intersection_sum += intersection_pos.coords;
             points_count += 1;
         }
     }
@@ -303,28 +315,50 @@ fn solve_qef<G: Grid>(
         return None;
     }
 
+    let avg = intersection_sum / points_count as f32;
+    let avg_pos = Pt3::new(avg.x, avg.y, avg.z);
+    let min_bound = grid.get_position(x as f32, y as f32, z as f32);
+    let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
+    let cell_diag = (max_bound - min_bound).magnitude();
+
     // Solve the system ATA * v = ATb
     if let Some(inv_ata) = ata.try_inverse() {
         let v = inv_ata * atb;
-        Some(Pt3::new(v.x, v.y, v.z))
+        let pos = Pt3::new(v.x, v.y, v.z);
+        let within_bounds =
+            pos.x >= min_bound.x - 1e-4 &&
+            pos.y >= min_bound.y - 1e-4 &&
+            pos.z >= min_bound.z - 1e-4 &&
+            pos.x <= max_bound.x + 1e-4 &&
+            pos.y <= max_bound.y + 1e-4 &&
+            pos.z <= max_bound.z + 1e-4;
+        let too_far = (pos - avg_pos).magnitude() > cell_diag * 0.5;
+
+        if within_bounds && !too_far {
+            Some(pos)
+        } else {
+            Some(avg_pos)
+        }
     } else {
-        None
+        Some(avg_pos)
     }
 }
 
 
 /// Projects a point to the isosurface using Newton's method.
 /// This is a fallback for when the QEF solver fails.
-fn project_to_surface_newton<G: Grid>(
+fn project_to_surface_newton(
     start_pos: Pt3,
     mould_manager: &MouldManager,
     iso_value: f32,
 ) -> Pt3 {
     let mut pos = start_pos;
 
-    // Use Newton's method for fast convergence to isosurface
-    let max_iterations = 8;
-    let tolerance = 0.001; 
+    // Use Newton's method for fast convergence to isosurface.
+    // Increase iterations and tighten tolerance to improve projection accuracy
+    // (helps reduce tiny gaps when vertices are not tightly projected).
+    let max_iterations = 20;
+    let tolerance = 1e-4;
 
     for _ in 0..max_iterations {
         let dist = mould_manager.evaluate_sdf(&pos) - iso_value;
@@ -360,6 +394,7 @@ fn create_face_x(
     x: u32,
     y: u32,
     z: u32,
+    flip: bool,
 ) {
     // Four cells form a quad in the YZ plane perpendicular to X-axis
     let v0 = cell_vertices.get(&(x, y, z));
@@ -375,17 +410,6 @@ fn create_face_x(
     let v1 = v1.unwrap();
     let v2 = v2.unwrap();
     let v3 = v3.unwrap();
-
-    // Compute face normal using cross product
-    // Edge from v0 to v1, edge from v0 to v3
-    let e1 = v1.position - v0.position;
-    let e2 = v3.position - v0.position;
-    let face_normal = e1.cross(&e2);
-
-    // Check if face normal points in +X or -X direction
-    // If normal.x > 0, we want CCW from +X view
-    // If normal.x < 0, we want CW from +X view (which is CCW from -X view)
-    let flip = face_normal.x < 0.0;
 
     // Triangulate quad along shortest diagonal
     let diag02 = distance(&v0.position, &v2.position);
@@ -438,6 +462,7 @@ fn create_face_y(
     x: u32,
     y: u32,
     z: u32,
+    flip: bool,
 ) {
     // Four cells form a quad in the XZ plane perpendicular to Y-axis
     // The quad surrounds the Y-axis edge at (x,y,z) going to (x,y+1,z)
@@ -454,15 +479,6 @@ fn create_face_y(
     let v1 = v1.unwrap();
     let v2 = v2.unwrap();
     let v3 = v3.unwrap();
-
-    // Compute face normal using cross product
-    // Edge from v0 to v1, edge from v0 to v3
-    let e1 = v1.position - v0.position;
-    let e2 = v3.position - v0.position;
-    let face_normal = e1.cross(&e2);
-
-    // Check if face normal points in +Y or -Y direction
-    let flip = face_normal.y < 0.0;
 
     let diag02 = distance(&v0.position, &v2.position);
     let diag13 = distance(&v1.position, &v3.position);
@@ -514,6 +530,7 @@ fn create_face_z(
     x: u32,
     y: u32,
     z: u32,
+    flip: bool,
 ) {
     // Four cells form a quad in the XY plane perpendicular to Z-axis
     // The quad surrounds the Z-axis edge at (x,y,z) going to (x,y,z+1)
@@ -530,15 +547,6 @@ fn create_face_z(
     let v1 = v1.unwrap();
     let v2 = v2.unwrap();
     let v3 = v3.unwrap();
-
-    // Compute face normal using cross product
-    // Edge from v0 to v1, edge from v0 to v3
-    let e1 = v1.position - v0.position;
-    let e2 = v3.position - v0.position;
-    let face_normal = e1.cross(&e2);
-
-    // Check if face normal points in +Z or -Z direction
-    let flip = face_normal.z < 0.0;
 
     let diag02 = distance(&v0.position, &v2.position);
     let diag13 = distance(&v1.position, &v3.position);
@@ -725,32 +733,32 @@ fn dual_contouring_generic<G: Grid + Sync>(
             let mut local_indices = Vec::new();
 
             // Create face in +X direction (YZ plane)
-            // Check for edge crossing along X between (x,y,z) and (x+1,y,z)
+            // Check for edge crossing along X at the shared edge of the four cells.
             if x < res - 1 && y < res - 2 && z < res - 2 {
-                let s0 = grid.get(x, y, z) < iso_value;
-                let s1 = grid.get(x + 1, y, z) < iso_value;
+                let s0 = grid.get(x, y + 1, z + 1) < iso_value;
+                let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along X-axis
-                    create_face_x(&cell_vertices, &mut local_indices, x, y, z);
+                    create_face_x(&cell_vertices, &mut local_indices, x, y, z, s0);
                 }
             }
 
             // Create face in +Y direction (XZ plane)
-            // Check for edge crossing along Y between (x,y,z) and (x,y+1,z)
+            // Check for edge crossing along Y at the shared edge of the four cells.
             if y < res - 1 && x < res - 2 && z < res - 2 {
-                let s0 = grid.get(x, y, z) < iso_value;
-                let s1 = grid.get(x, y + 1, z) < iso_value;
+                let s0 = grid.get(x + 1, y, z + 1) < iso_value;
+                let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along Y-axis
-                    create_face_y(&cell_vertices, &mut local_indices, x, y, z);
+                    create_face_y(&cell_vertices, &mut local_indices, x, y, z, s0);
                 }
             }
 
             // Create face in +Z direction (XY plane)
-            // Check for edge crossing along Z between (x,y,z) and (x,y,z+1)
+            // Check for edge crossing along Z at the shared edge of the four cells.
             if z < res - 1 && x < res - 2 && y < res - 2 {
-                let s0 = grid.get(x, y, z) < iso_value;
-                let s1 = grid.get(x, y, z + 1) < iso_value;
+                let s0 = grid.get(x + 1, y + 1, z) < iso_value;
+                let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along Z-axis
-                    create_face_z(&cell_vertices, &mut local_indices, x, y, z);
+                    create_face_z(&cell_vertices, &mut local_indices, x, y, z, !s0);
                 }
             }
 
@@ -830,7 +838,17 @@ fn find_cell_vertex_generic<G: Grid>(
             pos.z.clamp(min_bound.z, max_bound.z),
         )
     } else {
-        // Fallback to simple projection if QEF fails
-        project_to_surface_newton(cell_center, mould_manager, iso_value)
+        // Fallback to simple projection if QEF fails. Project to the isosurface
+        // but clamp the result to the containing cell to avoid vertices escaping
+        // the cell (which can cause T-junctions / holes in the mesh).
+        let projected = project_to_surface_newton(cell_center, mould_manager, iso_value);
+        let min_bound = grid.get_position(x as f32, y as f32, z as f32);
+        let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
+
+        Pt3::new(
+            projected.x.clamp(min_bound.x, max_bound.x),
+            projected.y.clamp(min_bound.y, max_bound.y),
+            projected.z.clamp(min_bound.z, max_bound.z),
+        )
     }
 }

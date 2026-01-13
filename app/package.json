@@ -13,8 +13,6 @@
     "test:run": "vitest run"
   },
   "dependencies": {
-    "@babylonjs/core": "^7.38.0",
-    "@babylonjs/loaders": "^7.38.0",
     "@tauri-apps/api": "2.0.0",
     "@tauri-apps/plugin-dialog": "^2.4.2",
     "@tauri-apps/plugin-fs": "2.0.0",

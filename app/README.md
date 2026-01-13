@@ -19,7 +19,7 @@ The desktop application for BuildHuman - a 3D human generator and character crea
 - Import/export GLB and GLTF formats
 
 ### Real-time Rendering
-- **Babylon.js Renderer**: Fast web-based 3D preview
+- **Three.js Renderer**: Fast web-based 3D preview
 
 ### Scene & Posing
 - Position and pose characters
@@ -32,7 +32,7 @@ The desktop application for BuildHuman - a 3D human generator and character crea
 - **Frontend**: SolidJS + TypeScript. The frontend is a modern web-based UI that requires a Node.js environment for the build process and development server.
 - **Window Manager**: Tauri (Rust)
 - **3D Rendering**:
-  - Babylon.js (web renderer)
+  - Three.js (web renderer)
   - WGPU for GPU acceleration
 
 ## Development
@@ -64,7 +64,7 @@ app/
 ├── src/                    # SolidJS frontend source
 │   ├── AssetLibrary.tsx   # Asset browser & management
 │   ├── Settings.tsx       # App configuration
-│   ├── BabylonScene.tsx   # 3D preview component
+│   ├── ThreeScene.tsx     # 3D preview component
 │   └── ...
 │
 ├── src-tauri/             # Rust backend
@@ -80,7 +80,7 @@ app/
 
 ## Renderer Modes
 
-### Babylon.js (Default)
+### Three.js (Default)
 Web-based 3D renderer integrated into the UI. Best for:
 - Quick previews
 - Asset browsing

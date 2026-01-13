@@ -2,7 +2,13 @@ import { onMount, onCleanup } from "solid-js";
 import * as THREE from "three";
 
 type ThreeSceneProps = {
-  onSceneReady?: (scene: THREE.Scene, mesh: THREE.Mesh, camera: THREE.Camera, canvas: HTMLCanvasElement) => void;
+  onSceneReady?: (
+    scene: THREE.Scene,
+    mesh: THREE.Mesh,
+    camera: THREE.Camera,
+    canvas: HTMLCanvasElement,
+    renderer: THREE.WebGLRenderer
+  ) => void;
 };
 
 export default function ThreeScene(props: ThreeSceneProps) {
@@ -20,6 +26,7 @@ export default function ThreeScene(props: ThreeSceneProps) {
     renderer = new THREE.WebGLRenderer({
       canvas: canvasRef,
       antialias: true,
+      preserveDrawingBuffer: import.meta.env.DEV,
     });
     renderer.setSize(canvasRef.clientWidth, canvasRef.clientHeight);
     renderer.setClearColor(0x1a1a1a);
@@ -50,7 +57,7 @@ export default function ThreeScene(props: ThreeSceneProps) {
     const material = new THREE.MeshStandardMaterial({
       color: 0x95c0d0,
       flatShading: false, // Use smooth shading for better appearance
-      side: THREE.FrontSide, // Single-sided rendering (much faster, no z-fighting)
+      side: THREE.FrontSide,
       transparent: true,
       opacity: 0.8,
     });
@@ -58,8 +65,8 @@ export default function ThreeScene(props: ThreeSceneProps) {
     scene.add(mesh);
 
     // Call onSceneReady callback
-    if (props.onSceneReady && mesh && camera && canvasRef) {
-      props.onSceneReady(scene, mesh, camera, canvasRef);
+    if (props.onSceneReady && mesh && camera && canvasRef && renderer) {
+      props.onSceneReady(scene, mesh, camera, canvasRef, renderer);
     }
 
     // Animation loop
