@@ -46,7 +46,7 @@ const Humans = () => {
   const [showSkeleton, setShowSkeleton] = createSignal(true);
   const [selectedJointId, setSelectedJointId] = createSignal<string | null>(null);
   const [skeletonJoints, setSkeletonJoints] = createSignal<Array<{ id: string; parentId?: string; children: string[] }>>([]);
-  const [moulds, setMoulds] = createSignal<Array<{ id: string; shape: "sphere" | "capsule"; parentJointId?: string }>>([]);
+  const [moulds, setMoulds] = createSignal<Array<{ id: string; shape: "sphere" | "capsule" | "profiled-capsule"; parentJointId?: string }>>([]);
 
   // Track slider values for joint transforms (reset when joint selection changes)
   const [sliderRotX, setSliderRotX] = createSignal(0);
@@ -548,7 +548,7 @@ const Humans = () => {
                                     >
                                       ▶
                                     </span>
-                                    <span class="tree-label">Moulds</span>
+                                    <span class="tree-label">Components</span>
                                   </div>
                                   {expandedNodes().has(mouldsNodeId) && (
                                     <For each={moulds()}>
@@ -596,7 +596,7 @@ const Humans = () => {
                     </div>
                   </div>
                   <div class="property-section">
-                    <h4>Mould System</h4>
+                    <h4>Component System</h4>
 
                     <div class="property-group">
                       <div class="property-label-row">
