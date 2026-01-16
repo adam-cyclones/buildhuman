@@ -1,4 +1,4 @@
-use crate::mesh::sdf::{capsule_sdf, smooth_min_poly, sphere_sdf};
+use crate::mesh::sdf::{capsule_sdf, profiled_capsule_sdf, smooth_min_poly, sphere_sdf};
 use crate::mesh::skeleton::Skeleton;
 use crate::mesh::types::{MouldData, MouldShape, Pt3};
 use std::collections::HashMap;
@@ -13,6 +13,9 @@ pub struct Mould {
     pub parent_joint_id: Option<String>,
     // Capsule-specific
     pub end_point: Option<Pt3>,
+    // Profiled capsule-specific
+    // 2D array: [segment_along_bone][control_point_around_ring]
+    pub radial_profiles: Option<Vec<Vec<f32>>>,
 }
 
 impl From<MouldData> for Mould {
@@ -25,6 +28,7 @@ impl From<MouldData> for Mould {
             blend_radius: data.blend_radius,
             parent_joint_id: data.parent_joint_id,
             end_point: data.end_point.map(|p| p.into()),
+            radial_profiles: data.radial_profiles,
         }
     }
 }
@@ -135,6 +139,29 @@ impl MouldManager {
                     } else {
                         // Degenerate capsule, treat as sphere
                         sphere_sdf(point, &cached.world_center, mould.radius)
+                    }
+                }
+                MouldShape::ProfiledCapsule => {
+                    if let Some(world_end) = cached.world_end {
+                        let radial_profiles = mould.radial_profiles.as_ref()
+                            .expect("ProfiledCapsule must have radial_profiles");
+
+                        profiled_capsule_sdf(
+                            point,
+                            &cached.world_center,
+                            &world_end,
+                            radial_profiles,
+                        )
+                    } else {
+                        // Degenerate profiled capsule, treat as sphere with first segment's average radius
+                        let radius = mould.radial_profiles.as_ref()
+                            .and_then(|profiles| profiles.first())
+                            .and_then(|ring| {
+                                let sum: f32 = ring.iter().sum();
+                                Some(sum / ring.len() as f32)
+                            })
+                            .unwrap_or(mould.radius);
+                        sphere_sdf(point, &cached.world_center, radius)
                     }
                 }
             };

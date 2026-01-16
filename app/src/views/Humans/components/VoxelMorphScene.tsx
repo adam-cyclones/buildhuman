@@ -18,7 +18,7 @@ type VoxelMorphSceneProps = {
   showSkeleton: boolean;
   selectedJointId: string | null;
   onSkeletonReady?: (joints: Array<{ id: string; parentId?: string; children: string[] }>) => void;
-  onMouldsReady?: (moulds: Array<{ id: string; shape: "sphere" | "capsule"; parentJointId?: string }>) => void;
+  onMouldsReady?: (moulds: Array<{ id: string; shape: "sphere" | "capsule" | "profiled-capsule"; parentJointId?: string }>) => void;
   onJointSelected?: (jointId: string, offset: [number, number, number], rotation: [number, number, number, number], mouldRadius: number) => void;
   onJointClicked?: (jointId: string) => void;
 };
@@ -27,6 +27,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   let sceneMesh: THREE.Mesh | undefined;
   let wireframeMesh: THREE.LineSegments | undefined;
   let skeletonGroup: THREE.Group | undefined;
+  let profileRingsGroup: THREE.Group | undefined;
   let jointSpheres: Map<string, THREE.Mesh> = new Map();
   let currentScene: THREE.Scene | undefined;
   let currentCamera: THREE.Camera | undefined;
@@ -59,6 +60,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     await initializeSkeletonAndMoulds();
     updateMesh();
     createSkeletonVisualization();
+    createProfileRingsVisualization();
     await setupSnapshotAutomation();
   };
 
@@ -650,14 +652,29 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       parentJointId: "hip-left",
     });
 
+    // Left shin with profiled capsule (calf muscle shape)
     mouldManager.addMould({
       id: "shin-left",
-      shape: "capsule",
+      shape: "profiled-capsule",
       center: [0, 0, 0],
-      endPoint: [0, -0.35, 0], // To ankle
+      endPoint: [0, -0.35, 0],
       radius: 0.5 * 0.08,
       blendRadius,
       parentJointId: "knee-left",
+      radialProfiles: [
+        // Seg 0: Knee - circular (8 points: 0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°)
+        [0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045],
+        // Seg 1: Upper shin - circular
+        [0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04],
+        // Seg 2: Mid shin - circular, thinnest
+        [0.0325, 0.0325, 0.0325, 0.0325, 0.0325, 0.0325, 0.0325, 0.0325],
+        // Seg 3: Calf starts - back (180°-315°) begins to bulge
+        [0.038, 0.039, 0.04, 0.039, 0.038, 0.041, 0.043, 0.041],
+        // Seg 4: Calf max - pronounced bulge at back (225°-270° = indices 5-6)
+        [0.042, 0.044, 0.046, 0.044, 0.042, 0.048, 0.052, 0.048],
+        // Seg 5: Ankle - circular
+        [0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035],
+      ],
     });
 
     mouldManager.addMould({
@@ -682,12 +699,26 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
     mouldManager.addMould({
       id: "shin-right",
-      shape: "capsule",
+      shape: "profiled-capsule",
       center: [0, 0, 0],
-      endPoint: [0, -0.35, 0], // To ankle
+      endPoint: [0, -0.35, 0],
       radius: 0.5 * 0.08,
       blendRadius,
       parentJointId: "knee-right",
+      radialProfiles: [
+        // Seg 0: Knee - circular (8 points: 0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°)
+        [0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045],
+        // Seg 1: Upper shin - circular
+        [0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04, 0.04],
+        // Seg 2: Mid shin - circular, thinnest
+        [0.0325, 0.0325, 0.0325, 0.0325, 0.0325, 0.0325, 0.0325, 0.0325],
+        // Seg 3: Calf starts - back (180°-315°) begins to bulge
+        [0.038, 0.039, 0.04, 0.039, 0.038, 0.041, 0.043, 0.041],
+        // Seg 4: Calf max - pronounced bulge at back (225°-270° = indices 5-6)
+        [0.042, 0.044, 0.046, 0.044, 0.042, 0.048, 0.052, 0.048],
+        // Seg 5: Ankle - circular
+        [0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035, 0.035],
+      ],
     });
 
     mouldManager.addMould({
@@ -744,9 +775,16 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       }));
 
       // Convert moulds to serializable format
-      const moulds = currentMouldManager.getMoulds().map((m) => ({
+      const moulds = currentMouldManager.getMoulds().map((m) => {
+        // Convert kebab-case to PascalCase for Rust enum (e.g., "profiled-capsule" -> "ProfiledCapsule")
+        const shapePascalCase = m.shape
+          .split('-')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+          .join('');
+
+        return {
         id: m.id,
-        shape: m.shape.charAt(0).toUpperCase() + m.shape.slice(1), // Capitalize for Rust enum
+        shape: shapePascalCase,
         center: {
           x: m.center[0],
           y: m.center[1],
@@ -762,7 +800,9 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
               z: m.endPoint[2],
             }
           : null,
-      }));
+        radial_profiles: m.radialProfiles || null,
+        };
+      });
 
       // Send to Rust backend
       await invoke("update_skeleton", { joints });
@@ -970,6 +1010,123 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     }
   };
 
+  // Create visualization for profiled capsule ring segments
+  const createProfileRingsVisualization = () => {
+    if (!currentScene || !currentSkeleton || !currentMouldManager) return;
+
+    // Remove existing profile rings visualization
+    if (profileRingsGroup) {
+      if (profileRingsGroup.parent) {
+        profileRingsGroup.parent.remove(profileRingsGroup);
+      }
+      profileRingsGroup.traverse((child) => {
+        if (child instanceof THREE.Line || child instanceof THREE.LineLoop) {
+          child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach((m) => m.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      });
+    }
+
+    // Create new group for profile rings
+    profileRingsGroup = new THREE.Group();
+
+    // Material for profile rings (yellow)
+    const ringMaterial = new THREE.LineBasicMaterial({
+      color: 0xffff00,
+      linewidth: 1,
+    });
+
+    // Get all moulds
+    const moulds = currentMouldManager.getMoulds();
+
+    for (const mould of moulds) {
+      // Only visualize profiled capsules
+      if (mould.shape !== "profiled-capsule" || !mould.radialProfiles || !mould.endPoint) {
+        continue;
+      }
+
+      const jointId = mould.parentJointId;
+      if (!jointId) continue;
+
+      // Get world-space start and end points
+      const startWorld = currentSkeleton.getWorldPosition(jointId);
+      const endLocal = mould.endPoint;
+      const endWorld = currentSkeleton.transformToWorld(jointId, endLocal);
+
+      // Bone direction vector
+      const boneDir = new THREE.Vector3(
+        endWorld[0] - startWorld[0],
+        endWorld[1] - startWorld[1],
+        endWorld[2] - startWorld[2]
+      ).normalize();
+
+      // Construct consistent local frame (matching Rust implementation)
+      const worldUp = new THREE.Vector3(0, 1, 0);
+      const worldForward = new THREE.Vector3(0, 0, 1);
+
+      // Choose reference vector based on bone orientation
+      const refVec = Math.abs(boneDir.y) > 0.9 ? worldForward : worldUp;
+
+      // Right vector (perpendicular to bone)
+      const right = new THREE.Vector3().crossVectors(boneDir, refVec).normalize();
+
+      // Forward vector (completes orthonormal basis)
+      const forward = new THREE.Vector3().crossVectors(right, boneDir).normalize();
+
+      // Draw a ring for each segment
+      const numSegments = mould.radialProfiles.length;
+      const numPoints = mould.radialProfiles[0]?.length || 8;
+
+      for (let segIdx = 0; segIdx < numSegments; segIdx++) {
+        const ringProfile = mould.radialProfiles[segIdx];
+        if (!ringProfile || ringProfile.length === 0) continue;
+
+        // t parameter along bone [0, 1]
+        const t = segIdx / (numSegments - 1);
+
+        // Center point of this ring in world space
+        const centerX = startWorld[0] + (endWorld[0] - startWorld[0]) * t;
+        const centerY = startWorld[1] + (endWorld[1] - startWorld[1]) * t;
+        const centerZ = startWorld[2] + (endWorld[2] - startWorld[2]) * t;
+
+        // Create ring points
+        const ringPoints: THREE.Vector3[] = [];
+        const angleStep = (2 * Math.PI) / numPoints;
+
+        for (let i = 0; i <= numPoints; i++) {
+          // Loop back to first point for closed ring
+          const angle = (i % numPoints) * angleStep;
+          const radius = ringProfile[i % numPoints];
+
+          // Position on ring: center + radius * (cos(angle)*right + sin(angle)*forward)
+          const x = centerX + radius * (Math.cos(angle) * right.x + Math.sin(angle) * forward.x);
+          const y = centerY + radius * (Math.cos(angle) * right.y + Math.sin(angle) * forward.y);
+          const z = centerZ + radius * (Math.cos(angle) * right.z + Math.sin(angle) * forward.z);
+
+          ringPoints.push(new THREE.Vector3(x, y, z));
+        }
+
+        // Create line loop for this ring
+        const ringGeometry = new THREE.BufferGeometry().setFromPoints(ringPoints);
+        const ringLine = new THREE.LineLoop(ringGeometry, ringMaterial);
+        profileRingsGroup.add(ringLine);
+      }
+    }
+
+    profileRingsGroup.visible = props.showSkeleton; // Show/hide with skeleton
+
+    // Add rings as child of mesh so they rotate together
+    if (sceneMesh) {
+      sceneMesh.add(profileRingsGroup);
+    } else {
+      currentScene.add(profileRingsGroup);
+    }
+  };
+
   // Update mesh when radius changes
   createEffect(() => {
     // This will run whenever props.mouldRadius changes
@@ -999,6 +1156,12 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     skeletonGroup.visible = props.showSkeleton;
   });
 
+  // Handle profile rings visibility toggle (follows skeleton)
+  createEffect(() => {
+    if (!profileRingsGroup) return;
+    profileRingsGroup.visible = props.showSkeleton;
+  });
+
   // Handle joint selection changes
   createEffect(() => {
     const selected = props.selectedJointId;
@@ -1026,6 +1189,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       scheduleSyncToRustBackend(true);
       updateMesh(false);
       createSkeletonVisualization(); // Update skeleton after interaction
+      createProfileRingsVisualization(); // Update profile rings after interaction
     }, 300); // 300ms after last interaction (reduced from 500ms)
   };
 
@@ -1058,6 +1222,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
     // Update skeleton visualization immediately (instant feedback)
     createSkeletonVisualization();
+    createProfileRingsVisualization();
 
     // Sync updated skeleton to Rust backend
     scheduleSyncToRustBackend();
@@ -1097,6 +1262,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
     // Update skeleton visualization immediately (instant feedback)
     createSkeletonVisualization();
+    createProfileRingsVisualization();
 
     // Sync updated skeleton to Rust backend
     scheduleSyncToRustBackend();

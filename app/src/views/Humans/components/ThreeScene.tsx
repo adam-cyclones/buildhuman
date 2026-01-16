@@ -1,5 +1,6 @@
 import { onMount, onCleanup } from "solid-js";
 import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 type ThreeSceneProps = {
   onSceneReady?: (
@@ -18,6 +19,7 @@ export default function ThreeScene(props: ThreeSceneProps) {
   let camera: THREE.PerspectiveCamera | undefined;
   let mesh: THREE.Mesh | undefined;
   let animationId: number | undefined;
+  let controls: OrbitControls | undefined;
 
   onMount(() => {
     if (!canvasRef) return;
@@ -64,6 +66,13 @@ export default function ThreeScene(props: ThreeSceneProps) {
     mesh = new THREE.Mesh(geometry, material);
     scene.add(mesh);
 
+    // Add orbit controls for camera rotation
+    controls = new OrbitControls(camera, canvasRef);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.target.set(0, 0, 0);
+    controls.update();
+
     // Call onSceneReady callback
     if (props.onSceneReady && mesh && camera && canvasRef && renderer) {
       props.onSceneReady(scene, mesh, camera, canvasRef, renderer);
@@ -73,9 +82,9 @@ export default function ThreeScene(props: ThreeSceneProps) {
     const animate = () => {
       animationId = requestAnimationFrame(animate);
 
-      // Rotate mesh
-      if (mesh) {
-        mesh.rotation.y += 0.005;
+      // Update orbit controls
+      if (controls) {
+        controls.update();
       }
 
       if (renderer && scene && camera) {

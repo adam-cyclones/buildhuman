@@ -58,12 +58,17 @@ pub struct MouldData {
     pub blend_radius: f32,
     pub parent_joint_id: Option<String>,
     pub end_point: Option<Vec3Data>,
+    // Profiled capsule-specific properties
+    // 2D array: [segment_along_bone][control_point_around_ring]
+    // Each segment has N radial control points defining the perimeter shape
+    pub radial_profiles: Option<Vec<Vec<f32>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum MouldShape {
     Sphere,
     Capsule,
+    ProfiledCapsule,
 }
 
 // Mesh output data

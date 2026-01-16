@@ -31,6 +31,18 @@ Add a new “profiled bone” SDF primitive that approximates realistic limb sha
    - Generate snapshot after 10s (existing snapshot pipeline).
    - Compare silhouette vs current capsules.
 
+## Radial Control Points (Future UI)
+Once rendering works, add direct manipulation controls:
+- At each segment along the bone, visualize a ring/spline perpendicular to bone axis
+- The ring defines the cross-sectional profile at that point (radial displacement)
+- Number of segments along bone = detail resolution for length-wise variation
+- Number of control points around ring = detail resolution for radial asymmetry
+- User grabs a control point on the ring and drags outward/inward
+- Dragging updates the radial displacement at that angle and t-value
+- Only affected voxel region recalculates (localized update)
+- Enables intuitive pull/push editing of limb shape (e.g., calf bulge, shin indent)
+- Could achieve 60fps with region-based mesh updates
+
 ## Future (Not Now)
 - Base mesh scan to derive profiles.
 - Mesh proxy SDFs for head/hands/feet.

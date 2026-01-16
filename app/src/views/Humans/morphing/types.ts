@@ -15,7 +15,7 @@ export type Mat4 = [
 
 export type BlendMode = "smooth" | "union" | "subtract";
 
-export type MouldShape = "sphere" | "capsule";
+export type MouldShape = "sphere" | "capsule" | "profiled-capsule";
 
 export type Mould = {
   id: string;
@@ -26,6 +26,10 @@ export type Mould = {
   parentJointId?: string; // For skeleton attachment
   // Capsule-specific properties
   endPoint?: Vec3; // Second endpoint in LOCAL space
+  // Profiled capsule-specific properties
+  // 2D array: [segment_along_bone][control_point_around_ring]
+  // Each segment has N radial control points defining the perimeter shape
+  radialProfiles?: number[][];
 };
 
 export type Joint = {
