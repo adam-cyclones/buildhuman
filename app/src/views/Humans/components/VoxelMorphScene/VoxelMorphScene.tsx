@@ -489,19 +489,19 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       blendRadius: 0.02, // Minimal blend for profiled capsules
       parentJointId: "ankle-left",
       radialProfiles: [
-        // Control points: 0° (lateral/right), 45°, 90° (top), 135°, 180° (medial/left), 225°, 270° (bottom), 315°
-        // Seg 0: Ankle - narrow, slightly taller than wide
-        [0.030, 0.032, 0.035, 0.032, 0.030, 0.032, 0.028, 0.032],
-        // Seg 1: Arch - wider at bottom for heel/arch support
-        [0.034, 0.035, 0.036, 0.035, 0.034, 0.036, 0.038, 0.036],
-        // Seg 2: Midfoot - flatter bottom, wider
-        [0.036, 0.037, 0.037, 0.037, 0.036, 0.038, 0.042, 0.038],
-        // Seg 3: Ball of foot - slightly wider, flatter bottom
-        [0.034, 0.035, 0.035, 0.035, 0.034, 0.036, 0.040, 0.036],
-        // Seg 4: Toe area - tapering
-        [0.028, 0.029, 0.030, 0.029, 0.028, 0.030, 0.032, 0.030],
+        // Control points: 0° (lateral/right), 45°, 90° (top), 135°, 180° (medial/left), 225°, 270° (bottom/ground), 315°
+        // Seg 0: Heel - narrow at ankle, rounded top, FLAT bottom for ground contact
+        [0.032, 0.033, 0.036, 0.033, 0.032, 0.020, 0.015, 0.020],
+        // Seg 1: Arch area - rounded top, INDENT at bottom (arch doesn't touch ground)
+        [0.036, 0.037, 0.038, 0.037, 0.036, 0.010, 0.005, 0.010],
+        // Seg 2: Midfoot/arch transition - still arched but starting to widen
+        [0.038, 0.039, 0.039, 0.039, 0.038, 0.012, 0.008, 0.012],
+        // Seg 3: Ball of foot - wider, rounded top, FLAT bottom for ground contact
+        [0.036, 0.037, 0.037, 0.037, 0.036, 0.018, 0.015, 0.018],
+        // Seg 4: Toe area - tapering, flatter bottom
+        [0.030, 0.031, 0.032, 0.031, 0.030, 0.016, 0.014, 0.016],
         // Seg 5: Toe tip - small and rounded
-        [0.022, 0.023, 0.024, 0.023, 0.022, 0.024, 0.025, 0.024],
+        [0.022, 0.023, 0.024, 0.023, 0.022, 0.018, 0.017, 0.018],
       ],
     });
 
@@ -565,19 +565,19 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       blendRadius: 0.02, // Minimal blend for profiled capsules
       parentJointId: "ankle-right",
       radialProfiles: [
-        // Control points: 0° (lateral/right), 45°, 90° (top), 135°, 180° (medial/left), 225°, 270° (bottom), 315°
-        // Seg 0: Ankle - narrow, slightly taller than wide
-        [0.030, 0.032, 0.035, 0.032, 0.030, 0.032, 0.028, 0.032],
-        // Seg 1: Arch - wider at bottom for heel/arch support
-        [0.034, 0.035, 0.036, 0.035, 0.034, 0.036, 0.038, 0.036],
-        // Seg 2: Midfoot - flatter bottom, wider
-        [0.036, 0.037, 0.037, 0.037, 0.036, 0.038, 0.042, 0.038],
-        // Seg 3: Ball of foot - slightly wider, flatter bottom
-        [0.034, 0.035, 0.035, 0.035, 0.034, 0.036, 0.040, 0.036],
-        // Seg 4: Toe area - tapering
-        [0.028, 0.029, 0.030, 0.029, 0.028, 0.030, 0.032, 0.030],
+        // Control points: 0° (lateral/right), 45°, 90° (top), 135°, 180° (medial/left), 225°, 270° (bottom/ground), 315°
+        // Seg 0: Heel - narrow at ankle, rounded top, FLAT bottom for ground contact
+        [0.032, 0.033, 0.036, 0.033, 0.032, 0.020, 0.015, 0.020],
+        // Seg 1: Arch area - rounded top, INDENT at bottom (arch doesn't touch ground)
+        [0.036, 0.037, 0.038, 0.037, 0.036, 0.010, 0.005, 0.010],
+        // Seg 2: Midfoot/arch transition - still arched but starting to widen
+        [0.038, 0.039, 0.039, 0.039, 0.038, 0.012, 0.008, 0.012],
+        // Seg 3: Ball of foot - wider, rounded top, FLAT bottom for ground contact
+        [0.036, 0.037, 0.037, 0.037, 0.036, 0.018, 0.015, 0.018],
+        // Seg 4: Toe area - tapering, flatter bottom
+        [0.030, 0.031, 0.032, 0.031, 0.030, 0.016, 0.014, 0.016],
         // Seg 5: Toe tip - small and rounded
-        [0.022, 0.023, 0.024, 0.023, 0.022, 0.024, 0.025, 0.024],
+        [0.022, 0.023, 0.024, 0.023, 0.022, 0.018, 0.017, 0.018],
       ],
     });
 
