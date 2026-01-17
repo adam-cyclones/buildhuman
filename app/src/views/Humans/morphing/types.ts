@@ -30,6 +30,11 @@ export type Mould = {
   // 2D array: [segment_along_bone][control_point_around_ring]
   // Each segment has N radial control points defining the perimeter shape
   radialProfiles?: number[][];
+  // Interpolation mode for profiled capsules
+  // true = Catmull-Rom splines (smooth, for hand-crafted profiles with few control points)
+  // false = Linear interpolation (preserves detail, for scanned meshes with many control points)
+  // Default: true
+  useSplines?: boolean;
 };
 
 export type Joint = {

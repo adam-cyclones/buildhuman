@@ -141,6 +141,11 @@ fn update_moulds(moulds: Vec<mesh::MouldData>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn get_profile_control_points() -> Result<Vec<serde_json::Value>, String> {
+    mesh_generation::get_profile_control_points()
+}
+
 
 pub fn generate_tauri_context() -> tauri::Context {
     tauri::generate_context!()
@@ -174,6 +179,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             request_snapshot,
             update_skeleton,
             update_moulds,
+            get_profile_control_points,
         ])
         .run(generate_tauri_context())
         .expect("error while running tauri application");

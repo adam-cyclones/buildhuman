@@ -1049,6 +1049,46 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     }
   };
 
+  // Catmull-Rom spline interpolation for closed ring (matches Rust implementation)
+  // Takes angle in radians [0, 2π], returns interpolated radius
+  const catmullRomClosed = (values: number[], angle: number): number => {
+    const n = values.length;
+    if (n === 0) return 0;
+    if (n === 1) return values[0];
+
+    // Normalize angle to [0, 2π]
+    const TWO_PI = 2 * Math.PI;
+    const normalizedAngle = ((angle % TWO_PI) + TWO_PI) % TWO_PI;
+
+    // Convert angle to parameter t ∈ [0, n]
+    const t = (normalizedAngle / TWO_PI) * n;
+
+    // Determine which segment
+    const segmentIdx = Math.floor(t) % n;
+    const localT = t - Math.floor(t);
+
+    // Get 4 control points with wrapping
+    const i0 = (segmentIdx + n - 1) % n;
+    const i1 = segmentIdx;
+    const i2 = (segmentIdx + 1) % n;
+    const i3 = (segmentIdx + 2) % n;
+
+    const p0 = values[i0];
+    const p1 = values[i1];
+    const p2 = values[i2];
+    const p3 = values[i3];
+
+    // Catmull-Rom basis functions
+    const t2 = localT * localT;
+    const t3 = t2 * localT;
+
+    return 0.5 * (
+      2 * p1 +
+      (-p0 + p2) * localT +
+      (2*p0 - 5*p1 + 4*p2 - p3) * t2 +
+      (-p0 + 3*p1 - 3*p2 + p3) * t3
+    );
+  };
 
   // Create visualization for profiled capsule ring segments using Rust-computed positions
   const createProfileRingsVisualization = async () => {
@@ -1133,6 +1173,173 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     }
   };
 
+  // Regenerate mesh (no longer used - replaced by code below)
+  const regenerateMesh_old = () => {
+    // Get all moulds
+    const moulds = currentMouldManager?.getMoulds();
+
+    for (const mould of moulds) {
+      // Only visualize profiled capsules
+      if (mould.shape !== "profiled-capsule" || !mould.radialProfiles || !mould.endPoint) {
+        continue;
+      }
+
+      const jointId = mould.parentJointId;
+      if (!jointId) continue;
+
+      // Get world-space start and end points
+      const startWorld = currentSkeleton.getWorldPosition(jointId);
+      const endLocal = mould.endPoint;
+      const endWorld = currentSkeleton.transformToWorld(jointId, endLocal);
+
+      // Bone direction vector
+      const boneDir = new THREE.Vector3(
+        endWorld[0] - startWorld[0],
+        endWorld[1] - startWorld[1],
+        endWorld[2] - startWorld[2]
+      ).normalize();
+
+      // Construct consistent local frame (matching Rust implementation)
+      const worldUp = new THREE.Vector3(0, 1, 0);
+      const worldForward = new THREE.Vector3(0, 0, 1);
+
+      // Choose reference vector based on bone orientation
+      const refVec = Math.abs(boneDir.y) > 0.9 ? worldForward : worldUp;
+
+      // Right vector (perpendicular to bone) - MUST MATCH RUST: bone_dir × ref_vec
+      const right = new THREE.Vector3().crossVectors(boneDir, refVec).normalize();
+
+      // Forward vector (completes orthonormal basis) - MUST MATCH RUST: right × bone_dir
+      const forward = new THREE.Vector3().crossVectors(right, boneDir).normalize();
+
+      // Debug: Log coordinate frame for first profiled capsule
+      if (mould.id === "thigh-left") {
+        console.log(`Coordinate frame for ${mould.id}:`, {
+          boneDir: [boneDir.x, boneDir.y, boneDir.z],
+          right: [right.x, right.y, right.z],
+          forward: [forward.x, forward.y, forward.z],
+        });
+      }
+
+      // Draw a ring for each segment
+      const numSegments = mould.radialProfiles.length;
+      const numControlPoints = mould.radialProfiles[0]?.length || 8;
+
+      // Use splines if enabled (default: true)
+      const useSplines = mould.useSplines !== false;
+
+      // Sample at high resolution to show the splined curve
+      const samplesPerRing = useSplines ? 64 : numControlPoints;
+
+      for (let segIdx = 0; segIdx < numSegments; segIdx++) {
+        const ringProfile = mould.radialProfiles[segIdx];
+        if (!ringProfile || ringProfile.length === 0) continue;
+
+        // t parameter along bone [0, 1]
+        const t = segIdx / (numSegments - 1);
+
+        // Center point of this ring in world space
+        const centerX = startWorld[0] + (endWorld[0] - startWorld[0]) * t;
+        const centerY = startWorld[1] + (endWorld[1] - startWorld[1]) * t;
+        const centerZ = startWorld[2] + (endWorld[2] - startWorld[2]) * t;
+
+        // Create ring points
+        const ringPoints: THREE.Vector3[] = [];
+
+        for (let i = 0; i < samplesPerRing; i++) {
+          let radius: number;
+          let angle: number;
+
+          if (useSplines) {
+            // Spline mode: sample the Catmull-Rom spline at high resolution
+            // Pass angle in radians to match Rust implementation
+            angle = (i / samplesPerRing) * 2 * Math.PI;
+            radius = catmullRomClosed(ringProfile, angle);
+          } else {
+            // Linear mode: sample control points directly
+            const controlIndex = i;
+            const angleStep = (2 * Math.PI) / numControlPoints;
+            angle = controlIndex * angleStep;
+            radius = ringProfile[controlIndex];
+          }
+
+          // Position on ring: center + cos(angle)*right + sin(angle)*forward
+          // This matches Rust: angle=0 points along +right
+          const x = centerX + radius * (Math.cos(angle) * right.x + Math.sin(angle) * forward.x);
+          const y = centerY + radius * (Math.cos(angle) * right.y + Math.sin(angle) * forward.y);
+          const z = centerZ + radius * (Math.cos(angle) * right.z + Math.sin(angle) * forward.z);
+
+          ringPoints.push(new THREE.Vector3(x, y, z));
+        }
+
+        // Create line loop for this ring
+        const ringGeometry = new THREE.BufferGeometry().setFromPoints(ringPoints);
+        const ringLine = new THREE.LineLoop(ringGeometry, ringMaterial);
+        profileRingsGroup.add(ringLine);
+      }
+
+      // Draw longitudinal lines connecting rings (showing the surface flow)
+      // These lines trace the same angle across all segments to show how the surface flows
+      if (numSegments > 1) {
+        const longitudinalMaterial = new THREE.LineBasicMaterial({
+          color: 0xffff00,
+          opacity: 0.3,
+          transparent: true,
+        });
+
+        // Draw longitudinal lines at regular angular intervals
+        const numLongitudinalLines = 16; // Show 16 meridians around the capsule
+
+        for (let lineIdx = 0; lineIdx < numLongitudinalLines; lineIdx++) {
+          const longPoints: THREE.Vector3[] = [];
+          const angle = (lineIdx / numLongitudinalLines) * 2 * Math.PI;
+
+          for (let segIdx = 0; segIdx < numSegments; segIdx++) {
+            const ringProfile = mould.radialProfiles![segIdx];
+            const t = segIdx / (numSegments - 1);
+
+            const centerX = startWorld[0] + (endWorld[0] - startWorld[0]) * t;
+            const centerY = startWorld[1] + (endWorld[1] - startWorld[1]) * t;
+            const centerZ = startWorld[2] + (endWorld[2] - startWorld[2]) * t;
+
+            // Sample radius at this angle using spline if enabled
+            let radius: number;
+            if (useSplines) {
+              // Pass angle directly to match Rust implementation
+              radius = catmullRomClosed(ringProfile, angle);
+            } else {
+              // Linear interpolation between control points
+              const angleStep = (2 * Math.PI) / numControlPoints;
+              const floatIndex = (angle / angleStep) % numControlPoints;
+              const idx0 = Math.floor(floatIndex);
+              const idx1 = (idx0 + 1) % numControlPoints;
+              const frac = floatIndex - idx0;
+              radius = ringProfile[idx0] * (1 - frac) + ringProfile[idx1] * frac;
+            }
+
+            const x = centerX + radius * (Math.cos(angle) * right.x + Math.sin(angle) * forward.x);
+            const y = centerY + radius * (Math.cos(angle) * right.y + Math.sin(angle) * forward.y);
+            const z = centerZ + radius * (Math.cos(angle) * right.z + Math.sin(angle) * forward.z);
+
+            longPoints.push(new THREE.Vector3(x, y, z));
+          }
+
+          const longGeometry = new THREE.BufferGeometry().setFromPoints(longPoints);
+          const longLine = new THREE.Line(longGeometry, longitudinalMaterial);
+          profileRingsGroup.add(longLine);
+        }
+      }
+    }
+
+    profileRingsGroup.visible = props.showSkeleton; // Show/hide with skeleton
+
+    // Add rings as child of mesh so they rotate together
+    if (sceneMesh) {
+      sceneMesh.add(profileRingsGroup);
+    } else {
+      currentScene.add(profileRingsGroup);
+    }
+  };
 
   // Update mesh when radius changes
   createEffect(() => {

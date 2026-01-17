@@ -362,3 +362,35 @@ fn union_bounds(target: &mut Option<AABB>, bounds: AABB) {
         }
     }
 }
+
+/// Get all control points for profiled capsules in world space
+/// Returns array of { mouldId, segmentIndex, pointIndex, position: {x, y, z} }
+pub fn get_profile_control_points() -> Result<Vec<serde_json::Value>, String> {
+    let state = MESH_STATE.lock().unwrap();
+
+    let mould_manager = state
+        .mould_manager
+        .as_ref()
+        .ok_or("No mould manager initialized")?;
+
+    let points = mould_manager.get_control_points_world();
+
+    // Convert to JSON-serializable format
+    let json_points: Vec<serde_json::Value> = points
+        .into_iter()
+        .map(|(mould_id, seg_idx, pt_idx, pos)| {
+            serde_json::json!({
+                "mouldId": mould_id,
+                "segmentIndex": seg_idx,
+                "pointIndex": pt_idx,
+                "position": {
+                    "x": pos.x,
+                    "y": pos.y,
+                    "z": pos.z,
+                }
+            })
+        })
+        .collect();
+
+    Ok(json_points)
+}

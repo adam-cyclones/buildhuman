@@ -4,6 +4,7 @@ pub mod grid_trait;
 pub mod mould;
 pub mod sdf;
 pub mod skeleton;
+pub mod spline;
 pub mod types;
 pub mod voxel_grid;
 

@@ -62,6 +62,10 @@ pub struct MouldData {
     // 2D array: [segment_along_bone][control_point_around_ring]
     // Each segment has N radial control points defining the perimeter shape
     pub radial_profiles: Option<Vec<Vec<f32>>>,
+    // Interpolation mode for profiled capsules
+    // true = Catmull-Rom splines (smooth, for hand-crafted profiles with few control points)
+    // false = Linear interpolation (preserves detail, for scanned meshes with many control points)
+    pub use_splines: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

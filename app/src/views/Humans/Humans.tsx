@@ -40,7 +40,7 @@ const Humans = () => {
   const sceneTabs = ["Scene", "Properties"];
   const [mouldRadius, setMouldRadius] = createSignal(0.5);
   const [debouncedMouldRadius, setDebouncedMouldRadius] = createSignal(0.5);
-  const [voxelResolution, setVoxelResolution] = createSignal<32 | 48 | 64 | 96 | 128 | 256>(64);
+  const [voxelResolution, setVoxelResolution] = createSignal<32 | 48 | 64 | 96 | 128 | 256>(96);
   const [jointMovement, setJointMovement] = createSignal<{ jointId: string; offset: [number, number, number] } | null>(null);
   const [jointRotation, setJointRotation] = createSignal<{ jointId: string; euler: [number, number, number] } | null>(null);
   const [showSkeleton, setShowSkeleton] = createSignal(true);
