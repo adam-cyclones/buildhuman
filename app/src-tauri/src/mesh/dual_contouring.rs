@@ -228,30 +228,39 @@ fn find_cell_vertex(
 ) -> Pt3 {
     let cell_center = grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
 
-    // Solve QEF to get the feature-preserving vertex position
-    if let Some(pos) = solve_qef(grid, mould_manager, x, y, z, iso_value) {
-        // Clamp vertex to be within the cell to avoid artifacts
-        let min_bound = grid.get_position(x as f32, y as f32, z as f32);
-        let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
+    // TEMPORARY: Skip QEF solver to test alignment with analytical surface
+    // QEF uses mass-point constraints that can offset vertices from the true SDF surface
+    // For profiled capsules, we want vertices to lie exactly on the analytical surface
+    const USE_QEF: bool = false;
 
-        Pt3::new(
-            pos.x.clamp(min_bound.x, max_bound.x),
-            pos.y.clamp(min_bound.y, max_bound.y),
-            pos.z.clamp(min_bound.z, max_bound.z),
-        )
+    if USE_QEF {
+        // Solve QEF to get the feature-preserving vertex position
+        if let Some(pos) = solve_qef(grid, mould_manager, x, y, z, iso_value) {
+            // Clamp vertex to be within the cell to avoid artifacts
+            let min_bound = grid.get_position(x as f32, y as f32, z as f32);
+            let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
+
+            Pt3::new(
+                pos.x.clamp(min_bound.x, max_bound.x),
+                pos.y.clamp(min_bound.y, max_bound.y),
+                pos.z.clamp(min_bound.z, max_bound.z),
+            )
+        } else {
+            // Fallback to simple projection if QEF fails
+            let projected = project_to_surface_newton(cell_center, mould_manager, iso_value);
+            let min_bound = grid.get_position(x as f32, y as f32, z as f32);
+            let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
+
+            Pt3::new(
+                projected.x.clamp(min_bound.x, max_bound.x),
+                projected.y.clamp(min_bound.y, max_bound.y),
+                projected.z.clamp(min_bound.z, max_bound.z),
+            )
+        }
     } else {
-        // Fallback to simple projection if QEF fails. Project to the isosurface
-        // but clamp the result to the containing cell to avoid vertices escaping
-        // the cell (which can cause T-junctions / holes in the mesh).
-        let projected = project_to_surface_newton(cell_center, mould_manager, iso_value);
-        let min_bound = grid.get_position(x as f32, y as f32, z as f32);
-        let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
-
-        Pt3::new(
-            projected.x.clamp(min_bound.x, max_bound.x),
-            projected.y.clamp(min_bound.y, max_bound.y),
-            projected.z.clamp(min_bound.z, max_bound.z),
-        )
+        // Direct surface projection without QEF mass-point constraints
+        // This should align vertices exactly with the analytical SDF surface
+        project_to_surface_newton(cell_center, mould_manager, iso_value)
     }
 }
 
@@ -826,29 +835,38 @@ fn find_cell_vertex_generic<G: Grid>(
 ) -> Pt3 {
     let cell_center = grid.get_position(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
 
-    // Solve QEF to get the feature-preserving vertex position
-    if let Some(pos) = solve_qef(grid, mould_manager, x, y, z, iso_value) {
-        // Clamp vertex to be within the cell to avoid artifacts
-        let min_bound = grid.get_position(x as f32, y as f32, z as f32);
-        let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
+    // TEMPORARY: Skip QEF solver to test alignment with analytical surface
+    // QEF uses mass-point constraints that can offset vertices from the true SDF surface
+    // For profiled capsules, we want vertices to lie exactly on the analytical surface
+    const USE_QEF: bool = false;
 
-        Pt3::new(
-            pos.x.clamp(min_bound.x, max_bound.x),
-            pos.y.clamp(min_bound.y, max_bound.y),
-            pos.z.clamp(min_bound.z, max_bound.z),
-        )
+    if USE_QEF {
+        // Solve QEF to get the feature-preserving vertex position
+        if let Some(pos) = solve_qef(grid, mould_manager, x, y, z, iso_value) {
+            // Clamp vertex to be within the cell to avoid artifacts
+            let min_bound = grid.get_position(x as f32, y as f32, z as f32);
+            let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
+
+            Pt3::new(
+                pos.x.clamp(min_bound.x, max_bound.x),
+                pos.y.clamp(min_bound.y, max_bound.y),
+                pos.z.clamp(min_bound.z, max_bound.z),
+            )
+        } else {
+            // Fallback to simple projection if QEF fails
+            let projected = project_to_surface_newton(cell_center, mould_manager, iso_value);
+            let min_bound = grid.get_position(x as f32, y as f32, z as f32);
+            let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
+
+            Pt3::new(
+                projected.x.clamp(min_bound.x, max_bound.x),
+                projected.y.clamp(min_bound.y, max_bound.y),
+                projected.z.clamp(min_bound.z, max_bound.z),
+            )
+        }
     } else {
-        // Fallback to simple projection if QEF fails. Project to the isosurface
-        // but clamp the result to the containing cell to avoid vertices escaping
-        // the cell (which can cause T-junctions / holes in the mesh).
-        let projected = project_to_surface_newton(cell_center, mould_manager, iso_value);
-        let min_bound = grid.get_position(x as f32, y as f32, z as f32);
-        let max_bound = grid.get_position(x as f32 + 1.0, y as f32 + 1.0, z as f32 + 1.0);
-
-        Pt3::new(
-            projected.x.clamp(min_bound.x, max_bound.x),
-            projected.y.clamp(min_bound.y, max_bound.y),
-            projected.z.clamp(min_bound.z, max_bound.z),
-        )
+        // Direct surface projection without QEF mass-point constraints
+        // This should align vertices exactly with the analytical SDF surface
+        project_to_surface_newton(cell_center, mould_manager, iso_value)
     }
 }

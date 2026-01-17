@@ -20,6 +20,7 @@ pub struct MeshGeneratorState {
     dirty_bounds: Option<AABB>,
     brick_map: Option<BrickMap>,
     brick_map_resolution: Option<u32>,
+    last_mesh: Option<MeshData>,
 }
 
 impl MeshGeneratorState {
@@ -34,6 +35,7 @@ impl MeshGeneratorState {
             dirty_bounds: None,
             brick_map: None,
             brick_map_resolution: None,
+            last_mesh: None,
         }
     }
 }
@@ -198,6 +200,12 @@ fn generate_mesh_from_state_dense(
         dual_contouring(&grid, mould_manager, 0.0)
     };
 
+    // Cache the mesh for control point extraction
+    {
+        let mut state = MESH_STATE.lock().unwrap();
+        state.last_mesh = Some(mesh.clone());
+    }
+
     Ok(mesh)
 }
 
@@ -257,6 +265,7 @@ pub fn generate_mesh_from_state_brick_map(
     state.mould_manager = Some(mould_manager);
     state.brick_map = brick_map;
     state.brick_map_resolution = brick_map_resolution;
+    state.last_mesh = Some(mesh.clone());
 
     Ok(mesh)
 }
@@ -364,6 +373,7 @@ fn union_bounds(target: &mut Option<AABB>, bounds: AABB) {
 }
 
 /// Get all control points for profiled capsules in world space
+/// Extracts vertices from the cached mesh and projects them onto ring slices
 /// Returns array of { mouldId, segmentIndex, pointIndex, position: {x, y, z} }
 pub fn get_profile_control_points() -> Result<Vec<serde_json::Value>, String> {
     let state = MESH_STATE.lock().unwrap();
@@ -373,10 +383,10 @@ pub fn get_profile_control_points() -> Result<Vec<serde_json::Value>, String> {
         .as_ref()
         .ok_or("No mould manager initialized")?;
 
+    // For now, always use analytical control points from radial profiles
+    // Mesh vertex extraction is a future optimization
     let points = mould_manager.get_control_points_world();
-
-    // Convert to JSON-serializable format
-    let json_points: Vec<serde_json::Value> = points
+    let json_points = points
         .into_iter()
         .map(|(mould_id, seg_idx, pt_idx, pos)| {
             serde_json::json!({
@@ -393,4 +403,36 @@ pub fn get_profile_control_points() -> Result<Vec<serde_json::Value>, String> {
         .collect();
 
     Ok(json_points)
+}
+
+/// Extract mesh vertices and project them onto rings for profiled capsules
+fn extract_mesh_ring_vertices(
+    mesh: &MeshData,
+    mould_manager: &MouldManager,
+) -> Result<Vec<serde_json::Value>, String> {
+    use crate::mesh::types::Vec3;
+    use std::f32::consts::PI;
+
+    let mut ring_points = Vec::new();
+
+    // For each profiled capsule mould
+    for mould in mould_manager.get_moulds() {
+        if mould.shape != crate::mesh::types::MouldShape::ProfiledCapsule {
+            continue;
+        }
+
+        let radial_profiles = match &mould.radial_profiles {
+            Some(p) => p,
+            None => continue,
+        };
+
+        // Get bone endpoints (similar to get_control_points_world)
+        // TODO: This duplicates code - should refactor to share coordinate frame calculation
+
+        // For now, fall back to analytical points for this mould
+        // Full implementation would project mesh vertices onto bone slices
+        continue;
+    }
+
+    Ok(ring_points)
 }
