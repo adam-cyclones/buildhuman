@@ -297,15 +297,30 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       parentJointId: "head",
     });
 
-    // Neck capsule (connects chest to head through neck joint)
+    // Neck with profiled capsule (trapezius muscles, narrower at top)
     mouldManager.addMould({
       id: "neck",
-      shape: "capsule",
+      shape: "profiled-capsule",
       center: [0, 0, 0],
-      endPoint: [0, 0.1, 0], // To head joint (local offset)
+      endPoint: [0, 0.1, 0], // To head joint
       radius: 0.5 * 0.08,
-      blendRadius,
+      blendRadius: 0.02,
       parentJointId: "neck",
+      radialProfiles: [
+        // Control points: 0° (right), 45°, 90° (front), 135°, 180° (left), 225°, 270° (back/trapezius), 315°
+        // Seg 0: Base of neck - wider, trapezius muscles
+        [0.042, 0.044, 0.040, 0.044, 0.042, 0.046, 0.050, 0.046],
+        // Seg 1: Lower neck - still muscular
+        [0.040, 0.041, 0.038, 0.041, 0.040, 0.043, 0.046, 0.043],
+        // Seg 2: Mid neck - starting to narrow
+        [0.038, 0.039, 0.036, 0.039, 0.038, 0.040, 0.042, 0.040],
+        // Seg 3: Upper mid neck - narrower
+        [0.036, 0.037, 0.034, 0.037, 0.036, 0.038, 0.039, 0.038],
+        // Seg 4: Below head - narrow
+        [0.034, 0.035, 0.033, 0.035, 0.034, 0.036, 0.037, 0.036],
+        // Seg 5: Head connection - narrowest
+        [0.033, 0.034, 0.032, 0.034, 0.033, 0.035, 0.036, 0.035],
+      ],
     });
 
     // Chest/Upper torso
@@ -318,25 +333,56 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       parentJointId: "chest",
     });
 
-    // Spine segments (capsules following bone chain)
+    // Upper spine with profiled capsule (thoracic region, ribcage)
     mouldManager.addMould({
       id: "spine-upper",
-      shape: "capsule",
+      shape: "profiled-capsule",
       center: [0, 0, 0],
       endPoint: [0, 0.15, 0], // To chest
       radius: 0.5 * 0.15,
-      blendRadius,
+      blendRadius: 0.02,
       parentJointId: "spine-upper",
+      radialProfiles: [
+        // Control points: 0° (right), 45°, 90° (front), 135°, 180° (left), 225°, 270° (back), 315°
+        // Seg 0: Lower thoracic - wider
+        [0.078, 0.080, 0.082, 0.080, 0.078, 0.080, 0.084, 0.080],
+        // Seg 1: Mid-lower thoracic
+        [0.079, 0.081, 0.083, 0.081, 0.079, 0.081, 0.085, 0.081],
+        // Seg 2: Mid thoracic - widest part of ribcage
+        [0.080, 0.082, 0.084, 0.082, 0.080, 0.082, 0.086, 0.082],
+        // Seg 3: Mid-upper thoracic
+        [0.079, 0.081, 0.083, 0.081, 0.079, 0.081, 0.085, 0.081],
+        // Seg 4: Upper thoracic - narrowing
+        [0.077, 0.079, 0.081, 0.079, 0.077, 0.079, 0.083, 0.079],
+        // Seg 5: Chest approach
+        [0.075, 0.077, 0.079, 0.077, 0.075, 0.077, 0.081, 0.077],
+      ],
     });
 
+    // Lower spine with profiled capsule (lumbar region)
     mouldManager.addMould({
       id: "spine-lower",
-      shape: "capsule",
+      shape: "profiled-capsule",
       center: [0, 0, 0],
       endPoint: [0, 0.15, 0], // To spine-upper
       radius: 0.5 * 0.16,
-      blendRadius,
+      blendRadius: 0.02,
       parentJointId: "spine-lower",
+      radialProfiles: [
+        // Control points: 0° (right), 45°, 90° (front), 135°, 180° (left), 225°, 270° (back), 315°
+        // Seg 0: Pelvis connection - wider
+        [0.082, 0.084, 0.086, 0.084, 0.082, 0.084, 0.088, 0.084],
+        // Seg 1: Lower lumbar - wide
+        [0.081, 0.083, 0.085, 0.083, 0.081, 0.083, 0.087, 0.083],
+        // Seg 2: Mid lumbar - widest
+        [0.082, 0.084, 0.086, 0.084, 0.082, 0.084, 0.088, 0.084],
+        // Seg 3: Upper mid lumbar
+        [0.081, 0.083, 0.085, 0.083, 0.081, 0.083, 0.087, 0.083],
+        // Seg 4: Upper lumbar - narrowing
+        [0.079, 0.081, 0.083, 0.081, 0.079, 0.081, 0.085, 0.081],
+        // Seg 5: Thoracic transition
+        [0.078, 0.080, 0.082, 0.080, 0.078, 0.080, 0.084, 0.080],
+      ],
     });
 
     // Pelvis
@@ -349,25 +395,55 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       parentJointId: "pelvis",
     });
 
-    // Left arm chain (capsules follow bone direction)
+    // Left arm chain - upper arm with muscle profile (biceps/triceps)
     mouldManager.addMould({
       id: "upper-arm-left",
-      shape: "capsule",
+      shape: "profiled-capsule",
       center: [0, 0, 0],
-      endPoint: [-0.25, 0, 0], // To elbow (shoulder's local offset to elbow)
+      endPoint: [-0.25, 0, 0], // To elbow
       radius: 0.5 * 0.07,
-      blendRadius,
+      blendRadius: 0.02,
       parentJointId: "shoulder-left",
+      radialProfiles: [
+        // Control points: 0° (outer), 45°, 90° (front/biceps), 135°, 180° (inner), 225°, 270° (back/triceps), 315°
+        // Seg 0: Shoulder - fuller, deltoid insertion
+        [0.038, 0.040, 0.041, 0.040, 0.037, 0.039, 0.040, 0.040],
+        // Seg 1: Upper arm - biceps bulge (front 90°), triceps (back 270°)
+        [0.040, 0.042, 0.045, 0.042, 0.038, 0.041, 0.044, 0.042],
+        // Seg 2: Mid upper arm - maximum biceps development
+        [0.041, 0.043, 0.047, 0.043, 0.039, 0.042, 0.046, 0.043],
+        // Seg 3: Lower mid - starting to taper
+        [0.038, 0.040, 0.042, 0.040, 0.037, 0.039, 0.041, 0.040],
+        // Seg 4: Above elbow - significant taper
+        [0.033, 0.034, 0.036, 0.034, 0.032, 0.033, 0.035, 0.034],
+        // Seg 5: Elbow approach - narrowest
+        [0.030, 0.031, 0.032, 0.031, 0.029, 0.030, 0.031, 0.031],
+      ],
     });
 
     mouldManager.addMould({
       id: "forearm-left",
-      shape: "capsule",
+      shape: "profiled-capsule",
       center: [0, 0, 0],
       endPoint: [-0.2, 0, 0], // To wrist
       radius: 0.5 * 0.06,
-      blendRadius,
+      blendRadius: 0.02,
       parentJointId: "elbow-left",
+      radialProfiles: [
+        // Control points: 0° (outer), 45°, 90° (top), 135°, 180° (inner), 225°, 270° (bottom), 315°
+        // Seg 0: Elbow - slightly wider
+        [0.030, 0.031, 0.032, 0.031, 0.029, 0.030, 0.031, 0.031],
+        // Seg 1: Upper forearm - muscle belly
+        [0.032, 0.033, 0.034, 0.033, 0.031, 0.032, 0.033, 0.033],
+        // Seg 2: Mid forearm - maximum thickness
+        [0.033, 0.034, 0.035, 0.034, 0.032, 0.033, 0.034, 0.034],
+        // Seg 3: Lower mid forearm - tapering begins
+        [0.030, 0.031, 0.032, 0.031, 0.029, 0.030, 0.031, 0.031],
+        // Seg 4: Above wrist - significant taper
+        [0.026, 0.027, 0.028, 0.027, 0.025, 0.026, 0.027, 0.027],
+        // Seg 5: Wrist approach - narrowest
+        [0.022, 0.023, 0.024, 0.023, 0.021, 0.022, 0.023, 0.023],
+      ],
     });
 
     mouldManager.addMould({
@@ -379,25 +455,55 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       parentJointId: "hand-left",
     });
 
-    // Right arm chain
+    // Right arm chain - upper arm with muscle profile (biceps/triceps)
     mouldManager.addMould({
       id: "upper-arm-right",
-      shape: "capsule",
+      shape: "profiled-capsule",
       center: [0, 0, 0],
       endPoint: [0.25, 0, 0], // To elbow
       radius: 0.5 * 0.07,
-      blendRadius,
+      blendRadius: 0.02,
       parentJointId: "shoulder-right",
+      radialProfiles: [
+        // Control points: 0° (outer), 45°, 90° (front/biceps), 135°, 180° (inner), 225°, 270° (back/triceps), 315°
+        // Seg 0: Shoulder - fuller, deltoid insertion
+        [0.038, 0.040, 0.041, 0.040, 0.037, 0.039, 0.040, 0.040],
+        // Seg 1: Upper arm - biceps bulge (front 90°), triceps (back 270°)
+        [0.040, 0.042, 0.045, 0.042, 0.038, 0.041, 0.044, 0.042],
+        // Seg 2: Mid upper arm - maximum biceps development
+        [0.041, 0.043, 0.047, 0.043, 0.039, 0.042, 0.046, 0.043],
+        // Seg 3: Lower mid - starting to taper
+        [0.038, 0.040, 0.042, 0.040, 0.037, 0.039, 0.041, 0.040],
+        // Seg 4: Above elbow - significant taper
+        [0.033, 0.034, 0.036, 0.034, 0.032, 0.033, 0.035, 0.034],
+        // Seg 5: Elbow approach - narrowest
+        [0.030, 0.031, 0.032, 0.031, 0.029, 0.030, 0.031, 0.031],
+      ],
     });
 
     mouldManager.addMould({
       id: "forearm-right",
-      shape: "capsule",
+      shape: "profiled-capsule",
       center: [0, 0, 0],
       endPoint: [0.2, 0, 0], // To wrist
       radius: 0.5 * 0.06,
-      blendRadius,
+      blendRadius: 0.02,
       parentJointId: "elbow-right",
+      radialProfiles: [
+        // Control points: 0° (outer), 45°, 90° (top), 135°, 180° (inner), 225°, 270° (bottom), 315°
+        // Seg 0: Elbow - slightly wider
+        [0.030, 0.031, 0.032, 0.031, 0.029, 0.030, 0.031, 0.031],
+        // Seg 1: Upper forearm - muscle belly
+        [0.032, 0.033, 0.034, 0.033, 0.031, 0.032, 0.033, 0.033],
+        // Seg 2: Mid forearm - maximum thickness
+        [0.033, 0.034, 0.035, 0.034, 0.032, 0.033, 0.034, 0.034],
+        // Seg 3: Lower mid forearm - tapering begins
+        [0.030, 0.031, 0.032, 0.031, 0.029, 0.030, 0.031, 0.031],
+        // Seg 4: Above wrist - significant taper
+        [0.026, 0.027, 0.028, 0.027, 0.025, 0.026, 0.027, 0.027],
+        // Seg 5: Wrist approach - narrowest
+        [0.022, 0.023, 0.024, 0.023, 0.021, 0.022, 0.023, 0.023],
+      ],
     });
 
     mouldManager.addMould({
