@@ -13,6 +13,7 @@ import { createRustSyncScheduler } from "./mesh/rustSync";
 import { createCanvasClickHandler } from "./handlers/events";
 import { createProfileHandles, updateProfileHandles, type ProfileHandle } from "./visualization/profileHandles";
 import { createProfileDragHandler } from "./handlers/profileDrag";
+import { createProfileRingClickHandler } from "./handlers/profileRingClick";
 
 export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   let sceneMesh: THREE.Mesh | undefined;
@@ -58,6 +59,14 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     props.onJointClicked
   );
 
+  // Create profile ring click handler
+  const profileRingClickHandler = createProfileRingClickHandler(
+    () => currentCamera,
+    () => currentCanvas,
+    () => profileRingsGroup,
+    props.onProfileRingClicked
+  );
+
   // Create profile drag handler
   const profileDragHandler = createProfileDragHandler(
     () => currentCamera,
@@ -98,10 +107,24 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
     // Add click listener to canvas for joint selection and profile handle interaction
     const handleCanvasClickWrapper = (e: MouseEvent) => {
-      // Profile edit mode takes priority
       if (props.profileEditMode) {
-        profileDragHandler.handleClick(e, canvas);
+        // In edit mode: first try profile handles, then profile rings
+        const handleEditState = profileDragHandler.getEditState();
+
+        // If we have a selected handle or are in move mode, prioritize handle interaction
+        if (handleEditState.selectedHandle || handleEditState.isMoving) {
+          profileDragHandler.handleClick(e, canvas);
+        } else {
+          // Try clicking profile rings first
+          const ringClicked = profileRingClickHandler.handleClick(e);
+
+          // If no ring was clicked, try profile handles
+          if (!ringClicked) {
+            profileDragHandler.handleClick(e, canvas);
+          }
+        }
       } else {
+        // Not in edit mode - normal joint clicking
         handleCanvasClick(e);
       }
     };

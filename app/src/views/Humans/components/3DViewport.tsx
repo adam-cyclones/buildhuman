@@ -19,6 +19,15 @@ type ThreeDViewportProps = {
 const ThreeDViewport = (props: ThreeDViewportProps) => {
   const [showWireframe, setShowWireframe] = createSignal(false);
 
+  // TEMPORARY: Enable profile editing for testing
+  const [profileEditMode, setProfileEditMode] = createSignal(true);
+  const [selectedProfileRing, setSelectedProfileRing] = createSignal<{mouldId: string; segmentIndex: number} | null>(null);
+
+  const handleProfileRingClicked = (mouldId: string, segmentIndex: number) => {
+    console.log("Profile ring clicked:", mouldId, segmentIndex);
+    setSelectedProfileRing({ mouldId, segmentIndex });
+  };
+
   return (
     <div class="viewport">
       <div class="left-toolbar">
@@ -59,10 +68,13 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
           showWireframe={showWireframe()}
           showSkeleton={props.showSkeleton}
           selectedJointId={props.selectedJointId}
+          profileEditMode={profileEditMode()}
+          selectedProfileRing={selectedProfileRing()}
           onSkeletonReady={props.onSkeletonReady}
           onMouldsReady={props.onMouldsReady}
           onJointSelected={props.onJointSelected}
           onJointClicked={props.onJointClicked}
+          onProfileRingClicked={handleProfileRingClicked}
         />
       </div>
     </div>

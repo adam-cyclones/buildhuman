@@ -65,13 +65,21 @@ export const createProfileRingsVisualization = async (
   }
 
   // Draw rings for each segment (control points from Rust)
-  for (const [_mouldId, segmentMap] of pointsByMouldAndSegment) {
-    for (const [_segmentIdx, points] of segmentMap) {
+  for (const [mouldId, segmentMap] of pointsByMouldAndSegment) {
+    for (const [segmentIndex, points] of segmentMap) {
       if (points.length < 3) continue; // Need at least 3 points for a ring
 
       // Create line loop for this ring (control points)
       const ringGeometry = new THREE.BufferGeometry().setFromPoints(points);
       const ringLine = new THREE.LineLoop(ringGeometry, ringMaterial);
+
+      // Add metadata for raycasting and selection
+      ringLine.userData = {
+        type: "profile-ring",
+        mouldId,
+        segmentIndex,
+      };
+
       profileRingsGroup.add(ringLine);
     }
   }

@@ -49,6 +49,13 @@ export function createProfileDragHandler(
   function handleClick(event: MouseEvent, canvas: HTMLCanvasElement) {
     const camera = getCamera();
     const handles = getHandles();
+
+    console.log("Profile drag handleClick:", {
+      hasCamera: !!camera,
+      handlesCount: handles.length,
+      isMoving: editState.isMoving
+    });
+
     if (!camera || handles.length === 0) return;
 
     // Calculate mouse position in normalized device coordinates
@@ -60,6 +67,7 @@ export function createProfileDragHandler(
 
     if (editState.isMoving) {
       // Click while moving - confirm the change
+      console.log("Confirming move");
       confirmMove();
       return;
     }
@@ -69,9 +77,13 @@ export function createProfileDragHandler(
     const handleMeshes = handles.map(h => h.mesh);
     const intersects = raycaster.intersectObjects(handleMeshes);
 
+    console.log("Handle raycast intersects:", intersects.length);
+
     if (intersects.length > 0) {
       const intersected = intersects[0].object as THREE.Mesh;
       const userData = intersected.userData;
+
+      console.log("Intersected handle userData:", userData);
 
       if (userData.type === "profile-handle") {
         // Find the handle
@@ -85,9 +97,11 @@ export function createProfileDragHandler(
         if (handle) {
           if (editState.selectedHandle === handle) {
             // Clicking selected handle again - enter move mode
+            console.log("Clicking selected handle again - entering move mode");
             enterMoveMode(handle, camera);
           } else {
             // Select new handle
+            console.log("Selecting new handle");
             selectHandle(handle);
           }
         }
@@ -96,6 +110,7 @@ export function createProfileDragHandler(
       event.preventDefault();
     } else {
       // Click on empty space - deselect
+      console.log("Deselecting handle");
       deselectHandle();
     }
   }
@@ -217,32 +232,61 @@ export function createProfileDragHandler(
       const ringCenter = userData.ringCenter as THREE.Vector3;
       const basis = userData.basis as { u: THREE.Vector3; v: THREE.Vector3 };
 
-      // Calculate new radius (distance from ring center to intersection point)
+      // Calculate delta in 3D world space
       const delta = intersectPoint.clone().sub(ringCenter);
-      const newRadius = delta.length();
 
-      // Clamp radius to reasonable bounds
-      const minRadius = 0.005;
-      const maxRadius = 0.2;
-      const clampedRadius = Math.max(minRadius, Math.min(maxRadius, newRadius));
+      // Project delta onto the ring plane basis vectors to get 2D coordinates
+      const u = basis.u;
+      const v = basis.v;
+      const deltaU = delta.dot(u); // Component along u axis
+      const deltaV = delta.dot(v); // Component along v axis
 
-      // Update handle position along its angle
-      const angle = userData.angle as number;
+      // Clamp to reasonable bounds in 2D
+      const maxDistance = 0.2;
+      const distance = Math.sqrt(deltaU * deltaU + deltaV * deltaV);
+
+      let clampedU = deltaU;
+      let clampedV = deltaV;
+
+      if (distance > maxDistance) {
+        // Scale down to max distance while preserving direction
+        const scale = maxDistance / distance;
+        clampedU = deltaU * scale;
+        clampedV = deltaV * scale;
+      }
+
+      // Enforce minimum distance from center
+      const minDistance = 0.005;
+      const clampedDistance = Math.sqrt(clampedU * clampedU + clampedV * clampedV);
+      if (clampedDistance < minDistance) {
+        const scale = minDistance / clampedDistance;
+        clampedU *= scale;
+        clampedV *= scale;
+      }
+
+      // Convert back to 3D world position
       const handlePos = new THREE.Vector3(
-        ringCenter.x + clampedRadius * (Math.cos(angle) * basis.u.x + Math.sin(angle) * basis.v.x),
-        ringCenter.y + clampedRadius * (Math.cos(angle) * basis.u.y + Math.sin(angle) * basis.v.y),
-        ringCenter.z + clampedRadius * (Math.cos(angle) * basis.u.z + Math.sin(angle) * basis.v.z)
+        ringCenter.x + clampedU * u.x + clampedV * v.x,
+        ringCenter.y + clampedU * u.y + clampedV * v.y,
+        ringCenter.z + clampedU * u.z + clampedV * v.z
       );
 
       editState.selectedHandle.mesh.position.copy(handlePos);
-      editState.selectedHandle.radius = clampedRadius;
 
-      // Notify about radius change
+      // Store both radius and angle for backward compatibility
+      const newRadius = Math.sqrt(clampedU * clampedU + clampedV * clampedV);
+      const newAngle = Math.atan2(clampedV, clampedU);
+      editState.selectedHandle.radius = newRadius;
+
+      // Update userData with new angle
+      userData.angle = newAngle;
+
+      // Notify about radius change (this will need to be extended to support 2D coords)
       onRadiusChange(
         editState.selectedHandle.mouldId,
         editState.selectedHandle.segmentIndex,
         editState.selectedHandle.controlPointIndex,
-        clampedRadius
+        newRadius
       );
     }
   }
@@ -251,11 +295,18 @@ export function createProfileDragHandler(
    * Handle keyboard shortcuts
    */
   function handleKeyDown(event: KeyboardEvent) {
+    console.log("Profile drag keydown:", event.key, {
+      selectedHandle: !!editState.selectedHandle,
+      isMoving: editState.isMoving
+    });
+
     // 'g' key - enter move mode if handle is selected
     if (event.key === 'g' || event.key === 'G') {
+      console.log("G pressed, selectedHandle:", editState.selectedHandle);
       if (editState.selectedHandle && !editState.isMoving) {
         const camera = getCamera();
         if (camera) {
+          console.log("Entering move mode");
           enterMoveMode(editState.selectedHandle, camera);
           event.preventDefault();
         }
@@ -265,6 +316,7 @@ export function createProfileDragHandler(
     // Escape - cancel move
     if (event.key === 'Escape') {
       if (editState.isMoving) {
+        console.log("Cancelling move");
         cancelMove();
         event.preventDefault();
       }

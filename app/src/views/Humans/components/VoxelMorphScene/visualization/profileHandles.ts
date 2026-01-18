@@ -61,8 +61,13 @@ export function createProfileHandles(
   const basis = createRingBasis(boneDirection);
 
   // Create a handle for each control point around the ring
-  const handleGeometry = new THREE.SphereGeometry(0.008, 8, 8);
-  const handleMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+  const handleGeometry = new THREE.SphereGeometry(0.015, 16, 16); // Larger and smoother
+  const handleMaterial = new THREE.MeshBasicMaterial({
+    color: 0x00ff00,
+    depthTest: false, // Render on top of everything
+    transparent: true,
+    opacity: 0.9
+  });
 
   for (let i = 0; i < numControlPoints; i++) {
     const angle = (i / numControlPoints) * Math.PI * 2;
@@ -121,23 +126,23 @@ function getSegmentWorldPosition(
   }
 
   // Get world positions of capsule start and end
-  const worldStart = skeleton.transformPointToWorld(mould.parentJointId, mould.center);
-  const worldEnd = skeleton.transformPointToWorld(mould.parentJointId, mould.endPoint);
+  const worldStart = skeleton.transformToWorld(mould.parentJointId, mould.center);
+  const worldEnd = skeleton.transformToWorld(mould.parentJointId, mould.endPoint);
 
   // Interpolate to segment position (t from 0 to 1)
   const numSegments = mould.radialProfiles.length;
   const t = segmentIndex / (numSegments - 1);
 
   const ringCenter = new THREE.Vector3(
-    worldStart.x + t * (worldEnd.x - worldStart.x),
-    worldStart.y + t * (worldEnd.y - worldStart.y),
-    worldStart.z + t * (worldEnd.z - worldStart.z)
+    worldStart[0] + t * (worldEnd[0] - worldStart[0]),
+    worldStart[1] + t * (worldEnd[1] - worldStart[1]),
+    worldStart[2] + t * (worldEnd[2] - worldStart[2])
   );
 
   const boneDirection = new THREE.Vector3(
-    worldEnd.x - worldStart.x,
-    worldEnd.y - worldStart.y,
-    worldEnd.z - worldStart.z
+    worldEnd[0] - worldStart[0],
+    worldEnd[1] - worldStart[1],
+    worldEnd[2] - worldStart[2]
   ).normalize();
 
   return { ringCenter, boneDirection };
