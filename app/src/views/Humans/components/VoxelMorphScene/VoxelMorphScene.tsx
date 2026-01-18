@@ -1,12 +1,11 @@
-import { createEffect, onCleanup, onMount } from "solid-js";
+import { createEffect, untrack } from "solid-js";
 import * as THREE from "three";
 import ThreeScene from "../ThreeScene";
 import { MouldManager } from "../../morphing/mould-manager";
 import { Skeleton } from "../../morphing/skeleton";
 import { identityQuat, eulerToQuat, multiplyQuat } from "../../morphing/transform";
 import type { VoxelMorphSceneProps } from "./types";
-import { setupSnapshotAutomation } from "./snapshots/automation";
-import { createSkeletonVisualization, updateSkeletonSelection } from "./visualization/skeleton";
+import { createSkeletonVisualization } from "./visualization/skeleton";
 import { createProfileRingsVisualization } from "./visualization/profileRings";
 import { updateWireframe as updateWireframeVisualization } from "./visualization/wireframe";
 import { regenerateMeshFromRust } from "./mesh/generation";
@@ -27,9 +26,6 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   let currentMouldManager: MouldManager | undefined;
   let isInitialized = false;
   let meshReady = false;
-  let snapshotListener: (() => void) | undefined;
-  let snapshotTimeoutId: number | undefined;
-  let snapshotInitialized = false;
 
   // Create canvas click handler using extracted module
   const handleCanvasClick = createCanvasClickHandler(
@@ -60,27 +56,12 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     updateMesh();
     await createSkeletonVisualizationWrapper();
     await createProfileRingsVisualizationWrapper();
-    await setupSnapshotWrapper();
+    // Snapshot automation disabled - take snapshots manually instead
+    // await setupSnapshotWrapper();
   };
 
-  // Wrapper for snapshot automation using extracted module
-  const setupSnapshotWrapper = async () => {
-    if (snapshotInitialized) return;
-    snapshotInitialized = true;
-
-    await setupSnapshotAutomation(
-      () => meshReady,
-      () => currentCanvas,
-      () => currentRenderer,
-      () => currentScene,
-      () => currentCamera,
-      onCleanup
-    );
-  };
-
-  onMount(() => {
-    void setupSnapshotWrapper();
-  });
+  // Snapshot automation disabled - setupSnapshotWrapper function removed
+  // Snapshots can be taken manually instead
 
   // Wrapper for updateWireframe using extracted module
   const updateWireframe = (geometry: THREE.BufferGeometry) => {
@@ -591,8 +572,8 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       props.onMouldsReady(moulds);
     }
 
-    // Sync skeleton and moulds to Rust backend (immediate)
-    scheduleSyncToRustBackend(true);
+    // Sync skeleton and moulds to Rust backend (immediate) - await to ensure Rust is ready
+    await scheduleSyncToRustBackend(true);
 
     isInitialized = true;
   };
@@ -832,9 +813,13 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   });
 
   // Update mould radius for selected joint's moulds
+  // ONLY tracks mouldRadius changes, not selectedJointId changes
   createEffect(() => {
     const radius = props.mouldRadius;
-    const jointId = props.selectedJointId;
+
+    // Use untrack to read selectedJointId without creating a dependency on it
+    // This prevents the effect from firing when joints are clicked
+    const jointId = untrack(() => props.selectedJointId);
 
     if (!jointId || !currentMouldManager) return;
 

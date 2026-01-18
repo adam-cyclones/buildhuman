@@ -105,14 +105,13 @@ export const createRustSyncScheduler = (
     }
   };
 
-  const scheduleSync = (immediate: boolean = false) => {
+  const scheduleSync = (immediate: boolean = false): Promise<void> | void => {
     if (immediate) {
       if (syncDebounceTimer) {
         clearTimeout(syncDebounceTimer);
         syncDebounceTimer = undefined;
       }
-      void runSync();
-      return;
+      return runSync(); // Return promise for immediate syncs
     }
 
     if (syncDebounceTimer) return;
