@@ -96,24 +96,39 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     currentCanvas = canvas;
     currentRenderer = renderer;
 
-    // Add click listener to canvas for joint selection
-    canvas.addEventListener('click', handleCanvasClick);
+    // Add click listener to canvas for joint selection and profile handle interaction
+    const handleCanvasClickWrapper = (e: MouseEvent) => {
+      // Profile edit mode takes priority
+      if (props.profileEditMode) {
+        profileDragHandler.handleClick(e, canvas);
+      } else {
+        handleCanvasClick(e);
+      }
+    };
 
-    // Add profile drag event listeners
-    const handleMouseDown = (e: MouseEvent) => profileDragHandler.handleMouseDown(e, canvas);
-    const handleMouseMove = (e: MouseEvent) => profileDragHandler.handleMouseMove(e, canvas);
-    const handleMouseUp = () => profileDragHandler.handleMouseUp();
+    canvas.addEventListener('click', handleCanvasClickWrapper);
 
-    canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('mouseup', handleMouseUp);
+    // Add mouse move listener for profile handle editing
+    const handleMouseMoveWrapper = (e: MouseEvent) => {
+      if (props.profileEditMode) {
+        profileDragHandler.handleMouseMove(e, canvas);
+      }
+    };
+    canvas.addEventListener('mousemove', handleMouseMoveWrapper);
+
+    // Add keyboard listener for shortcuts (g for move, Escape for cancel)
+    const handleKeyDownWrapper = (e: KeyboardEvent) => {
+      if (props.profileEditMode) {
+        profileDragHandler.handleKeyDown(e);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDownWrapper);
 
     // Cleanup listeners on component unmount
     onCleanup(() => {
-      canvas.removeEventListener('click', handleCanvasClick);
-      canvas.removeEventListener('mousedown', handleMouseDown);
-      canvas.removeEventListener('mousemove', handleMouseMove);
-      canvas.removeEventListener('mouseup', handleMouseUp);
+      canvas.removeEventListener('click', handleCanvasClickWrapper);
+      canvas.removeEventListener('mousemove', handleMouseMoveWrapper);
+      window.removeEventListener('keydown', handleKeyDownWrapper);
     });
 
     await initializeSkeletonAndMoulds();
