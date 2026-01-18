@@ -287,14 +287,30 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     // Capsules connect parent joints to child joints along bone tangents
     const blendRadius = 0.2;
 
-    // Head sphere
+    // Head with profiled capsule (egg/axe-shaped: protruding face, very flat back)
     mouldManager.addMould({
       id: "head",
-      shape: "sphere",
-      center: [0, 0.05, 0],
+      shape: "profiled-capsule",
+      center: [0, 0, 0],
+      endPoint: [0, 0.1, 0], // Vertical from neck to top of head
       radius: 0.5 * 0.15,
-      blendRadius,
+      blendRadius: 0.02,
       parentJointId: "head",
+      radialProfiles: [
+        // Control points: 0° (right), 45°, 90° (front/face), 135°, 180° (left), 225°, 270° (back/flat), 315°
+        // Seg 0: Chin/jaw - narrower, face extends forward, very flat back
+        [0.060, 0.065, 0.080, 0.065, 0.060, 0.055, 0.045, 0.055],
+        // Seg 1: Lower face/mouth - face still forward, back very flat
+        [0.068, 0.072, 0.088, 0.072, 0.068, 0.062, 0.050, 0.062],
+        // Seg 2: Mid face/cheekbones - widest front-to-back, very flat back
+        [0.074, 0.078, 0.092, 0.078, 0.074, 0.068, 0.054, 0.068],
+        // Seg 3: Upper face/forehead - still protruding, back flattens
+        [0.076, 0.080, 0.090, 0.080, 0.076, 0.070, 0.056, 0.070],
+        // Seg 4: Crown/top of skull - widest sideways, very flat back
+        [0.078, 0.082, 0.088, 0.082, 0.078, 0.072, 0.058, 0.072],
+        // Seg 5: Top of head - rounds off, back still flat
+        [0.074, 0.078, 0.084, 0.078, 0.074, 0.068, 0.056, 0.068],
+      ],
     });
 
     // Neck with profiled capsule (trapezius muscles, narrower at top)
