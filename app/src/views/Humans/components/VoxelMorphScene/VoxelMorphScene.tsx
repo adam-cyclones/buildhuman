@@ -699,26 +699,16 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     });
   });
 
-  // Debounced high-res update
-  let upscaleDebounceTimer: number | undefined;
-  const debouncedUpscale = () => {
-    if (upscaleDebounceTimer) clearTimeout(upscaleDebounceTimer);
-    upscaleDebounceTimer = setTimeout(() => {
-      scheduleSyncToRustBackend(true);
+  // Debounced mesh update after user stops interacting
+  let meshUpdateDebounceTimer: number | undefined;
+  const debouncedMeshUpdate = () => {
+    if (meshUpdateDebounceTimer) clearTimeout(meshUpdateDebounceTimer);
+    meshUpdateDebounceTimer = setTimeout(async () => {
+      await scheduleSyncToRustBackend(true);
       updateMesh(false);
-      void createSkeletonVisualizationWrapper(); // Update skeleton after interaction
-      void createProfileRingsVisualizationWrapper(); // Update profile rings after interaction
-    }, 300); // 300ms after last interaction (reduced from 500ms)
-  };
-
-  // Throttled low-res updates during drag for responsiveness
-  let lowResThrottleTimer: number | undefined;
-  const throttledLowResUpdate = () => {
-    if (lowResThrottleTimer) return;
-    updateMesh(true);
-    lowResThrottleTimer = setTimeout(() => {
-      lowResThrottleTimer = undefined;
-    }, 100) as unknown as number;
+      void createSkeletonVisualizationWrapper();
+      void createProfileRingsVisualizationWrapper();
+    }, 500); // Wait 500ms after last slider change before regenerating mesh
   };
 
   // Handle joint movements
@@ -742,12 +732,8 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     void createSkeletonVisualizationWrapper();
     void createProfileRingsVisualizationWrapper();
 
-    // Sync updated skeleton to Rust backend
-    scheduleSyncToRustBackend();
-
-    // Low-res mesh updates during drag, then high-res after pause
-    throttledLowResUpdate();
-    debouncedUpscale();
+    // Defer mesh regeneration until user stops dragging slider
+    debouncedMeshUpdate();
   });
 
   // Handle joint rotations
@@ -782,12 +768,8 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     void createSkeletonVisualizationWrapper();
     void createProfileRingsVisualizationWrapper();
 
-    // Sync updated skeleton to Rust backend
-    scheduleSyncToRustBackend();
-
-    // Low-res mesh updates during drag, then high-res after pause
-    throttledLowResUpdate();
-    debouncedUpscale();
+    // Defer mesh regeneration until user stops dragging slider
+    debouncedMeshUpdate();
   });
 
   // Notify parent when joint is selected (provides initial offset/rotation/mouldRadius for sliders)
@@ -846,12 +828,8 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       mouldManager.updateMouldRadius(mould.id, radius);
     });
 
-    // Sync to Rust backend
-    scheduleSyncToRustBackend();
-
-    // Low-res mesh updates during drag, then high-res after pause
-    throttledLowResUpdate();
-    debouncedUpscale();
+    // Defer mesh regeneration until user stops dragging slider
+    debouncedMeshUpdate();
   });
 
   // Reusable materials for joint highlighting (created once, reused)
