@@ -10,10 +10,15 @@ export type VoxelMorphSceneProps = {
   showWireframe: boolean;
   showSkeleton: boolean;
   selectedJointId: string | null;
+  // Profile editing
+  profileEditMode: boolean;
+  selectedProfileRing: { mouldId: string; segmentIndex: number } | null;
   onSkeletonReady?: (joints: Array<{ id: string; parentId?: string; children: string[] }>) => void;
   onMouldsReady?: (moulds: Array<{ id: string; shape: "sphere" | "capsule" | "profiled-capsule"; parentJointId?: string }>) => void;
   onJointSelected?: (jointId: string, offset: [number, number, number], rotation: [number, number, number, number], mouldRadius: number) => void;
   onJointClicked?: (jointId: string) => void;
+  onProfileRingClicked?: (mouldId: string, segmentIndex: number) => void;
+  onProfileRadiusChange?: (mouldId: string, segmentIndex: number, controlPointIndex: number, newRadius: number) => void;
 };
 
 export type SceneState = {

@@ -1,4 +1,4 @@
-import { createEffect, untrack } from "solid-js";
+import { createEffect, untrack, onCleanup } from "solid-js";
 import * as THREE from "three";
 import ThreeScene from "../ThreeScene";
 import { MouldManager } from "../../morphing/mould-manager";
@@ -11,6 +11,8 @@ import { updateWireframe as updateWireframeVisualization } from "./visualization
 import { regenerateMeshFromRust } from "./mesh/generation";
 import { createRustSyncScheduler } from "./mesh/rustSync";
 import { createCanvasClickHandler } from "./handlers/events";
+import { createProfileHandles, updateProfileHandles, type ProfileHandle } from "./visualization/profileHandles";
+import { createProfileDragHandler } from "./handlers/profileDrag";
 
 export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   let sceneMesh: THREE.Mesh | undefined;
@@ -27,6 +29,26 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   let isInitialized = false;
   let meshReady = false;
 
+  // Profile editing state
+  let profileHandlesGroup: THREE.Group | undefined;
+  let profileHandles: ProfileHandle[] = [];
+
+  // Debounced mesh update after user stops interacting (defined early for use in handlers)
+  let meshUpdateDebounceTimer: number | undefined;
+  const debouncedMeshUpdate = () => {
+    if (meshUpdateDebounceTimer) clearTimeout(meshUpdateDebounceTimer);
+    meshUpdateDebounceTimer = setTimeout(async () => {
+      await scheduleSyncToRustBackend(true);
+      updateMesh(false);
+      void createSkeletonVisualizationWrapper();
+      void createProfileRingsVisualizationWrapper();
+      // Update profile handles if they exist
+      if (profileHandles.length > 0 && currentMouldManager && currentSkeleton) {
+        updateProfileHandles(profileHandles, currentMouldManager, currentSkeleton);
+      }
+    }, 500); // Wait 500ms after last change before regenerating mesh
+  };
+
   // Create canvas click handler using extracted module
   const handleCanvasClick = createCanvasClickHandler(
     () => currentCanvas,
@@ -34,6 +56,31 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     () => currentScene,
     () => jointSpheres,
     props.onJointClicked
+  );
+
+  // Create profile drag handler
+  const profileDragHandler = createProfileDragHandler(
+    () => currentCamera,
+    () => profileHandles,
+    () => currentMouldManager,
+    (mouldId, segmentIndex, controlPointIndex, newRadius) => {
+      // Update the profile data in the mould manager
+      if (!currentMouldManager) return;
+
+      const mould = currentMouldManager.getMould(mouldId);
+      if (!mould || !mould.radialProfiles) return;
+
+      // Update the radius value
+      mould.radialProfiles[segmentIndex][controlPointIndex] = newRadius;
+
+      // Notify parent component if callback provided
+      if (props.onProfileRadiusChange) {
+        props.onProfileRadiusChange(mouldId, segmentIndex, controlPointIndex, newRadius);
+      }
+
+      // Trigger mesh update (debounced)
+      debouncedMeshUpdate();
+    }
   );
 
   const handleSceneReady = async (
@@ -51,6 +98,23 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
     // Add click listener to canvas for joint selection
     canvas.addEventListener('click', handleCanvasClick);
+
+    // Add profile drag event listeners
+    const handleMouseDown = (e: MouseEvent) => profileDragHandler.handleMouseDown(e, canvas);
+    const handleMouseMove = (e: MouseEvent) => profileDragHandler.handleMouseMove(e, canvas);
+    const handleMouseUp = () => profileDragHandler.handleMouseUp();
+
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+
+    // Cleanup listeners on component unmount
+    onCleanup(() => {
+      canvas.removeEventListener('click', handleCanvasClick);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('mousemove', handleMouseMove);
+      canvas.removeEventListener('mouseup', handleMouseUp);
+    });
 
     await initializeSkeletonAndMoulds();
     updateMesh();
@@ -821,17 +885,6 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     });
   });
 
-  // Debounced mesh update after user stops interacting
-  let meshUpdateDebounceTimer: number | undefined;
-  const debouncedMeshUpdate = () => {
-    if (meshUpdateDebounceTimer) clearTimeout(meshUpdateDebounceTimer);
-    meshUpdateDebounceTimer = setTimeout(async () => {
-      await scheduleSyncToRustBackend(true);
-      updateMesh(false);
-      void createSkeletonVisualizationWrapper();
-      void createProfileRingsVisualizationWrapper();
-    }, 500); // Wait 500ms after last slider change before regenerating mesh
-  };
 
   // Handle joint movements
   createEffect(() => {
@@ -982,6 +1035,44 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       }
 
       lastSelectedJointId = jointId;
+    }
+  });
+
+  // Manage profile handles when profile ring selection changes
+  createEffect(() => {
+    const selectedRing = props.selectedProfileRing;
+    const editMode = props.profileEditMode;
+
+    // Clean up existing handles
+    if (profileHandlesGroup && currentScene) {
+      currentScene.remove(profileHandlesGroup);
+      profileHandlesGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach(m => m.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      });
+      profileHandlesGroup = undefined;
+      profileHandles = [];
+    }
+
+    // Create new handles if a ring is selected and edit mode is active
+    if (editMode && selectedRing && currentScene && currentMouldManager && currentSkeleton) {
+      const { mouldId, segmentIndex } = selectedRing;
+      const result = createProfileHandles(
+        currentScene,
+        mouldId,
+        segmentIndex,
+        currentMouldManager,
+        currentSkeleton
+      );
+
+      profileHandlesGroup = result.group;
+      profileHandles = result.handles;
     }
   });
 
