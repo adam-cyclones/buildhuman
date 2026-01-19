@@ -1,5 +1,6 @@
 import { createEffect, untrack, onCleanup } from "solid-js";
 import * as THREE from "three";
+import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import ThreeScene from "../ThreeScene";
 import { MouldManager } from "../../morphing/mould-manager";
 import { Skeleton } from "../../morphing/skeleton";
@@ -14,6 +15,7 @@ import { createCanvasClickHandler } from "./handlers/events";
 import { createProfileHandles, updateProfileHandles, type ProfileHandle } from "./visualization/profileHandles";
 import { createProfileDragHandler } from "./handlers/profileDrag";
 import { createProfileRingClickHandler } from "./handlers/profileRingClick";
+import { createProfileOverlay, updateProfileOverlay, disposeProfileOverlay } from "./visualization/profileOverlay";
 
 export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   let sceneMesh: THREE.Mesh | undefined;
@@ -25,6 +27,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   let currentCamera: THREE.Camera | undefined;
   let currentCanvas: HTMLCanvasElement | undefined;
   let currentRenderer: THREE.WebGLRenderer | undefined;
+  let currentControls: OrbitControls | undefined;
   let currentSkeleton: Skeleton | undefined;
   let currentMouldManager: MouldManager | undefined;
   let isInitialized = false;
@@ -33,6 +36,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
   // Profile editing state
   let profileHandlesGroup: THREE.Group | undefined;
   let profileHandles: ProfileHandle[] = [];
+  let profileOverlaySprite: THREE.Sprite | undefined;
 
   // Debounced mesh update after user stops interacting (defined early for use in handlers)
   let meshUpdateDebounceTimer: number | undefined;
@@ -46,6 +50,16 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       // Update profile handles if they exist
       if (profileHandles.length > 0 && currentMouldManager && currentSkeleton) {
         updateProfileHandles(profileHandles, currentMouldManager, currentSkeleton);
+      }
+      // Update profile overlay sprite if it exists
+      if (profileOverlaySprite && currentMouldManager && props.selectedProfileRing) {
+        const mould = currentMouldManager.getMould(props.selectedProfileRing.mouldId);
+        if (mould && mould.radialProfiles) {
+          const profile = mould.radialProfiles[props.selectedProfileRing.segmentIndex];
+          if (profile) {
+            updateProfileOverlay(profileOverlaySprite, profile);
+          }
+        }
       }
     }, 500); // Wait 500ms after last change before regenerating mesh
   };
@@ -64,6 +78,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     () => currentCamera,
     () => currentCanvas,
     () => profileRingsGroup,
+    () => currentMouldManager,
     props.onProfileRingClicked
   );
 
@@ -72,6 +87,8 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     () => currentCamera,
     () => profileHandles,
     () => currentMouldManager,
+    () => currentControls,
+    () => profileHandlesGroup,
     (mouldId, segmentIndex, controlPointIndex, newRadius) => {
       // Update the profile data in the mould manager
       if (!currentMouldManager) return;
@@ -81,6 +98,9 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
       // Update the radius value
       mould.radialProfiles[segmentIndex][controlPointIndex] = newRadius;
+
+      // Update profile ring visualization immediately
+      void createProfileRingsVisualizationWrapper();
 
       // Notify parent component if callback provided
       if (props.onProfileRadiusChange) {
@@ -97,32 +117,47 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     mesh: THREE.Mesh,
     camera: THREE.Camera,
     canvas: HTMLCanvasElement,
-    renderer: THREE.WebGLRenderer
+    renderer: THREE.WebGLRenderer,
+    controls: OrbitControls
   ) => {
     currentScene = scene;
     sceneMesh = mesh;
     currentCamera = camera;
     currentCanvas = canvas;
     currentRenderer = renderer;
+    currentControls = controls;
 
     // Add click listener to canvas for joint selection and profile handle interaction
     const handleCanvasClickWrapper = (e: MouseEvent) => {
       if (props.profileEditMode) {
-        // In edit mode: first try profile handles, then profile rings
+        // In edit mode: priority order: handles (if they exist) -> rings -> joints
         const handleEditState = profileDragHandler.getEditState();
+        const handles = profileHandles;
 
-        // If we have a selected handle or are in move mode, prioritize handle interaction
-        if (handleEditState.selectedHandle || handleEditState.isMoving) {
+        // If we're in move mode, only handle that interaction
+        if (handleEditState.isMoving) {
           profileDragHandler.handleClick(e, canvas);
-        } else {
-          // Try clicking profile rings first
-          const ringClicked = profileRingClickHandler.handleClick(e);
+          return;
+        }
 
-          // If no ring was clicked, try profile handles
-          if (!ringClicked) {
-            profileDragHandler.handleClick(e, canvas);
+        // If handles exist (ring is selected), try clicking handles first
+        if (handles.length > 0) {
+          // profileDragHandler returns early via event.stopPropagation if it handled the click
+          profileDragHandler.handleClick(e, canvas);
+          // Check if the event was handled (propagation stopped)
+          if (e.defaultPrevented) {
+            return;
           }
         }
+
+        // Try clicking profile rings
+        const ringClicked = profileRingClickHandler.handleClick(e);
+        if (ringClicked) {
+          return;
+        }
+
+        // Finally, fall through to joint clicking
+        handleCanvasClick(e);
       } else {
         // Not in edit mode - normal joint clicking
         handleCanvasClick(e);
@@ -1076,7 +1111,7 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     }
   });
 
-  // Manage profile handles when profile ring selection changes
+  // Manage profile handles and overlay when profile ring selection changes
   createEffect(() => {
     const selectedRing = props.selectedProfileRing;
     const editMode = props.profileEditMode;
@@ -1098,9 +1133,17 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
       profileHandles = [];
     }
 
-    // Create new handles if a ring is selected and edit mode is active
+    // Clean up existing overlay sprite
+    if (profileOverlaySprite && currentScene) {
+      disposeProfileOverlay(profileOverlaySprite, currentScene);
+      profileOverlaySprite = undefined;
+    }
+
+    // Create new handles and overlay if a ring is selected and edit mode is active
     if (editMode && selectedRing && currentScene && currentMouldManager && currentSkeleton) {
       const { mouldId, segmentIndex } = selectedRing;
+
+      // Create handles
       const result = createProfileHandles(
         currentScene,
         mouldId,
@@ -1111,8 +1154,21 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
 
       profileHandlesGroup = result.group;
       profileHandles = result.handles;
+
+      // NOTE: 2D overlay sprite disabled - using direct 3D handles only
+      // const overlay = createProfileOverlay(
+      //   currentScene,
+      //   mouldId,
+      //   segmentIndex,
+      //   currentMouldManager,
+      //   currentSkeleton
+      // );
+      // if (overlay) {
+      //   profileOverlaySprite = overlay;
+      // }
     }
   });
+
 
   return <ThreeScene onSceneReady={handleSceneReady} />;
 }

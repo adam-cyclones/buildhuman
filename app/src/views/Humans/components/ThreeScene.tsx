@@ -8,7 +8,8 @@ type ThreeSceneProps = {
     mesh: THREE.Mesh,
     camera: THREE.Camera,
     canvas: HTMLCanvasElement,
-    renderer: THREE.WebGLRenderer
+    renderer: THREE.WebGLRenderer,
+    controls: OrbitControls
   ) => void;
 };
 
@@ -74,8 +75,8 @@ export default function ThreeScene(props: ThreeSceneProps) {
     controls.update();
 
     // Call onSceneReady callback
-    if (props.onSceneReady && mesh && camera && canvasRef && renderer) {
-      props.onSceneReady(scene, mesh, camera, canvasRef, renderer);
+    if (props.onSceneReady && mesh && camera && canvasRef && renderer && controls) {
+      props.onSceneReady(scene, mesh, camera, canvasRef, renderer, controls);
     }
 
     // Animation loop

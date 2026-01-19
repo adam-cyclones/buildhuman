@@ -1,0 +1,47 @@
+.profile-editor {
+  display: flex;
+  flex-direction: column;
+  background: #2a2a2a;
+  border-radius: 8px;
+  padding: 16px;
+  gap: 12px;
+  width: fit-content;
+}
+
+.profile-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.profile-editor-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.profile-info {
+  font-size: 12px;
+  color: #999;
+  font-family: monospace;
+}
+
+.profile-editor canvas {
+  border: 1px solid #444;
+  border-radius: 4px;
+  cursor: crosshair;
+  background: #1a1a1a;
+}
+
+.profile-editor canvas:active {
+  cursor: grabbing;
+}
+
+.profile-editor-help {
+  font-size: 12px;
+  color: #888;
+  text-align: center;
+  line-height: 1.4;
+}

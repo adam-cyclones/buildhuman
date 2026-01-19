@@ -20,11 +20,12 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
   const [showWireframe, setShowWireframe] = createSignal(false);
 
   // TEMPORARY: Enable profile editing for testing
-  const [profileEditMode, setProfileEditMode] = createSignal(true);
+  const [profileEditMode] = createSignal(true);
   const [selectedProfileRing, setSelectedProfileRing] = createSignal<{mouldId: string; segmentIndex: number} | null>(null);
 
+  // Handle profile ring selection (now managed entirely within viewport)
   const handleProfileRingClicked = (mouldId: string, segmentIndex: number) => {
-    console.log("Profile ring clicked:", mouldId, segmentIndex);
+    console.log("3DViewport: Profile ring clicked", mouldId, segmentIndex);
     setSelectedProfileRing({ mouldId, segmentIndex });
   };
 

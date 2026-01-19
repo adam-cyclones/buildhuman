@@ -1,5 +1,7 @@
 import * as THREE from "three";
+import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { ProfileHandle } from "../visualization/profileHandles";
+import { createTangentHandles, removeTangentHandles } from "../visualization/profileHandles";
 import type { MouldManager } from "../../../morphing/mould-manager";
 
 /**
@@ -16,14 +18,18 @@ type EditState = {
  * Creates a profile handle interaction handler with click-to-move workflow
  *
  * Workflow:
- * 1. Click handle to select it
- * 2. Press 'g' or click selected handle again to enter move mode
- * 3. Move mouse to adjust radius
+ * 1. Click handle to select it (shows tangent handles)
+ * 2. Press 'g' to enter move mode
+ * 3. Move mouse to adjust position
  * 4. Click to confirm, or press Escape to cancel
+ *
+ * Camera rotation is automatically disabled during move mode.
  *
  * @param getCamera - Function to get current camera
  * @param getHandles - Function to get current profile handles
  * @param getMouldManager - Function to get mould manager
+ * @param getControls - Function to get OrbitControls (to disable during drag)
+ * @param getHandlesGroup - Function to get the THREE.Group containing handles (for tangent handles)
  * @param onRadiusChange - Callback when radius changes (for live updates)
  * @returns Event handlers for mouse and keyboard events
  */
@@ -31,6 +37,8 @@ export function createProfileDragHandler(
   getCamera: () => THREE.Camera | undefined,
   getHandles: () => ProfileHandle[],
   getMouldManager: () => MouldManager | undefined,
+  getControls: () => OrbitControls | undefined,
+  getHandlesGroup: () => THREE.Group | undefined,
   onRadiusChange: (mouldId: string, segmentIndex: number, controlPointIndex: number, newRadius: number) => void
 ) {
   const editState: EditState = {
@@ -41,7 +49,8 @@ export function createProfileDragHandler(
   };
 
   const raycaster = new THREE.Raycaster();
-  raycaster.params.Points = { threshold: 0.02 };
+  // Increase threshold for easier clicking on sphere handles
+  raycaster.params.Points = { threshold: 0.05 };
 
   /**
    * Handle mouse click - select handle or confirm move
@@ -77,7 +86,12 @@ export function createProfileDragHandler(
     const handleMeshes = handles.map(h => h.mesh);
     const intersects = raycaster.intersectObjects(handleMeshes);
 
-    console.log("Handle raycast intersects:", intersects.length);
+    console.log("Handle raycast:", {
+      intersectsCount: intersects.length,
+      handlesCount: handleMeshes.length,
+      mouse,
+      handlePositions: handleMeshes.map(m => m.position)
+    });
 
     if (intersects.length > 0) {
       const intersected = intersects[0].object as THREE.Mesh;
@@ -95,39 +109,41 @@ export function createProfileDragHandler(
         );
 
         if (handle) {
-          if (editState.selectedHandle === handle) {
-            // Clicking selected handle again - enter move mode
-            console.log("Clicking selected handle again - entering move mode");
-            enterMoveMode(handle, camera);
-          } else {
-            // Select new handle
-            console.log("Selecting new handle");
-            selectHandle(handle);
-          }
+          // Select handle (press 'g' to move)
+          console.log("Selecting handle");
+          selectHandle(handle);
+          event.stopPropagation();
+          event.preventDefault();
         }
       }
-      event.stopPropagation();
-      event.preventDefault();
-    } else {
-      // Click on empty space - deselect
-      console.log("Deselecting handle");
-      deselectHandle();
     }
+    // Don't deselect here - let other handlers (ring click, joint click) handle empty clicks
   }
 
   /**
    * Select a handle
    */
   function selectHandle(handle: ProfileHandle) {
-    // Deselect previous
+    const group = getHandlesGroup();
+    const mouldManager = getMouldManager();
+
+    // Deselect previous (remove its tangent handles)
     if (editState.selectedHandle) {
       (editState.selectedHandle.mesh.material as THREE.MeshBasicMaterial).color.setHex(0x00ff00);
+      if (group) {
+        removeTangentHandles(editState.selectedHandle, group);
+      }
     }
 
     // Select new
     editState.selectedHandle = handle;
     editState.startRadius = handle.radius;
     (handle.mesh.material as THREE.MeshBasicMaterial).color.setHex(0xffff00); // Yellow for selected
+
+    // Create tangent handles for selected point
+    if (group && mouldManager) {
+      createTangentHandles(handle, group, mouldManager);
+    }
   }
 
   /**
@@ -135,18 +151,111 @@ export function createProfileDragHandler(
    */
   function deselectHandle() {
     if (editState.selectedHandle) {
+      const group = getHandlesGroup();
       (editState.selectedHandle.mesh.material as THREE.MeshBasicMaterial).color.setHex(0x00ff00);
+
+      // Remove tangent handles
+      if (group) {
+        removeTangentHandles(editState.selectedHandle, group);
+      }
+
       editState.selectedHandle = null;
     }
+  }
+
+  /**
+   * Update tangent handle positions when control point moves
+   */
+  function updateTangentHandlePositions(handle: ProfileHandle, mouldManager: MouldManager) {
+    if (!handle.tangentHandles) return;
+
+    const mould = mouldManager.getMould(handle.mouldId);
+    if (!mould || !mould.radialProfiles) return;
+
+    const profile = mould.radialProfiles[handle.segmentIndex];
+    const numPoints = profile.length;
+    const i = handle.controlPointIndex;
+
+    // Get adjacent control points for calculating tangent direction
+    const prevIndex = (i - 1 + numPoints) % numPoints;
+    const nextIndex = (i + 1) % numPoints;
+
+    const userData = handle.mesh.userData;
+    const ringCenter = userData.ringCenter as THREE.Vector3;
+    const basis = userData.basis as { u: THREE.Vector3; v: THREE.Vector3 };
+
+    // Calculate positions of previous and next control points
+    const prevAngle = (prevIndex / numPoints) * Math.PI * 2;
+    const nextAngle = (nextIndex / numPoints) * Math.PI * 2;
+    const prevRadius = profile[prevIndex];
+    const nextRadius = profile[nextIndex];
+
+    const prevU = prevRadius * Math.cos(prevAngle);
+    const prevV = prevRadius * Math.sin(prevAngle);
+    const nextU = nextRadius * Math.cos(nextAngle);
+    const nextV = nextRadius * Math.sin(nextAngle);
+
+    // Current point position in 2D
+    const currentAngle = userData.angle as number;
+    const currentU = handle.radius * Math.cos(currentAngle);
+    const currentV = handle.radius * Math.sin(currentAngle);
+
+    // Calculate tangent direction
+    const tangentU = (nextU - prevU) / 6;
+    const tangentV = (nextV - prevV) / 6;
+
+    // In handle: point - tangent
+    const inU = currentU - tangentU;
+    const inV = currentV - tangentV;
+    const inPos = new THREE.Vector3(
+      ringCenter.x + inU * basis.u.x + inV * basis.v.x,
+      ringCenter.y + inU * basis.u.y + inV * basis.v.y,
+      ringCenter.z + inU * basis.u.z + inV * basis.v.z
+    );
+
+    // Out handle: point + tangent
+    const outU = currentU + tangentU;
+    const outV = currentV + tangentV;
+    const outPos = new THREE.Vector3(
+      ringCenter.x + outU * basis.u.x + outV * basis.v.x,
+      ringCenter.y + outU * basis.u.y + outV * basis.v.y,
+      ringCenter.z + outU * basis.u.z + outV * basis.v.z
+    );
+
+    // Update tangent handle positions
+    handle.tangentHandles.inHandle.position.copy(inPos);
+    handle.tangentHandles.outHandle.position.copy(outPos);
+
+    // Update line geometries
+    const inLineGeometry = new THREE.BufferGeometry().setFromPoints([
+      handle.mesh.position,
+      inPos
+    ]);
+    handle.tangentHandles.inLine.geometry.dispose();
+    handle.tangentHandles.inLine.geometry = inLineGeometry;
+
+    const outLineGeometry = new THREE.BufferGeometry().setFromPoints([
+      handle.mesh.position,
+      outPos
+    ]);
+    handle.tangentHandles.outLine.geometry.dispose();
+    handle.tangentHandles.outLine.geometry = outLineGeometry;
   }
 
   /**
    * Enter move mode for selected handle
    */
   function enterMoveMode(handle: ProfileHandle, camera: THREE.Camera) {
+    const controls = getControls();
+
     editState.isMoving = true;
     editState.selectedHandle = handle;
     editState.startRadius = handle.radius;
+
+    // Disable OrbitControls during move mode
+    if (controls) {
+      controls.enabled = false;
+    }
 
     // Create a plane perpendicular to camera view, passing through ring center
     const userData = handle.mesh.userData;
@@ -167,12 +276,19 @@ export function createProfileDragHandler(
    * Exit move mode and confirm changes
    */
   function confirmMove() {
+    const controls = getControls();
+
     if (editState.selectedHandle) {
       // Keep it selected (yellow) but stop moving
       (editState.selectedHandle.mesh.material as THREE.MeshBasicMaterial).color.setHex(0xffff00);
     }
     editState.isMoving = false;
     editState.plane = null;
+
+    // Re-enable OrbitControls
+    if (controls) {
+      controls.enabled = true;
+    }
   }
 
   /**
@@ -183,6 +299,7 @@ export function createProfileDragHandler(
 
     const handle = editState.selectedHandle;
     const mouldManager = getMouldManager();
+    const controls = getControls();
 
     if (mouldManager) {
       const mould = mouldManager.getMould(handle.mouldId);
@@ -204,6 +321,11 @@ export function createProfileDragHandler(
     (handle.mesh.material as THREE.MeshBasicMaterial).color.setHex(0xffff00);
     editState.isMoving = false;
     editState.plane = null;
+
+    // Re-enable OrbitControls
+    if (controls) {
+      controls.enabled = true;
+    }
   }
 
   /**
@@ -281,6 +403,11 @@ export function createProfileDragHandler(
       // Update userData with new angle
       userData.angle = newAngle;
 
+      // Update tangent handle positions if they exist
+      if (editState.selectedHandle.tangentHandles) {
+        updateTangentHandlePositions(editState.selectedHandle, mouldManager);
+      }
+
       // Notify about radius change (this will need to be extended to support 2D coords)
       onRadiusChange(
         editState.selectedHandle.mouldId,
@@ -327,6 +454,7 @@ export function createProfileDragHandler(
     handleClick,
     handleMouseMove,
     handleKeyDown,
+    deselectHandle,
     // Expose state for external access if needed
     getEditState: () => editState,
   };

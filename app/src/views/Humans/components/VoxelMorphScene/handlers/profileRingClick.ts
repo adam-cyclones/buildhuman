@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { MouldManager } from "../../../morphing/mould-manager";
 
 /**
  * Creates a profile ring click handler
@@ -6,6 +7,7 @@ import * as THREE from "three";
  * @param getCamera - Function to get current camera
  * @param getCanvas - Function to get canvas element
  * @param getProfileRingsGroup - Function to get profile rings group
+ * @param getMouldManager - Function to get mould manager
  * @param onProfileRingClicked - Callback when a ring is clicked
  * @returns Click handler function
  */
@@ -13,6 +15,7 @@ export function createProfileRingClickHandler(
   getCamera: () => THREE.Camera | undefined,
   getCanvas: () => HTMLCanvasElement | undefined,
   getProfileRingsGroup: () => THREE.Group | undefined,
+  getMouldManager: () => MouldManager | undefined,
   onProfileRingClicked?: (mouldId: string, segmentIndex: number) => void
 ) {
   const raycaster = new THREE.Raycaster();
@@ -62,6 +65,14 @@ export function createProfileRingClickHandler(
       console.log("Intersected ring:", userData);
 
       if (userData.type === "profile-ring") {
+        const mouldManager = getMouldManager();
+        if (!mouldManager) return false;
+
+        const mould = mouldManager.getMould(userData.mouldId);
+        if (!mould || mould.shape !== "profiled-capsule" || !mould.radialProfiles) {
+          return false;
+        }
+
         console.log("Calling onProfileRingClicked:", userData.mouldId, userData.segmentIndex);
         onProfileRingClicked(userData.mouldId, userData.segmentIndex);
         event.stopPropagation();

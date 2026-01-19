@@ -11,6 +11,12 @@ export type ProfileHandle = {
   segmentIndex: number;
   controlPointIndex: number;
   radius: number;
+  tangentHandles?: {
+    inHandle: THREE.Mesh;
+    outHandle: THREE.Mesh;
+    inLine: THREE.Line;
+    outLine: THREE.Line;
+  };
 };
 
 /**
@@ -61,7 +67,7 @@ export function createProfileHandles(
   const basis = createRingBasis(boneDirection);
 
   // Create a handle for each control point around the ring
-  const handleGeometry = new THREE.SphereGeometry(0.015, 16, 16); // Larger and smoother
+  const handleGeometry = new THREE.SphereGeometry(0.02, 16, 16); // Larger for easier clicking
   const handleMaterial = new THREE.MeshBasicMaterial({
     color: 0x00ff00,
     depthTest: false, // Render on top of everything
@@ -213,4 +219,150 @@ export function updateProfileHandles(
     handle.mesh.userData.basis = basis;
     handle.mesh.userData.angle = angle;
   });
+}
+
+/**
+ * Creates tangent handles for bezier curve editing on a selected control point
+ * Shows "in" and "out" handles connected to the control point
+ */
+export function createTangentHandles(
+  handle: ProfileHandle,
+  group: THREE.Group,
+  mouldManager: MouldManager
+): void {
+  // Remove existing tangent handles if any
+  if (handle.tangentHandles) {
+    group.remove(handle.tangentHandles.inLine);
+    group.remove(handle.tangentHandles.outLine);
+    group.remove(handle.tangentHandles.inHandle);
+    group.remove(handle.tangentHandles.outHandle);
+  }
+
+  const mould = mouldManager.getMould(handle.mouldId);
+  if (!mould || !mould.radialProfiles) return;
+
+  const profile = mould.radialProfiles[handle.segmentIndex];
+  const numPoints = profile.length;
+  const i = handle.controlPointIndex;
+
+  // Get adjacent control points for calculating tangent direction
+  const prevIndex = (i - 1 + numPoints) % numPoints;
+  const nextIndex = (i + 1) % numPoints;
+
+  const userData = handle.mesh.userData;
+  const ringCenter = userData.ringCenter as THREE.Vector3;
+  const basis = userData.basis as { u: THREE.Vector3; v: THREE.Vector3 };
+
+  // Calculate positions of previous and next control points
+  const prevAngle = (prevIndex / numPoints) * Math.PI * 2;
+  const nextAngle = (nextIndex / numPoints) * Math.PI * 2;
+  const prevRadius = profile[prevIndex];
+  const nextRadius = profile[nextIndex];
+
+  const prevU = prevRadius * Math.cos(prevAngle);
+  const prevV = prevRadius * Math.sin(prevAngle);
+  const nextU = nextRadius * Math.cos(nextAngle);
+  const nextV = nextRadius * Math.sin(nextAngle);
+
+  // Current point position in 2D
+  const currentAngle = userData.angle as number;
+  const currentU = handle.radius * Math.cos(currentAngle);
+  const currentV = handle.radius * Math.sin(currentAngle);
+
+  // Calculate tangent direction (simplified - just use vector to prev/next)
+  const tangentU = (nextU - prevU) / 6;
+  const tangentV = (nextV - prevV) / 6;
+
+  // In handle: point - tangent
+  const inU = currentU - tangentU;
+  const inV = currentV - tangentV;
+  const inPos = new THREE.Vector3(
+    ringCenter.x + inU * basis.u.x + inV * basis.v.x,
+    ringCenter.y + inU * basis.u.y + inV * basis.v.y,
+    ringCenter.z + inU * basis.u.z + inV * basis.v.z
+  );
+
+  // Out handle: point + tangent
+  const outU = currentU + tangentU;
+  const outV = currentV + tangentV;
+  const outPos = new THREE.Vector3(
+    ringCenter.x + outU * basis.u.x + outV * basis.v.x,
+    ringCenter.y + outU * basis.u.y + outV * basis.v.y,
+    ringCenter.z + outU * basis.u.z + outV * basis.v.z
+  );
+
+  // Create small spheres for the tangent handle endpoints
+  const handleGeometry = new THREE.SphereGeometry(0.008, 8, 8);
+  const handleMaterial = new THREE.MeshBasicMaterial({
+    color: 0x888888,
+    depthTest: false,
+    transparent: true,
+    opacity: 0.8
+  });
+
+  const inHandle = new THREE.Mesh(handleGeometry, handleMaterial.clone());
+  inHandle.position.copy(inPos);
+  inHandle.userData = {
+    type: "tangent-handle",
+    direction: "in",
+    parentHandle: handle
+  };
+
+  const outHandle = new THREE.Mesh(handleGeometry, handleMaterial.clone());
+  outHandle.position.copy(outPos);
+  outHandle.userData = {
+    type: "tangent-handle",
+    direction: "out",
+    parentHandle: handle
+  };
+
+  // Create lines connecting control point to tangent handles
+  const lineMaterial = new THREE.LineBasicMaterial({
+    color: 0x888888,
+    depthTest: false,
+    transparent: true,
+    opacity: 0.6
+  });
+
+  const inLineGeometry = new THREE.BufferGeometry().setFromPoints([
+    handle.mesh.position,
+    inPos
+  ]);
+  const inLine = new THREE.Line(inLineGeometry, lineMaterial.clone());
+
+  const outLineGeometry = new THREE.BufferGeometry().setFromPoints([
+    handle.mesh.position,
+    outPos
+  ]);
+  const outLine = new THREE.Line(outLineGeometry, lineMaterial.clone());
+
+  // Add to scene
+  group.add(inHandle);
+  group.add(outHandle);
+  group.add(inLine);
+  group.add(outLine);
+
+  // Store references
+  handle.tangentHandles = {
+    inHandle,
+    outHandle,
+    inLine,
+    outLine
+  };
+}
+
+/**
+ * Removes tangent handles from a control point
+ */
+export function removeTangentHandles(
+  handle: ProfileHandle,
+  group: THREE.Group
+): void {
+  if (handle.tangentHandles) {
+    group.remove(handle.tangentHandles.inLine);
+    group.remove(handle.tangentHandles.outLine);
+    group.remove(handle.tangentHandles.inHandle);
+    group.remove(handle.tangentHandles.outHandle);
+    handle.tangentHandles = undefined;
+  }
 }
