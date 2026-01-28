@@ -26,12 +26,59 @@ impl Default for UiBounds {
     }
 }
 
+/// Camera uniform data - must match shader layout
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CameraUniform {
+    view_proj: [[f32; 4]; 4],
+}
+
+impl CameraUniform {
+    fn new() -> Self {
+        Self {
+            view_proj: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        }
+    }
+
+    /// Create orthographic projection that maintains aspect ratio
+    /// Objects at z=0 will appear at correct size, regardless of viewport aspect
+    fn orthographic(aspect: f32) -> Self {
+        // Orthographic projection that shows -1 to 1 on the smaller axis
+        // and extends proportionally on the larger axis
+        let (scale_x, scale_y) = if aspect > 1.0 {
+            // Wider than tall: scale x to show more horizontal space
+            (1.0 / aspect, 1.0)
+        } else {
+            // Taller than wide: scale y to show more vertical space
+            (1.0, aspect)
+        };
+
+        Self {
+            view_proj: [
+                [scale_x, 0.0, 0.0, 0.0],
+                [0.0, scale_y, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        }
+    }
+}
+
 pub struct GpuRenderer {
     device: Arc<Device>,
     queue: Arc<Queue>,
     surface: Surface<'static>,
     surface_config: SurfaceConfiguration,
-    render_pipeline: wgpu::RenderPipeline,
+    ui_render_pipeline: wgpu::RenderPipeline,
+    scene_render_pipeline: wgpu::RenderPipeline,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    camera_bind_group_layout: wgpu::BindGroupLayout,
     viewport: ViewportInfo,
 }
 
@@ -116,35 +163,145 @@ impl GpuRenderer {
 
         surface.configure(&device, &surface_config);
 
-        // Create render pipeline
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Shader"),
+        // Create camera uniform buffer
+        let camera_uniform = CameraUniform::new();
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Camera Buffer"),
+            contents: bytemuck::cast_slice(&[camera_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create bind group layout for camera
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Camera Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+        // Create bind group
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Camera Bind Group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+
+        // Load shaders
+        let ui_shader_source = r#"
+            struct VertexInput {
+                @location(0) position: vec3<f32>,
+                @location(1) color: vec3<f32>,
+            };
+            struct VertexOutput {
+                @builtin(position) position: vec4<f32>,
+                @location(0) color: vec3<f32>,
+            };
+            @vertex
+            fn vs_main(input: VertexInput) -> VertexOutput {
+                var output: VertexOutput;
+                output.position = vec4<f32>(input.position, 1.0);
+                output.color = input.color;
+                return output;
+            }
+            @fragment
+            fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+                return vec4<f32>(input.color, 1.0);
+            }
+        "#;
+
+        let ui_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("UI Shader"),
+            source: wgpu::ShaderSource::Wgsl(ui_shader_source.into()),
+        });
+
+        let scene_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Scene Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/basic.wgsl").into()),
         });
 
-        let render_pipeline_layout =
+        // UI pipeline - no bind groups, direct NDC
+        let ui_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
+                label: Some("UI Pipeline Layout"),
                 bind_group_layouts: &[],
                 push_constant_ranges: &[],
             });
 
+        // Scene pipeline - with camera bind group
+        let scene_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Scene Pipeline Layout"),
+                bind_group_layouts: &[&camera_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
         // Vertex layout: position (vec3) + color (vec3) = 6 floats per vertex
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
+        let vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+        };
+
+        let ui_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("UI Render Pipeline"),
+            layout: Some(&ui_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &ui_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
-                }],
+                buffers: &[vertex_layout.clone()],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &ui_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        let scene_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Scene Render Pipeline"),
+            layout: Some(&scene_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &scene_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[vertex_layout],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &scene_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_format,
@@ -177,7 +334,11 @@ impl GpuRenderer {
             queue,
             surface,
             surface_config,
-            render_pipeline,
+            ui_render_pipeline,
+            scene_render_pipeline,
+            camera_buffer,
+            camera_bind_group,
+            camera_bind_group_layout,
             viewport: ViewportInfo {
                 x: viewport_x,
                 y: viewport_y,
@@ -185,6 +346,16 @@ impl GpuRenderer {
                 height: viewport_height,
             },
         })
+    }
+
+    /// Update camera projection based on viewport aspect ratio
+    pub fn update_camera_aspect(&self) {
+        if self.viewport.width == 0 || self.viewport.height == 0 {
+            return;
+        }
+        let aspect = self.viewport.width as f32 / self.viewport.height as f32;
+        let camera_uniform = CameraUniform::orthographic(aspect);
+        self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_uniform]));
     }
 
     pub fn update_viewport(&mut self, x: u32, y: u32, width: u32, height: u32) {
@@ -198,6 +369,9 @@ impl GpuRenderer {
             width: clamped_width,
             height: clamped_height,
         };
+
+        // Update camera projection for new aspect ratio
+        self.update_camera_aspect();
 
         println!("Viewport updated: requested ({}, {}, {}, {}), actual ({}, {}, {}, {})",
                  x, y, width, height,
@@ -312,9 +486,8 @@ impl GpuRenderer {
                 occlusion_query_set: None,
             });
 
-            render_pass.set_pipeline(&self.render_pipeline);
-
-            // === Phase 1: Draw UI backgrounds (full surface) ===
+            // === Phase 1: Draw UI backgrounds (full surface, no camera) ===
+            render_pass.set_pipeline(&self.ui_render_pipeline);
             render_pass.set_viewport(
                 0.0,
                 0.0,
@@ -334,8 +507,11 @@ impl GpuRenderer {
             render_pass.set_index_buffer(ui_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(0..ui_num_indices, 0, 0..1);
 
-            // === Phase 2: Draw 3D scene (viewport + scissor constrained) ===
+            // === Phase 2: Draw 3D scene (with camera projection) ===
             if let (Some(ref scene_vb), Some(ref scene_ib)) = (&scene_vertex_buffer, &scene_index_buffer) {
+                render_pass.set_pipeline(&self.scene_render_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+
                 println!("Drawing scene with {} indices, viewport: ({}, {}, {}, {})",
                          scene_num_indices,
                          self.viewport.x, self.viewport.y,
