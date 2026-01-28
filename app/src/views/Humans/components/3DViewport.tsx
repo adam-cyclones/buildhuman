@@ -52,6 +52,22 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
           width: Math.round(rect.width * scaleFactor),
           height: Math.round(rect.height * scaleFactor)
         });
+
+        // Test render: large centered triangle to verify rendering works
+        const testVertices: number[] = [
+          // Position (x, y, z) + Color (r, g, b)
+          0.0,  0.8, 0.0,   1.0, 0.0, 0.0,  // 0: top center - red
+         -0.8, -0.8, 0.0,   0.0, 1.0, 0.0,  // 1: bottom left - green
+          0.8, -0.8, 0.0,   0.0, 0.0, 1.0,  // 2: bottom right - blue
+        ];
+        // CCW winding when viewed from +Z: 0 -> 1 -> 2 (top -> bottom-left -> bottom-right)
+        const testIndices: number[] = [0, 1, 2];
+
+        await invoke("render_scene_gpu", {
+          sceneVertices: testVertices,
+          sceneIndices: testIndices
+        });
+        console.log("Test triangle rendered");
       } catch (error) {
         console.error("Failed to update GPU viewport:", error);
       }

@@ -199,31 +199,67 @@ impl GpuRenderer {
         }
     }
 
+    /// Render UI backgrounds and optionally 3D scene content
+    /// ui_vertices/ui_indices: UI background quads (rendered to full surface)
+    /// scene_vertices/scene_indices: 3D content (rendered within scissor rect)
     pub fn render(&self, vertices: &[f32], indices: &[u32]) -> Result<(), String> {
+        self.render_with_scene(vertices, indices, &[], &[])
+    }
+
+    /// Render UI backgrounds and 3D scene content with scissor rect
+    pub fn render_with_scene(
+        &self,
+        ui_vertices: &[f32],
+        ui_indices: &[u32],
+        scene_vertices: &[f32],
+        scene_indices: &[u32],
+    ) -> Result<(), String> {
         // Don't render until viewport has been properly set
         if self.viewport.width == 0 || self.viewport.height == 0 {
             return Ok(());
         }
 
-        // NOTE: We recreate buffers every frame here for simplicity
-        // For production, maintain persistent buffers and update them
-        let vertex_buffer = self
+        // Create UI buffers
+        let ui_vertex_buffer = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(vertices),
+                label: Some("UI Vertex Buffer"),
+                contents: bytemuck::cast_slice(ui_vertices),
                 usage: wgpu::BufferUsages::VERTEX,
             });
 
-        let index_buffer = self
+        let ui_index_buffer = self
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(indices),
+                label: Some("UI Index Buffer"),
+                contents: bytemuck::cast_slice(ui_indices),
                 usage: wgpu::BufferUsages::INDEX,
             });
 
-        let num_indices = indices.len() as u32;
+        let ui_num_indices = ui_indices.len() as u32;
+
+        // Create scene buffers if we have scene data
+        let (scene_vertex_buffer, scene_index_buffer, scene_num_indices) = if !scene_vertices.is_empty() && !scene_indices.is_empty() {
+            let vb = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Scene Vertex Buffer"),
+                    contents: bytemuck::cast_slice(scene_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+
+            let ib = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Scene Index Buffer"),
+                    contents: bytemuck::cast_slice(scene_indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+
+            (Some(vb), Some(ib), scene_indices.len() as u32)
+        } else {
+            (None, None, 0)
+        };
 
         // Get current surface texture
         let output = self
@@ -248,7 +284,7 @@ impl GpuRenderer {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        // Clear to black - we draw colored quads for all visible regions
+                        // Clear to black
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: 0.0,
                             g: 0.0,
@@ -263,7 +299,9 @@ impl GpuRenderer {
                 occlusion_query_set: None,
             });
 
-            // Use full surface for rendering (viewport/scissor will be used later for 3D content)
+            render_pass.set_pipeline(&self.render_pipeline);
+
+            // === Phase 1: Draw UI backgrounds (full surface) ===
             render_pass.set_viewport(
                 0.0,
                 0.0,
@@ -272,7 +310,6 @@ impl GpuRenderer {
                 0.0,
                 1.0,
             );
-
             render_pass.set_scissor_rect(
                 0,
                 0,
@@ -280,16 +317,50 @@ impl GpuRenderer {
                 self.surface_config.height,
             );
 
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            render_pass.draw_indexed(0..num_indices, 0, 0..1);
+            render_pass.set_vertex_buffer(0, ui_vertex_buffer.slice(..));
+            render_pass.set_index_buffer(ui_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.draw_indexed(0..ui_num_indices, 0, 0..1);
+
+            // === Phase 2: Draw 3D scene (viewport + scissor constrained) ===
+            if let (Some(ref scene_vb), Some(ref scene_ib)) = (&scene_vertex_buffer, &scene_index_buffer) {
+                println!("Drawing scene with {} indices, viewport: ({}, {}, {}, {})",
+                         scene_num_indices,
+                         self.viewport.x, self.viewport.y,
+                         self.viewport.width, self.viewport.height);
+
+                // Set viewport to the scene area - this makes NDC coords (-1 to 1) map to this region
+                render_pass.set_viewport(
+                    self.viewport.x as f32,
+                    self.viewport.y as f32,
+                    self.viewport.width as f32,
+                    self.viewport.height as f32,
+                    0.0,
+                    1.0,
+                );
+
+                // Scissor rect clips any pixels outside the viewport area
+                render_pass.set_scissor_rect(
+                    self.viewport.x,
+                    self.viewport.y,
+                    self.viewport.width,
+                    self.viewport.height,
+                );
+
+                render_pass.set_vertex_buffer(0, scene_vb.slice(..));
+                render_pass.set_index_buffer(scene_ib.slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.draw_indexed(0..scene_num_indices, 0, 0..1);
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
         Ok(())
+    }
+
+    /// Get the current viewport bounds (for use by scene rendering)
+    pub fn get_viewport(&self) -> &ViewportInfo {
+        &self.viewport
     }
 }
 
@@ -300,6 +371,10 @@ use std::sync::Mutex;
 static GPU_RENDERER: Lazy<Mutex<Option<GpuRenderer>>> = Lazy::new(|| Mutex::new(None));
 static LAST_RESIZE: Lazy<Mutex<std::time::Instant>> = Lazy::new(|| Mutex::new(std::time::Instant::now()));
 static SCALE_FACTOR: Lazy<Mutex<f64>> = Lazy::new(|| Mutex::new(2.0)); // Default to Retina
+
+// Store last scene data for re-rendering on resize
+static LAST_SCENE_VERTICES: Lazy<Mutex<Vec<f32>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static LAST_SCENE_INDICES: Lazy<Mutex<Vec<u32>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 pub fn set_global_renderer(renderer: GpuRenderer) {
     let mut global_renderer = GPU_RENDERER.lock().unwrap();
@@ -394,10 +469,15 @@ pub fn handle_window_resize(width: u32, height: u32) {
     if let Some(ref mut renderer) = *renderer {
         renderer.resize_window(width, height);
 
-        // Re-render UI bounds after resize
+        // Re-render UI bounds + last scene after resize
         let scale = get_scale_factor();
-        let (vertices, indices) = generate_ui_bounds(width, height, scale);
-        let _ = renderer.render(&vertices, &indices);
+        let (ui_vertices, ui_indices) = generate_ui_bounds(width, height, scale);
+
+        // Get last scene data
+        let scene_vertices = LAST_SCENE_VERTICES.lock().unwrap();
+        let scene_indices = LAST_SCENE_INDICES.lock().unwrap();
+
+        let _ = renderer.render_with_scene(&ui_vertices, &ui_indices, &scene_vertices, &scene_indices);
     }
 }
 
@@ -468,6 +548,50 @@ pub async fn render_mesh_gpu(
 
     if let Some(ref renderer) = *renderer {
         renderer.render(&vertices, &indices)?;
+        Ok(())
+    } else {
+        Err("GPU renderer not initialized".to_string())
+    }
+}
+
+/// Render a 3D scene with UI backgrounds, using scissor rect to constrain scene to viewport
+#[tauri::command]
+pub async fn render_scene_gpu(
+    scene_vertices: Vec<f64>,  // JS numbers come as f64
+    scene_indices: Vec<u32>,
+) -> Result<(), String> {
+    println!("render_scene_gpu called with {} vertices, {} indices",
+             scene_vertices.len(), scene_indices.len());
+
+    let renderer = GPU_RENDERER.lock().unwrap();
+
+    if let Some(ref renderer) = *renderer {
+        // Convert f64 to f32
+        let scene_vertices_f32: Vec<f32> = scene_vertices.iter().map(|&v| v as f32).collect();
+
+        // Store scene data for re-rendering on resize
+        {
+            let mut stored_verts = LAST_SCENE_VERTICES.lock().unwrap();
+            let mut stored_inds = LAST_SCENE_INDICES.lock().unwrap();
+            *stored_verts = scene_vertices_f32.clone();
+            *stored_inds = scene_indices.clone();
+        }
+
+        println!("Viewport: x={}, y={}, w={}, h={}",
+                 renderer.viewport.x, renderer.viewport.y,
+                 renderer.viewport.width, renderer.viewport.height);
+
+        // Generate UI background quads
+        let scale = get_scale_factor();
+        let (ui_vertices, ui_indices) = generate_ui_bounds(
+            renderer.surface_config.width,
+            renderer.surface_config.height,
+            scale,
+        );
+
+        // Render UI + scene with scissor rect
+        renderer.render_with_scene(&ui_vertices, &ui_indices, &scene_vertices_f32, &scene_indices)?;
+        println!("render_scene_gpu completed successfully");
         Ok(())
     } else {
         Err("GPU renderer not initialized".to_string())

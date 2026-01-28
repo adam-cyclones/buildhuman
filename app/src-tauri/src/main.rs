@@ -225,6 +225,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             gpu_renderer::update_gpu_viewport,
             gpu_renderer::resize_gpu_window,
             gpu_renderer::render_mesh_gpu,
+            gpu_renderer::render_scene_gpu,
             gpu_renderer::shutdown_gpu_renderer,
         ])
         .build(generate_tauri_context())
