@@ -188,7 +188,20 @@ impl GpuRenderer {
     }
 
     pub fn update_viewport(&mut self, x: u32, y: u32, width: u32, height: u32) {
-        self.viewport = ViewportInfo { x, y, width, height };
+        // Clamp viewport to not exceed surface dimensions
+        let clamped_width = width.min(self.surface_config.width.saturating_sub(x));
+        let clamped_height = height.min(self.surface_config.height.saturating_sub(y));
+
+        self.viewport = ViewportInfo {
+            x,
+            y,
+            width: clamped_width,
+            height: clamped_height,
+        };
+
+        println!("Viewport updated: requested ({}, {}, {}, {}), actual ({}, {}, {}, {})",
+                 x, y, width, height,
+                 self.viewport.x, self.viewport.y, self.viewport.width, self.viewport.height);
     }
 
     pub fn resize_window(&mut self, window_width: u32, window_height: u32) {
@@ -376,6 +389,9 @@ static SCALE_FACTOR: Lazy<Mutex<f64>> = Lazy::new(|| Mutex::new(2.0)); // Defaul
 static LAST_SCENE_VERTICES: Lazy<Mutex<Vec<f32>>> = Lazy::new(|| Mutex::new(Vec::new()));
 static LAST_SCENE_INDICES: Lazy<Mutex<Vec<u32>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
+// Store the viewport offset (top-left corner) set by frontend - this stays fixed
+static VIEWPORT_OFFSET: Lazy<Mutex<(u32, u32)>> = Lazy::new(|| Mutex::new((0, 0)));
+
 pub fn set_global_renderer(renderer: GpuRenderer) {
     let mut global_renderer = GPU_RENDERER.lock().unwrap();
     *global_renderer = Some(renderer);
@@ -469,8 +485,18 @@ pub fn handle_window_resize(width: u32, height: u32) {
     if let Some(ref mut renderer) = *renderer {
         renderer.resize_window(width, height);
 
-        // Re-render UI bounds + last scene after resize
+        // Use the stored viewport offset (set by frontend) and recalculate width/height
         let scale = get_scale_factor();
+        let bounds = UiBounds::default();
+        let right_sidebar_width = (bounds.right_sidebar_width as f64 * scale) as u32;
+
+        let (viewport_x, viewport_y) = *VIEWPORT_OFFSET.lock().unwrap();
+        let viewport_width = width.saturating_sub(right_sidebar_width).saturating_sub(viewport_x);
+        let viewport_height = height.saturating_sub(viewport_y);
+
+        renderer.update_viewport(viewport_x, viewport_y, viewport_width, viewport_height);
+
+        // Re-render UI bounds + last scene after resize
         let (ui_vertices, ui_indices) = generate_ui_bounds(width, height, scale);
 
         // Get last scene data
@@ -514,10 +540,22 @@ pub async fn update_gpu_viewport(
     width: u32,
     height: u32,
 ) -> Result<(), String> {
+    println!("update_gpu_viewport called: x={}, y={}, width={}, height={}", x, y, width, height);
+
+    // Store the viewport offset for use during resize
+    {
+        let mut offset = VIEWPORT_OFFSET.lock().unwrap();
+        *offset = (x, y);
+    }
+
     let mut renderer = GPU_RENDERER.lock().unwrap();
 
     if let Some(ref mut renderer) = *renderer {
+        println!("Surface dimensions: {}x{}", renderer.surface_config.width, renderer.surface_config.height);
         renderer.update_viewport(x, y, width, height);
+        println!("Viewport now set to: x={}, y={}, w={}, h={}",
+                 renderer.viewport.x, renderer.viewport.y,
+                 renderer.viewport.width, renderer.viewport.height);
         Ok(())
     } else {
         Err("GPU renderer not initialized".to_string())

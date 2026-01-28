@@ -53,12 +53,13 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
           height: Math.round(rect.height * scaleFactor)
         });
 
-        // Test render: large centered triangle to verify rendering works
+        // Test render: triangle that extends beyond viewport to test scissor clipping
+        // One vertex goes outside NDC bounds to verify clipping works
         const testVertices: number[] = [
           // Position (x, y, z) + Color (r, g, b)
           0.0,  0.8, 0.0,   1.0, 0.0, 0.0,  // 0: top center - red
          -0.8, -0.8, 0.0,   0.0, 1.0, 0.0,  // 1: bottom left - green
-          0.8, -0.8, 0.0,   0.0, 0.0, 1.0,  // 2: bottom right - blue
+          1.5, -0.8, 0.0,   0.0, 0.0, 1.0,  // 2: bottom right - blue (EXTENDS PAST RIGHT EDGE)
         ];
         // CCW winding when viewed from +Z: 0 -> 1 -> 2 (top -> bottom-left -> bottom-right)
         const testIndices: number[] = [0, 1, 2];
