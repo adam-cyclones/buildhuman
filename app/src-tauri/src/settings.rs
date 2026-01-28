@@ -13,6 +13,12 @@ pub struct AppSettings {
     pub custom_assets_folder: String,
     pub moderator_api_key: String,
     pub moderator_mode: bool,
+    #[serde(default = "default_render_mode")]
+    pub render_mode: String,  // "cpu" or "gpu"
+}
+
+fn default_render_mode() -> String {
+    "cpu".to_string()
 }
 
 impl Default for AppSettings {
@@ -25,6 +31,7 @@ impl Default for AppSettings {
             custom_assets_folder: String::new(),
             moderator_api_key: String::new(),
             moderator_mode: false,
+            render_mode: default_render_mode(),
         }
     }
 }
@@ -32,6 +39,22 @@ impl Default for AppSettings {
 fn get_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     let app_data = crate::asset_manager::get_app_data_dir(app)?;
     Ok(app_data.join("settings.json"))
+}
+
+/// Load settings without an AppHandle (for use during setup before app is fully initialized)
+pub fn load_settings_sync() -> AppSettings {
+    let home = dirs::home_dir().unwrap_or_default();
+    let settings_path = home.join(".buildhuman").join("settings.json");
+
+    if settings_path.exists() {
+        if let Ok(content) = fs::read_to_string(&settings_path) {
+            if let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
+                return settings;
+            }
+        }
+    }
+
+    AppSettings::default()
 }
 
 #[tauri::command]

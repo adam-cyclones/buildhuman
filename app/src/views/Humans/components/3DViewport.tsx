@@ -1,8 +1,10 @@
-import { createSignal } from "solid-js";
+import { createSignal, onMount, onCleanup } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
 import VoxelMorphScene from "./VoxelMorphScene";
 import Icon from "../../../components/Icon";
 
 type ThreeDViewportProps = {
+  renderMode: string;
   onAddHuman: () => void;
   mouldRadius: number;
   voxelResolution: 32 | 48 | 64 | 96 | 128 | 256;
@@ -18,6 +20,7 @@ type ThreeDViewportProps = {
 
 const ThreeDViewport = (props: ThreeDViewportProps) => {
   const [showWireframe, setShowWireframe] = createSignal(false);
+  let viewportContentRef: HTMLDivElement | undefined;
 
   // TEMPORARY: Enable profile editing for testing
   const [profileEditMode] = createSignal(true);
@@ -28,6 +31,44 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
     console.log("3DViewport: Profile ring clicked", mouldId, segmentIndex);
     setSelectedProfileRing({ mouldId, segmentIndex });
   };
+
+  // GPU renderer is initialized in Rust's setup() - just update viewport bounds here
+  onMount(async () => {
+    if (props.renderMode === "gpu" && viewportContentRef) {
+      try {
+        const rect = viewportContentRef.getBoundingClientRect();
+        const scaleFactor = window.devicePixelRatio || 2;
+
+        console.log("Updating GPU viewport bounds:", {
+          x: Math.round(rect.left * scaleFactor),
+          y: Math.round(rect.top * scaleFactor),
+          width: Math.round(rect.width * scaleFactor),
+          height: Math.round(rect.height * scaleFactor)
+        });
+
+        await invoke("update_gpu_viewport", {
+          x: Math.round(rect.left * scaleFactor),
+          y: Math.round(rect.top * scaleFactor),
+          width: Math.round(rect.width * scaleFactor),
+          height: Math.round(rect.height * scaleFactor)
+        });
+      } catch (error) {
+        console.error("Failed to update GPU viewport:", error);
+      }
+    }
+  });
+
+  // Cleanup GPU renderer on unmount
+  onCleanup(async () => {
+    if (props.renderMode === "gpu") {
+      try {
+        await invoke("shutdown_gpu_renderer");
+        console.log("GPU renderer shut down");
+      } catch (error) {
+        console.error("Failed to shutdown GPU renderer:", error);
+      }
+    }
+  });
 
   return (
     <div class="viewport">
@@ -60,23 +101,32 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
           <button class="tool-btn">⊞</button>
         </div>
       </div>
-      <div class="viewport-content">
-        <VoxelMorphScene
-          mouldRadius={props.mouldRadius}
-          voxelResolution={props.voxelResolution}
-          jointMovement={props.jointMovement}
-          jointRotation={props.jointRotation}
-          showWireframe={showWireframe()}
-          showSkeleton={props.showSkeleton}
-          selectedJointId={props.selectedJointId}
-          profileEditMode={profileEditMode()}
-          selectedProfileRing={selectedProfileRing()}
-          onSkeletonReady={props.onSkeletonReady}
-          onMouldsReady={props.onMouldsReady}
-          onJointSelected={props.onJointSelected}
-          onJointClicked={props.onJointClicked}
-          onProfileRingClicked={handleProfileRingClicked}
-        />
+      <div class="viewport-content" ref={viewportContentRef}>
+        {props.renderMode === "cpu" ? (
+          <VoxelMorphScene
+            mouldRadius={props.mouldRadius}
+            voxelResolution={props.voxelResolution}
+            jointMovement={props.jointMovement}
+            jointRotation={props.jointRotation}
+            showWireframe={showWireframe()}
+            showSkeleton={props.showSkeleton}
+            selectedJointId={props.selectedJointId}
+            profileEditMode={profileEditMode()}
+            selectedProfileRing={selectedProfileRing()}
+            onSkeletonReady={props.onSkeletonReady}
+            onMouldsReady={props.onMouldsReady}
+            onJointSelected={props.onJointSelected}
+            onJointClicked={props.onJointClicked}
+            onProfileRingClicked={handleProfileRingClicked}
+          />
+        ) : (
+          <canvas
+            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: auto; background: transparent;"
+            onMouseDown={(e) => console.log('Canvas mouse down', e)}
+            onMouseMove={(e) => console.log('Canvas mouse move', e)}
+            onMouseUp={(e) => console.log('Canvas mouse up', e)}
+          />
+        )}
       </div>
     </div>
   );

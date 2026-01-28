@@ -10,7 +10,11 @@ import Icon from "../../components/Icon";
 import type { Human } from "./types";
 import "./Humans.css";
 
-const Humans = () => {
+interface HumansProps {
+  renderMode: string;
+}
+
+const Humans = (props: HumansProps) => {
   const maleNames = [
     "Alex", "Ben", "Chris", "Daniel", "Ethan", "Felix", "Gabriel", "Henry",
     "Isaac", "Jack", "Kevin", "Liam", "Mason", "Nathan", "Oliver", "Patrick",
@@ -412,6 +416,7 @@ const Humans = () => {
   return (
     <div class="three-d-editor">
       <ThreeDViewport
+        renderMode={props.renderMode}
         onAddHuman={addHuman}
         mouldRadius={debouncedMouldRadius()}
         voxelResolution={voxelResolution()}

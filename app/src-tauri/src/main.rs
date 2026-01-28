@@ -5,11 +5,13 @@ mod asset_manager;
 mod settings;
 mod mesh;
 mod mesh_generation;
+mod gpu_renderer;
 
 use mesh::MeshData;
-use tauri::{Manager, Listener, Emitter};
+use tauri::{Manager, Listener, Emitter, async_runtime, RunEvent, WindowEvent};
 use tokio::sync::oneshot;
 use tokio::time;
+use std::sync::Arc;
 
 // A helper function to serialize mesh data into a byte buffer
 fn serialize_mesh_to_bytes(mesh: MeshData) -> Vec<u8> {
@@ -156,9 +158,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .setup(|_app| {
+        .setup(|app| {
             // Clean up stale .blend files from previous session
             println!("BuildHuman starting up...");
+
+            // Check if GPU mode is enabled and initialize renderer on main thread
+            let settings = settings::load_settings_sync();
+            if settings.render_mode == "gpu" {
+                println!("GPU mode enabled, initializing wgpu renderer...");
+
+                if let Some(window) = app.get_webview_window("main") {
+                    // Get actual physical size and scale factor (accounts for Retina/HiDPI)
+                    let size = window.inner_size().unwrap_or(tauri::PhysicalSize { width: 1400, height: 900 });
+                    let scale_factor = window.scale_factor().unwrap_or(2.0);
+                    let width = size.width;
+                    let height = size.height;
+                    println!("Window physical size: {}x{}, scale factor: {}", width, height, scale_factor);
+
+                    // Store scale factor for resize handler
+                    gpu_renderer::set_scale_factor(scale_factor);
+
+                    let wgpu_state = async_runtime::block_on(
+                        gpu_renderer::GpuRenderer::new(&window, 0, 0, width, height)
+                    );
+
+                    match wgpu_state {
+                        Ok(renderer) => {
+                            // Do an initial render with UI bounds using physical size
+                            let (vertices, indices) = gpu_renderer::generate_ui_bounds(width, height, scale_factor);
+                            if let Err(e) = renderer.render(&vertices, &indices) {
+                                println!("Initial render failed: {}", e);
+                            } else {
+                                println!("GPU renderer initialized and rendered UI bounds");
+                            }
+                            gpu_renderer::set_global_renderer(renderer);
+                        }
+                        Err(e) => {
+                            println!("Failed to initialize GPU renderer: {}", e);
+                        }
+                    }
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -180,9 +221,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             update_skeleton,
             update_moulds,
             get_profile_control_points,
+            gpu_renderer::init_gpu_renderer,
+            gpu_renderer::update_gpu_viewport,
+            gpu_renderer::resize_gpu_window,
+            gpu_renderer::render_mesh_gpu,
+            gpu_renderer::shutdown_gpu_renderer,
         ])
-        .run(generate_tauri_context())
-        .expect("error while running tauri application");
+        .build(generate_tauri_context())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            if let RunEvent::WindowEvent {
+                event: WindowEvent::Resized(size),
+                ..
+            } = event
+            {
+                // Reconfigure the wgpu surface on resize
+                gpu_renderer::handle_window_resize(size.width, size.height);
+            }
+        });
 
     Ok(())
 }

@@ -28,6 +28,11 @@ html, body, #root {
   color: var(--text-primary);
 }
 
+/* GPU mode: transparent backgrounds to let wgpu render through */
+html.gpu-mode, html.gpu-mode body, html.gpu-mode #root, html.gpu-mode .app, html.gpu-mode .viewport {
+  background: transparent !important;
+}
+
 .app {
   display: flex;
   flex-direction: column;

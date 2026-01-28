@@ -32,6 +32,7 @@ interface AppSettings {
   custom_assets_folder: string;
   moderator_api_key: string;
   moderator_mode: boolean;
+  render_mode: string;
 }
 
 const Settings = (_props: SettingsProps) => {
@@ -46,6 +47,7 @@ const Settings = (_props: SettingsProps) => {
     custom_assets_folder: "",
     moderator_api_key: "",
     moderator_mode: false,
+    render_mode: "cpu",
   });
   const [showToast, setShowToast] = createSignal(false);
   const [toastMessage, setToastMessage] = createSignal("");
@@ -63,6 +65,10 @@ const Settings = (_props: SettingsProps) => {
   const loadSettings = async () => {
     try {
       const loadedSettings = await invoke<AppSettings>("get_app_settings");
+      // Ensure render_mode has a default value if not present (for backwards compatibility)
+      if (!loadedSettings.render_mode) {
+        loadedSettings.render_mode = "cpu";
+      }
       setSettings(loadedSettings);
     } catch (error) {
       console.error("Failed to load settings:", error);
@@ -204,6 +210,14 @@ const Settings = (_props: SettingsProps) => {
             <span class="tree-label">General</span>
           </div>
           <div
+            class={`tree-item ${activeCategory() === "rendering" ? "active" : ""}`}
+            onClick={() => setActiveCategory("rendering")}
+          >
+            <span class="tree-icon">•</span>
+            <Icon name="eye" size={16} class="tree-icon-svg" />
+            <span class="tree-label">Rendering</span>
+          </div>
+          <div
             class={`tree-item ${activeCategory() === "cache" ? "active" : ""}`}
             onClick={() => setActiveCategory("cache")}
           >
@@ -223,6 +237,80 @@ const Settings = (_props: SettingsProps) => {
       </div>
 
       <div class="settings-content">
+            {activeCategory() === "rendering" && (
+              <div class="settings-section">
+                <h3>Rendering Settings</h3>
+
+                <div class="setting-group">
+                  <label class="setting-label">Render Mode</label>
+                  <p class="setting-description">Choose between WebGL-based rendering (Three.js) or native GPU-accelerated rendering (wgpu)</p>
+
+                  <div class="editor-options">
+                    <label class={`editor-option ${settings().render_mode === "cpu" ? "selected" : ""}`}>
+                      <input
+                        type="radio"
+                        name="render_mode"
+                        value="cpu"
+                        checked={settings().render_mode === "cpu"}
+                        onChange={(e) => {
+                          setSettings({ ...settings(), render_mode: e.currentTarget.value });
+                          autoSaveSettings();
+                        }}
+                      />
+                      <div class="editor-info">
+                        <span class="editor-name">WebGL (Three.js)</span>
+                        <span class="editor-status">Default</span>
+                      </div>
+                    </label>
+
+                    <label class="editor-option disabled">
+                      <input type="radio" name="render_mode" value="webgpu" disabled />
+                      <div class="editor-info">
+                        <span class="editor-name">WebGPU (Three.js)</span>
+                        <span class="editor-status coming-soon">Coming Soon</span>
+                      </div>
+                    </label>
+
+                    <label class={`editor-option ${settings().render_mode === "gpu" ? "selected" : ""}`}>
+                      <input
+                        type="radio"
+                        name="render_mode"
+                        value="gpu"
+                        checked={settings().render_mode === "gpu"}
+                        onChange={(e) => {
+                          setSettings({ ...settings(), render_mode: e.currentTarget.value });
+                          autoSaveSettings();
+                        }}
+                      />
+                      <div class="editor-info">
+                        <span class="editor-name">Native GPU (wgpu)</span>
+                        <span class="editor-status">Experimental</span>
+                      </div>
+                    </label>
+                  </div>
+
+                  <p class="setting-note" style="margin-top: 0.75rem;">
+                    <strong>WebGL:</strong> Three.js with WebGL backend (maximum compatibility)<br/>
+                    <strong>WebGPU:</strong> Three.js with WebGPU backend (coming soon, better performance)<br/>
+                    <strong>Native GPU:</strong> Direct hardware rendering via wgpu (maximum performance)
+                  </p>
+
+                  {settings().render_mode === "gpu" && (
+                    <div class="setting-note" style="margin-top: 0.75rem; padding: 0.75rem; background: rgba(255, 165, 0, 0.1); border-radius: 4px; border-left: 3px solid orange;">
+                      <strong>Note:</strong> GPU rendering is experimental.
+                      <button
+                        class="settings-btn"
+                        style="margin-left: 0.5rem; padding: 0.25rem 0.5rem; font-size: 0.9em;"
+                        onClick={() => window.location.reload()}
+                      >
+                        Reload Now
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {activeCategory() === "cache" && (
               <div class="settings-section">
                 <h3>Cache Management</h3>
