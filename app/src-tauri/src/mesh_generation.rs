@@ -8,6 +8,8 @@ use crate::mesh::{
 };
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
+use crate::mesh::types::Vec3;
+use std::f32::consts::PI;
 
 /// Global state holding the skeleton and mould manager
 pub struct MeshGeneratorState {
@@ -410,8 +412,7 @@ fn extract_mesh_ring_vertices(
     mesh: &MeshData,
     mould_manager: &MouldManager,
 ) -> Result<Vec<serde_json::Value>, String> {
-    use crate::mesh::types::Vec3;
-    use std::f32::consts::PI;
+
 
     let mut ring_points = Vec::new();
 

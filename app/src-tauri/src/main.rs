@@ -183,10 +183,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
 
                     match wgpu_state {
-                        Ok(renderer) => {
+                        Ok(mut renderer) => {
                             // Do an initial render with UI bounds using physical size
                             let (vertices, indices) = gpu_renderer::generate_ui_bounds(width, height, scale_factor);
-                            if let Err(e) = renderer.render(&vertices, &indices) {
+                            if let Err(e) = renderer.render_with_scene(&vertices, &indices, &[], &[]) {
                                 println!("Initial render failed: {}", e);
                             } else {
                                 println!("GPU renderer initialized and rendered UI bounds");

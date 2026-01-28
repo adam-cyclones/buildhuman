@@ -80,6 +80,14 @@ pub struct GpuRenderer {
     camera_bind_group: wgpu::BindGroup,
     camera_bind_group_layout: wgpu::BindGroupLayout,
     viewport: ViewportInfo,
+    ui_vertex_buffer: wgpu::Buffer,
+    ui_index_buffer: wgpu::Buffer,
+    ui_vertex_buffer_size: u64,
+    ui_index_buffer_size: u64,
+    scene_vertex_buffer: wgpu::Buffer,
+    scene_index_buffer: wgpu::Buffer,
+    scene_vertex_buffer_size: u64,
+    scene_index_buffer_size: u64,
 }
 
 impl GpuRenderer {
@@ -329,6 +337,17 @@ impl GpuRenderer {
             cache: None,
         });
 
+        let empty_buffer_desc = wgpu::util::BufferInitDescriptor {
+            label: Some("Empty Placeholder Buffer"),
+            contents: &[0; 4], // Smallest possible non-empty buffer
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+        };
+
+        let ui_vertex_buffer = device.create_buffer_init(&empty_buffer_desc);
+        let ui_index_buffer = device.create_buffer_init(&empty_buffer_desc);
+        let scene_vertex_buffer = device.create_buffer_init(&empty_buffer_desc);
+        let scene_index_buffer = device.create_buffer_init(&empty_buffer_desc);
+
         Ok(Self {
             device,
             queue,
@@ -345,6 +364,14 @@ impl GpuRenderer {
                 width: viewport_width,
                 height: viewport_height,
             },
+            ui_vertex_buffer,
+            ui_index_buffer,
+            ui_vertex_buffer_size: 0,
+            ui_index_buffer_size: 0,
+            scene_vertex_buffer,
+            scene_index_buffer,
+            scene_vertex_buffer_size: 0,
+            scene_index_buffer_size: 0,
         })
     }
 
@@ -386,16 +413,11 @@ impl GpuRenderer {
         }
     }
 
-    /// Render UI backgrounds and optionally 3D scene content
-    /// ui_vertices/ui_indices: UI background quads (rendered to full surface)
-    /// scene_vertices/scene_indices: 3D content (rendered within scissor rect)
-    pub fn render(&self, vertices: &[f32], indices: &[u32]) -> Result<(), String> {
-        self.render_with_scene(vertices, indices, &[], &[])
-    }
+
 
     /// Render UI backgrounds and 3D scene content with scissor rect
     pub fn render_with_scene(
-        &self,
+        &mut self,
         ui_vertices: &[f32],
         ui_indices: &[u32],
         scene_vertices: &[f32],
@@ -406,47 +428,91 @@ impl GpuRenderer {
             return Ok(());
         }
 
-        // Create UI buffers
-        let ui_vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("UI Vertex Buffer"),
-                contents: bytemuck::cast_slice(ui_vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        // Handle UI Vertex Buffer
+        let vertex_stride = std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress; // 6 floats per vertex
+        let required_ui_vertex_size = (ui_vertices.len() * std::mem::size_of::<f32>()) as u64;
 
-        let ui_index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("UI Index Buffer"),
-                contents: bytemuck::cast_slice(ui_indices),
-                usage: wgpu::BufferUsages::INDEX,
+        if required_ui_vertex_size > self.ui_vertex_buffer_size {
+            // Re-allocate if new data is larger
+            println!("Re-allocating UI vertex buffer. Old size: {}, New size: {}", self.ui_vertex_buffer_size, required_ui_vertex_size);
+            self.ui_vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("UI Vertex Buffer"),
+                size: required_ui_vertex_size.max(vertex_stride), // Ensure at least one vertex size
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             });
+            self.ui_vertex_buffer_size = required_ui_vertex_size;
+        }
+
+        // Write data to UI Vertex Buffer
+        if !ui_vertices.is_empty() {
+            self.queue.write_buffer(&self.ui_vertex_buffer, 0, bytemuck::cast_slice(ui_vertices));
+        }
+
+        // Handle UI Index Buffer
+        let required_ui_index_size = (ui_indices.len() * std::mem::size_of::<u32>()) as u64;
+
+        if required_ui_index_size > self.ui_index_buffer_size {
+            // Re-allocate if new data is larger
+            println!("Re-allocating UI index buffer. Old size: {}, New size: {}", self.ui_index_buffer_size, required_ui_index_size);
+            self.ui_index_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("UI Index Buffer"),
+                size: required_ui_index_size.max(std::mem::size_of::<u32>() as u64), // Ensure at least one index size
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.ui_index_buffer_size = required_ui_index_size;
+        }
+
+        // Write data to UI Index Buffer
+        if !ui_indices.is_empty() {
+            self.queue.write_buffer(&self.ui_index_buffer, 0, bytemuck::cast_slice(ui_indices));
+        }
 
         let ui_num_indices = ui_indices.len() as u32;
 
-        // Create scene buffers if we have scene data
-        let (scene_vertex_buffer, scene_index_buffer, scene_num_indices) = if !scene_vertices.is_empty() && !scene_indices.is_empty() {
-            let vb = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let mut scene_num_indices = 0;
+        if !scene_vertices.is_empty() && !scene_indices.is_empty() {
+            scene_num_indices = scene_indices.len() as u32;
+
+            // Handle Scene Vertex Buffer
+            let vertex_stride = std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress; // 6 floats per vertex
+            let required_scene_vertex_size = (scene_vertices.len() * std::mem::size_of::<f32>()) as u64;
+
+            if required_scene_vertex_size > self.scene_vertex_buffer_size {
+                // Re-allocate if new data is larger
+                println!("Re-allocating Scene vertex buffer. Old size: {}, New size: {}", self.scene_vertex_buffer_size, required_scene_vertex_size);
+                self.scene_vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("Scene Vertex Buffer"),
-                    contents: bytemuck::cast_slice(scene_vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
+                    size: required_scene_vertex_size.max(vertex_stride), // Ensure at least one vertex size
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
                 });
+                self.scene_vertex_buffer_size = required_scene_vertex_size;
+            }
 
-            let ib = self
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            // Write data to Scene Vertex Buffer
+            self.queue.write_buffer(&self.scene_vertex_buffer, 0, bytemuck::cast_slice(scene_vertices));
+
+
+            // Handle Scene Index Buffer
+            let required_scene_index_size = (scene_indices.len() * std::mem::size_of::<u32>()) as u64;
+
+            if required_scene_index_size > self.scene_index_buffer_size {
+                // Re-allocate if new data is larger
+                println!("Re-allocating Scene index buffer. Old size: {}, New size: {}", self.scene_index_buffer_size, required_scene_index_size);
+                self.scene_index_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("Scene Index Buffer"),
-                    contents: bytemuck::cast_slice(scene_indices),
-                    usage: wgpu::BufferUsages::INDEX,
+                    size: required_scene_index_size.max(std::mem::size_of::<u32>() as u64), // Ensure at least one index size
+                    usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
                 });
+                self.scene_index_buffer_size = required_scene_index_size;
+            }
 
-            (Some(vb), Some(ib), scene_indices.len() as u32)
-        } else {
-            (None, None, 0)
-        };
+            // Write data to Scene Index Buffer
+            self.queue.write_buffer(&self.scene_index_buffer, 0, bytemuck::cast_slice(scene_indices));
+        }
 
         // Get current surface texture
         let output = self
@@ -503,12 +569,12 @@ impl GpuRenderer {
                 self.surface_config.height,
             );
 
-            render_pass.set_vertex_buffer(0, ui_vertex_buffer.slice(..));
-            render_pass.set_index_buffer(ui_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.set_vertex_buffer(0, self.ui_vertex_buffer.slice(..));
+            render_pass.set_index_buffer(self.ui_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.draw_indexed(0..ui_num_indices, 0, 0..1);
 
             // === Phase 2: Draw 3D scene (with camera projection) ===
-            if let (Some(ref scene_vb), Some(ref scene_ib)) = (&scene_vertex_buffer, &scene_index_buffer) {
+            if scene_num_indices > 0 {
                 render_pass.set_pipeline(&self.scene_render_pipeline);
                 render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
 
@@ -535,8 +601,8 @@ impl GpuRenderer {
                     self.viewport.height,
                 );
 
-                render_pass.set_vertex_buffer(0, scene_vb.slice(..));
-                render_pass.set_index_buffer(scene_ib.slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.set_vertex_buffer(0, self.scene_vertex_buffer.slice(..));
+                render_pass.set_index_buffer(self.scene_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 render_pass.draw_indexed(0..scene_num_indices, 0, 0..1);
             }
         }
@@ -692,7 +758,7 @@ pub fn init_gpu_renderer<R: Runtime>(
     viewport_height: u32,
 ) -> Result<String, String> {
     // Must run on main thread for Metal
-    let renderer = pollster::block_on(GpuRenderer::new(&window, viewport_x, viewport_y, viewport_width, viewport_height))?;
+    let mut renderer = pollster::block_on(GpuRenderer::new(&window, viewport_x, viewport_y, viewport_width, viewport_height))?;
 
     // Do an initial render with a test triangle
     let vertices: Vec<f32> = vec![
@@ -701,7 +767,7 @@ pub fn init_gpu_renderer<R: Runtime>(
         0.5, -0.5, 0.0,  // bottom right
     ];
     let indices: Vec<u32> = vec![0, 1, 2];
-    renderer.render(&vertices, &indices)?;
+    renderer.render_with_scene(&vertices, &indices, &[], &[])?;
 
     let mut global_renderer = GPU_RENDERER.lock().unwrap();
     *global_renderer = Some(renderer);
@@ -758,10 +824,10 @@ pub async fn render_mesh_gpu(
     vertices: Vec<f32>,
     indices: Vec<u32>,
 ) -> Result<(), String> {
-    let renderer = GPU_RENDERER.lock().unwrap();
+    let mut renderer = GPU_RENDERER.lock().unwrap();
 
-    if let Some(ref renderer) = *renderer {
-        renderer.render(&vertices, &indices)?;
+    if let Some(ref mut renderer) = *renderer {
+        renderer.render_with_scene(&vertices, &indices, &[], &[])?;
         Ok(())
     } else {
         Err("GPU renderer not initialized".to_string())
@@ -777,9 +843,9 @@ pub async fn render_scene_gpu(
     println!("render_scene_gpu called with {} vertices, {} indices",
              scene_vertices.len(), scene_indices.len());
 
-    let renderer = GPU_RENDERER.lock().unwrap();
+    let mut renderer = GPU_RENDERER.lock().unwrap();
 
-    if let Some(ref renderer) = *renderer {
+    if let Some(ref mut renderer) = *renderer {
         // Convert f64 to f32
         let scene_vertices_f32: Vec<f32> = scene_vertices.iter().map(|&v| v as f32).collect();
 
