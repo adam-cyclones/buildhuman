@@ -26,9 +26,98 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
   const [profileEditMode] = createSignal(true);
   const [selectedProfileRing, setSelectedProfileRing] = createSignal<{mouldId: string; segmentIndex: number} | null>(null);
 
+  // Orbit camera state
+  const [cameraYaw, setCameraYaw] = createSignal(0);
+  const [cameraPitch, setCameraPitch] = createSignal(0);
+  const [cameraDistance, setCameraDistance] = createSignal(2.0);
+
+  // Mouse drag state
+  let isDragging = false;
+  let lastMouseX = 0;
+  let lastMouseY = 0;
+
+  // Camera update state - prevent overlapping calls
+  let cameraUpdatePending = false;
+  let pendingCameraState: { yaw: number; pitch: number; distance: number } | null = null;
+
   // Handle profile ring selection (now managed entirely within viewport)
   const handleProfileRingClicked = (mouldId: string, segmentIndex: number) => {
     setSelectedProfileRing({ mouldId, segmentIndex });
+  };
+
+  // Update camera on Rust side with coalescing to prevent flickering
+  const updateCamera = async (yaw: number, pitch: number, distance: number) => {
+    if (props.renderMode !== "gpu") return;
+
+    // Store the latest state
+    pendingCameraState = { yaw, pitch, distance };
+
+    // If an update is already in flight, let it pick up the new state when done
+    if (cameraUpdatePending) return;
+
+    cameraUpdatePending = true;
+
+    try {
+      while (pendingCameraState) {
+        const state = pendingCameraState;
+        pendingCameraState = null;
+        await invoke("update_gpu_camera", state);
+      }
+    } catch (error) {
+      console.error("Failed to update camera:", error);
+    } finally {
+      cameraUpdatePending = false;
+    }
+  };
+
+  // Mouse event handlers for orbit camera
+  const handleMouseDown = (e: MouseEvent) => {
+    if (props.renderMode !== "gpu") return;
+    isDragging = true;
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+    e.preventDefault();
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!isDragging || props.renderMode !== "gpu") return;
+
+    const deltaX = e.clientX - lastMouseX;
+    const deltaY = e.clientY - lastMouseY;
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+
+    // Sensitivity for rotation
+    const sensitivity = 0.01;
+
+    const newYaw = cameraYaw() + deltaX * sensitivity;
+    const newPitch = cameraPitch() - deltaY * sensitivity;
+
+    // Clamp pitch to avoid gimbal lock
+    const clampedPitch = Math.max(-1.5, Math.min(1.5, newPitch));
+
+    setCameraYaw(newYaw);
+    setCameraPitch(clampedPitch);
+    void updateCamera(newYaw, clampedPitch, cameraDistance());
+  };
+
+  const handleMouseUp = () => {
+    isDragging = false;
+  };
+
+  const handleWheel = (e: WheelEvent) => {
+    if (props.renderMode !== "gpu") return;
+    e.preventDefault();
+
+    // Zoom sensitivity
+    const zoomFactor = 0.001;
+    const newDistance = cameraDistance() + e.deltaY * zoomFactor * cameraDistance();
+
+    // Clamp distance
+    const clampedDistance = Math.max(0.5, Math.min(10, newDistance));
+
+    setCameraDistance(clampedDistance);
+    void updateCamera(cameraYaw(), cameraPitch(), clampedDistance);
   };
 
   // GPU renderer is initialized in Rust's setup() - just update viewport bounds here
@@ -125,11 +214,13 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
             onProfileRingClicked={handleProfileRingClicked}
           />
         ) : (
-          <canvas
-            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: auto; background: transparent;"
-            onMouseDown={(e) => console.log('Canvas mouse down', e)}
-            onMouseMove={(e) => console.log('Canvas mouse move', e)}
-            onMouseUp={(e) => console.log('Canvas mouse up', e)}
+          <div
+            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: auto; background: transparent; cursor: grab;"
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onWheel={handleWheel}
           />
         )}
       </div>

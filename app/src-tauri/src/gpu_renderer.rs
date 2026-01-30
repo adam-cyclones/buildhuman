@@ -11,6 +11,182 @@ pub struct ViewportInfo {
     pub height: u32,
 }
 
+/// Orbit camera state - spherical coordinates around a target point
+#[derive(Clone, Copy)]
+pub struct OrbitCamera {
+    pub yaw: f32,      // Horizontal rotation (radians)
+    pub pitch: f32,    // Vertical rotation (radians), clamped to avoid gimbal lock
+    pub distance: f32, // Distance from target
+    pub target: [f32; 3], // Point the camera orbits around
+}
+
+impl Default for OrbitCamera {
+    fn default() -> Self {
+        Self {
+            yaw: 0.0,
+            pitch: 0.0,
+            distance: 2.0,
+            target: [0.0, 0.3, 0.0], // Center on the mesh (roughly torso height)
+        }
+    }
+}
+
+impl OrbitCamera {
+    /// Calculate camera position from spherical coordinates
+    pub fn position(&self) -> [f32; 3] {
+        let cos_pitch = self.pitch.cos();
+        let sin_pitch = self.pitch.sin();
+        let cos_yaw = self.yaw.cos();
+        let sin_yaw = self.yaw.sin();
+
+        [
+            self.target[0] + self.distance * cos_pitch * sin_yaw,
+            self.target[1] + self.distance * sin_pitch,
+            self.target[2] + self.distance * cos_pitch * cos_yaw,
+        ]
+    }
+
+    /// Build view matrix (look-at)
+    pub fn view_matrix(&self) -> [[f32; 4]; 4] {
+        let eye = self.position();
+        let target = self.target;
+
+        // Forward vector (from eye to target) - this becomes -Z in view space
+        let f = normalize([
+            target[0] - eye[0],
+            target[1] - eye[1],
+            target[2] - eye[2],
+        ]);
+
+        // Right vector (cross product of forward and world up)
+        let up = [0.0_f32, 1.0, 0.0];
+        let r = normalize(cross(f, up));
+
+        // Recalculate up to be orthogonal
+        let u = cross(r, f);
+
+        // View matrix: rotation part is transpose of [r, u, -f], then translation
+        // Column-major for WGSL
+        [
+            [r[0], u[0], -f[0], 0.0],
+            [r[1], u[1], -f[1], 0.0],
+            [r[2], u[2], -f[2], 0.0],
+            [-dot(r, eye), -dot(u, eye), dot(f, eye), 1.0],
+        ]
+    }
+
+    /// Build orthographic projection matrix
+    pub fn ortho_projection(&self, aspect: f32) -> [[f32; 4]; 4] {
+        // Orthographic size scales with distance for intuitive zoom
+        let half_size = self.distance * 0.5;
+
+        let (scale_x, scale_y) = if aspect > 1.0 {
+            (1.0 / (half_size * aspect), 1.0 / half_size)
+        } else {
+            (1.0 / half_size, aspect / half_size)
+        };
+
+        // Orthographic projection for WGPU (Z maps to [0, 1])
+        // Near/far planes in view space (negative Z is forward)
+        let near = 0.1_f32;
+        let far = 10.0_f32;
+
+        // Standard orthographic projection for WGPU NDC
+        // Z in view space: -near to -far maps to NDC Z: 0 to 1
+        [
+            [scale_x, 0.0, 0.0, 0.0],
+            [0.0, scale_y, 0.0, 0.0],
+            [0.0, 0.0, 1.0 / (far - near), 0.0],
+            [0.0, 0.0, -near / (far - near), 1.0],
+        ]
+    }
+
+    /// Build combined view-projection matrix
+    pub fn view_projection(&self, aspect: f32) -> [[f32; 4]; 4] {
+        let view = self.view_matrix();
+        let proj = self.ortho_projection(aspect);
+        mat4_mul(proj, view)
+    }
+
+    /// Build CameraUniform from current state
+    pub fn to_uniform(&self, aspect: f32) -> CameraUniform {
+        // Use simpler approach: just rotation around Y axis for yaw, X for pitch
+        // Camera orbits around target at given distance
+
+        let cos_yaw = self.yaw.cos();
+        let sin_yaw = self.yaw.sin();
+        let cos_pitch = self.pitch.cos();
+        let sin_pitch = self.pitch.sin();
+
+        // Rotation matrix: first pitch (X), then yaw (Y)
+        // This rotates the scene, equivalent to orbiting camera
+        let rot = [
+            [cos_yaw, sin_yaw * sin_pitch, sin_yaw * cos_pitch, 0.0],
+            [0.0, cos_pitch, -sin_pitch, 0.0],
+            [-sin_yaw, cos_yaw * sin_pitch, cos_yaw * cos_pitch, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+
+        // Orthographic scale based on distance
+        let half_size = self.distance * 0.5;
+        let (scale_x, scale_y) = if aspect > 1.0 {
+            (1.0 / (half_size * aspect), 1.0 / half_size)
+        } else {
+            (1.0 / half_size, aspect / half_size)
+        };
+
+        // Simple ortho projection (same as before that worked)
+        let proj = [
+            [scale_x, 0.0, 0.0, 0.0],
+            [0.0, scale_y, 0.0, 0.0],
+            [0.0, 0.0, 0.1, 0.0],
+            [0.0, -self.target[1] * scale_y, 0.5, 1.0],
+        ];
+
+        // Combine: proj * rot
+        let view_proj = mat4_mul(proj, rot);
+
+        CameraUniform {
+            view_proj,
+            view: rot,
+            camera_pos: self.position(),
+            _padding: 0.0,
+        }
+    }
+}
+
+// Matrix/vector math helpers
+fn normalize(v: [f32; 3]) -> [f32; 3] {
+    let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if len > 0.0001 {
+        [v[0] / len, v[1] / len, v[2] / len]
+    } else {
+        [0.0, 0.0, 1.0]
+    }
+}
+
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn mat4_mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    let mut result = [[0.0_f32; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            result[i][j] = a[0][j] * b[i][0] + a[1][j] * b[i][1] + a[2][j] * b[i][2] + a[3][j] * b[i][3];
+        }
+    }
+    result
+}
+
 /// UI layout bounds (in pixels from top-left)
 pub struct UiBounds {
     pub menu_bar_height: u32,
@@ -120,28 +296,6 @@ impl Default for LightUniform {
     }
 }
 
-// Helper math functions
-fn normalize(v: [f32; 3]) -> [f32; 3] {
-    let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-    if len > 0.0 {
-        [v[0] / len, v[1] / len, v[2] / len]
-    } else {
-        v
-    }
-}
-
-fn mat4_multiply(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
-    let mut result = [[0.0_f32; 4]; 4];
-    for i in 0..4 {
-        for j in 0..4 {
-            for k in 0..4 {
-                result[i][j] += a[k][j] * b[i][k];
-            }
-        }
-    }
-    result
-}
-
 fn create_depth_texture(
     device: &Device,
     width: u32,
@@ -180,6 +334,7 @@ pub struct GpuRenderer {
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
     viewport: ViewportInfo,
+    camera: OrbitCamera,
     ui_vertex_buffer: wgpu::Buffer,
     ui_index_buffer: wgpu::Buffer,
     ui_vertex_buffer_size: u64,
@@ -520,6 +675,7 @@ impl GpuRenderer {
                 width: viewport_width,
                 height: viewport_height,
             },
+            camera: OrbitCamera::default(),
             ui_vertex_buffer,
             ui_index_buffer,
             ui_vertex_buffer_size: 0,
@@ -528,19 +684,33 @@ impl GpuRenderer {
             scene_index_buffer,
             scene_vertex_buffer_size: 0,
             scene_index_buffer_size: 0,
-            ui_num_indices: 0, // Added previously
-            scene_num_indices: 0, // Added previously
+            ui_num_indices: 0,
+            scene_num_indices: 0,
         })
     }
 
-    /// Update camera projection based on viewport aspect ratio
-    pub fn update_camera_aspect(&self) {
+    /// Update camera uniform buffer from current orbit camera state
+    pub fn update_camera_uniform(&self) {
         if self.viewport.width == 0 || self.viewport.height == 0 {
             return;
         }
         let aspect = self.viewport.width as f32 / self.viewport.height as f32;
-        let camera_uniform = CameraUniform::orthographic(aspect);
+        let camera_uniform = self.camera.to_uniform(aspect);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_uniform]));
+    }
+
+    /// Update orbit camera parameters and refresh the uniform buffer
+    pub fn set_camera(&mut self, yaw: f32, pitch: f32, distance: f32) {
+        // Clamp pitch to avoid gimbal lock (slightly less than 90 degrees)
+        self.camera.pitch = pitch.clamp(-1.5, 1.5);
+        self.camera.yaw = yaw;
+        self.camera.distance = distance.max(0.5); // Minimum distance
+        self.update_camera_uniform();
+    }
+
+    /// Get current camera state
+    pub fn get_camera(&self) -> (f32, f32, f32) {
+        (self.camera.yaw, self.camera.pitch, self.camera.distance)
     }
 
     /// Update UI vertex and index buffers, caching the number of indices
@@ -637,11 +807,7 @@ impl GpuRenderer {
         };
 
         // Update camera projection for new aspect ratio
-        self.update_camera_aspect();
-
-        println!("Viewport updated: requested ({}, {}, {}, {}), actual ({}, {}, {}, {})",
-                 x, y, width, height,
-                 self.viewport.x, self.viewport.y, self.viewport.width, self.viewport.height);
+        self.update_camera_uniform();
     }
 
     pub fn resize_window(&mut self, window_width: u32, window_height: u32) {
@@ -978,6 +1144,36 @@ pub async fn resize_gpu_window(
     if let Some(ref mut renderer) = *renderer {
         renderer.resize_window(window_width, window_height);
         Ok(())
+    } else {
+        Err("GPU renderer not initialized".to_string())
+    }
+}
+
+/// Update the orbit camera and re-render
+#[tauri::command]
+pub async fn update_gpu_camera(
+    yaw: f32,
+    pitch: f32,
+    distance: f32,
+) -> Result<(), String> {
+    let mut renderer = GPU_RENDERER.lock().unwrap();
+
+    if let Some(ref mut renderer) = *renderer {
+        renderer.set_camera(yaw, pitch, distance);
+        renderer.render()?;
+        Ok(())
+    } else {
+        Err("GPU renderer not initialized".to_string())
+    }
+}
+
+/// Get current camera state (for syncing UI)
+#[tauri::command]
+pub async fn get_gpu_camera() -> Result<(f32, f32, f32), String> {
+    let renderer = GPU_RENDERER.lock().unwrap();
+
+    if let Some(ref renderer) = *renderer {
+        Ok(renderer.get_camera())
     } else {
         Err("GPU renderer not initialized".to_string())
     }
