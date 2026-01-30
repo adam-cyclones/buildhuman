@@ -178,12 +178,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Store scale factor for resize handler
                     gpu_renderer::set_scale_factor(scale_factor);
 
-                    let wgpu_state = async_runtime::block_on(
-                        gpu_renderer::GpuRenderer::new(&window, 0, 0, width, height)
-                    );
+                    // Use catch_unwind to prevent GPU init failures from crashing the app
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        async_runtime::block_on(
+                            gpu_renderer::GpuRenderer::new(&window, 0, 0, width, height)
+                        )
+                    }));
 
-                    match wgpu_state {
-                        Ok(mut renderer) => {
+                    match result {
+                        Ok(Ok(mut renderer)) => {
                             // Do an initial render with UI bounds using physical size
                             let (vertices, indices) = gpu_renderer::generate_ui_bounds(width, height, scale_factor);
                             if let Err(e) = renderer.render_with_scene(&vertices, &indices, &[], &[]) {
@@ -193,8 +196,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             gpu_renderer::set_global_renderer(renderer);
                         }
-                        Err(e) => {
+                        Ok(Err(e)) => {
                             println!("Failed to initialize GPU renderer: {}", e);
+                        }
+                        Err(panic_info) => {
+                            println!("GPU renderer initialization panicked: {:?}", panic_info);
                         }
                     }
                 }
@@ -226,6 +232,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             gpu_renderer::resize_gpu_window,
             gpu_renderer::render_mesh_gpu,
             gpu_renderer::render_scene_gpu,
+            gpu_renderer::generate_and_render_gpu,
             gpu_renderer::shutdown_gpu_renderer,
         ])
         .build(generate_tauri_context())

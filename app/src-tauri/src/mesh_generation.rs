@@ -46,6 +46,82 @@ static MESH_STATE: Lazy<Mutex<MeshGeneratorState>> = Lazy::new(|| {
     Mutex::new(MeshGeneratorState::new())
 });
 
+/// Ensure default skeleton and moulds exist if not initialized.
+/// Creates a simple test capsule for GPU rendering testing.
+pub fn ensure_default_state() {
+    let mut state = MESH_STATE.lock().unwrap();
+
+    if state.mould_manager.is_some() {
+        return; // Already initialized
+    }
+
+    // Create minimal skeleton with just root and a few joints
+    use crate::mesh::skeleton::Joint;
+    use crate::mesh::mould::Mould;
+    use crate::mesh::types::{Quat, MouldShape};
+    use nalgebra::Vector3;
+
+    let identity_quat = Quat::identity();
+
+    let mut skeleton = Skeleton::new();
+
+    skeleton.add_joint(Joint {
+        id: "root".to_string(),
+        local_offset: Vector3::new(0.0, 0.0, 0.0),
+        local_rotation: identity_quat,
+        parent_id: None,
+        children: vec!["torso".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "torso".to_string(),
+        local_offset: Vector3::new(0.0, 0.5, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("root".to_string()),
+        children: vec!["head".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "head".to_string(),
+        local_offset: Vector3::new(0.0, 0.3, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("torso".to_string()),
+        children: vec![],
+    });
+
+    state.skeleton = Some(skeleton.clone());
+
+    // Create mould manager with simple capsules
+    let mut mould_manager = MouldManager::new();
+    mould_manager.set_skeleton(skeleton);
+
+    // Add a simple torso capsule
+    mould_manager.add_mould(Mould {
+        id: "torso".to_string(),
+        shape: MouldShape::Capsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.0, 0.5, 0.0)),
+        radius: 0.15,
+        blend_radius: 0.05,
+        parent_joint_id: Some("root".to_string()),
+        radial_profiles: None,
+        use_splines: false,
+    });
+
+    // Add a simple head sphere
+    mould_manager.add_mould(Mould {
+        id: "head".to_string(),
+        shape: MouldShape::Sphere,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: None,
+        radius: 0.12,
+        blend_radius: 0.03,
+        parent_joint_id: Some("head".to_string()),
+        radial_profiles: None,
+        use_splines: false,
+    });
+
+    state.mould_manager = Some(mould_manager);
+}
+
 /// Update the skeleton from TypeScript
 pub fn update_skeleton(joints: Vec<JointData>) {
     let mut state = MESH_STATE.lock().unwrap();
@@ -55,9 +131,6 @@ pub fn update_skeleton(joints: Vec<JointData>) {
     for joint_data in joints {
         skeleton.add_joint(joint_data.into());
     }
-
-    let num_joints = skeleton.get_joints().len();
-    println!("Skeleton updated with {} joints", num_joints);
 
     let moved_joint_ids = if let Some(prev) = prev_skeleton.as_ref() {
         compute_moved_joints(prev, &skeleton)
@@ -98,9 +171,6 @@ pub fn update_moulds(moulds: Vec<MouldData>) {
     if let Some(ref skeleton) = state.skeleton {
         mould_manager.set_skeleton(skeleton.clone());
     }
-
-    let num_moulds = mould_manager.get_moulds().len();
-    println!("Moulds updated with {} moulds", num_moulds);
 
     let mut dirty_bounds = None;
     let mut prev_mould_map = std::collections::HashMap::new();

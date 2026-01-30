@@ -56,12 +56,6 @@ export const syncToRustBackend = async (
       };
     });
 
-    // Debug: Log profiled capsule data being sent to Rust
-    const profiledCapsules = moulds.filter(m => m.shape === "ProfiledCapsule");
-    if (profiledCapsules.length > 0) {
-      console.log("Syncing profiled capsules to Rust:", profiledCapsules);
-    }
-
     // Send to Rust backend
     await invoke("update_skeleton", { joints });
     await invoke("update_moulds", { moulds });

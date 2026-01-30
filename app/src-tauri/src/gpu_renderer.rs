@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tauri::{Runtime, WebviewWindow, Manager};
 use wgpu::{
-    util::DeviceExt, Device, Queue, Surface, SurfaceConfiguration,
+    util::DeviceExt, Device, Queue, Surface, SurfaceConfiguration, TextureFormat,
 };
 
 pub struct ViewportInfo {
@@ -31,43 +31,139 @@ impl Default for UiBounds {
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    view: [[f32; 4]; 4],
+    camera_pos: [f32; 3],
+    _padding: f32, // Align to 16 bytes
 }
 
 impl CameraUniform {
     fn new() -> Self {
+        let identity = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
         Self {
-            view_proj: [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
+            view_proj: identity,
+            view: identity,
+            camera_pos: [0.0, 0.0, 3.0],
+            _padding: 0.0,
         }
     }
 
     /// Create orthographic projection that maintains aspect ratio
-    /// Objects at z=0 will appear at correct size, regardless of viewport aspect
+    /// Camera positioned at (0, 0, 5) looking at origin
     fn orthographic(aspect: f32) -> Self {
-        // Orthographic projection that shows -1 to 1 on the smaller axis
-        // and extends proportionally on the larger axis
-        let (scale_x, mut scale_y) = if aspect > 1.0 {
-            // Wider than tall: scale x to show more horizontal space
-            (1.0 / aspect, 1.0)
+        // Orthographic bounds - the mesh is roughly -0.2 to 0.8, so show -1 to 1
+        let half_size = 1.0_f32;
+
+        let (scale_x, scale_y) = if aspect > 1.0 {
+            (1.0 / (half_size * aspect), 1.0 / half_size)
         } else {
-            // Taller than wide: scale y to show more vertical space
-            (1.0, aspect)
+            (1.0 / half_size, aspect / half_size)
         };
-        scale_y = -scale_y; // Flip Y for WGPU's Y-down NDC
+
+        // Camera at (0, 0.3, 3) looking at (0, 0.3, 0) - center on the mesh
+        let camera_pos = [0.0_f32, 0.3, 3.0];
+
+        // Simple orthographic: just scale X and Y, and remap Z to [0,1]
+        // No view translation needed since we're doing orthographic
+        let view_proj = [
+            [scale_x, 0.0, 0.0, 0.0],
+            [0.0, scale_y, 0.0, 0.0],      // Y is not flipped - WGPU NDC is Y-up at clip space
+            [0.0, 0.0, 0.1, 0.0],          // Scale Z into reasonable depth range
+            [0.0, -0.3 * scale_y, 0.5, 1.0], // Translate to center mesh, offset Z to middle
+        ];
+
+        // View matrix for lighting calculations (identity since we're orthographic)
+        let view = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
 
         Self {
-            view_proj: [
-                [scale_x, 0.0, 0.0, 0.0],
-                [0.0, scale_y, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0],
-            ],
+            view_proj,
+            view,
+            camera_pos,
+            _padding: 0.0,
         }
     }
+}
+
+/// Light uniform data - must match shader layout
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct LightUniform {
+    direction: [f32; 3],
+    _padding1: f32,
+    color: [f32; 3],
+    _padding2: f32,
+    ambient: [f32; 3],
+    _padding3: f32,
+}
+
+impl Default for LightUniform {
+    fn default() -> Self {
+        // Directional light from upper-front-right
+        let dir = normalize([1.0, 1.0, 1.0]);
+        Self {
+            direction: dir,
+            _padding1: 0.0,
+            color: [1.0, 0.98, 0.95], // Slightly warm white
+            _padding2: 0.0,
+            ambient: [0.15, 0.15, 0.18], // Cool ambient
+            _padding3: 0.0,
+        }
+    }
+}
+
+// Helper math functions
+fn normalize(v: [f32; 3]) -> [f32; 3] {
+    let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if len > 0.0 {
+        [v[0] / len, v[1] / len, v[2] / len]
+    } else {
+        v
+    }
+}
+
+fn mat4_multiply(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    let mut result = [[0.0_f32; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            for k in 0..4 {
+                result[i][j] += a[k][j] * b[i][k];
+            }
+        }
+    }
+    result
+}
+
+fn create_depth_texture(
+    device: &Device,
+    width: u32,
+    height: u32,
+    format: TextureFormat,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Depth Texture"),
+        size: wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
 }
 
 pub struct GpuRenderer {
@@ -78,8 +174,11 @@ pub struct GpuRenderer {
     ui_render_pipeline: wgpu::RenderPipeline,
     scene_render_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
-    camera_bind_group_layout: wgpu::BindGroupLayout,
+    light_buffer: wgpu::Buffer,
+    scene_bind_group: wgpu::BindGroup,
+    scene_bind_group_layout: wgpu::BindGroupLayout,
+    depth_texture: wgpu::Texture,
+    depth_view: wgpu::TextureView,
     viewport: ViewportInfo,
     ui_vertex_buffer: wgpu::Buffer,
     ui_index_buffer: wgpu::Buffer,
@@ -89,8 +188,8 @@ pub struct GpuRenderer {
     scene_index_buffer: wgpu::Buffer,
     scene_vertex_buffer_size: u64,
     scene_index_buffer_size: u64,
-    ui_num_indices: u32, // Added previously
-    scene_num_indices: u32, // Added previously
+    ui_num_indices: u32,
+    scene_num_indices: u32,
 }
 
 impl GpuRenderer {
@@ -174,6 +273,10 @@ impl GpuRenderer {
 
         surface.configure(&device, &surface_config);
 
+        // Create depth texture
+        let depth_format = TextureFormat::Depth32Float;
+        let (depth_texture, depth_view) = create_depth_texture(&device, size.width, size.height, depth_format);
+
         // Create camera uniform buffer
         let camera_uniform = CameraUniform::new();
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -182,30 +285,56 @@ impl GpuRenderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Create bind group layout for camera
-        let camera_bind_group_layout =
+        // Create light uniform buffer
+        let light_uniform = LightUniform::default();
+        let light_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Light Buffer"),
+            contents: bytemuck::cast_slice(&[light_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create bind group layout for scene (camera + light)
+        let scene_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Camera Bind Group Layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                label: Some("Scene Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
             });
 
-        // Create bind group
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Camera Bind Group"),
-            layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
+        // Create scene bind group
+        let scene_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Scene Bind Group"),
+            layout: &scene_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: light_buffer.as_entire_binding(),
+                },
+            ],
         });
 
         // Load shaders
@@ -249,16 +378,24 @@ impl GpuRenderer {
                 push_constant_ranges: &[],
             });
 
-        // Scene pipeline - with camera bind group
+        // Scene pipeline - with camera + light bind group
         let scene_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Scene Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout],
+                bind_group_layouts: &[&scene_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
-        // Vertex layout: position (vec3) + color (vec3) = 6 floats per vertex
-        let vertex_layout = wgpu::VertexBufferLayout {
+        // UI Vertex layout: position (vec3) + color (vec3) = 6 floats per vertex
+        let ui_vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+        };
+
+        // Scene Vertex layout: position (vec3) + normal (vec3) = 6 floats per vertex
+        // (keeping 6 for now, UV can be added later for textures)
+        let scene_vertex_layout = wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
@@ -270,7 +407,7 @@ impl GpuRenderer {
             vertex: wgpu::VertexState {
                 module: &ui_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[vertex_layout.clone()],
+                buffers: &[ui_vertex_layout],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -292,7 +429,14 @@ impl GpuRenderer {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: None,
+            // UI pipeline needs compatible depth format but doesn't write depth
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always, // Always pass depth test
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -308,7 +452,7 @@ impl GpuRenderer {
             vertex: wgpu::VertexState {
                 module: &scene_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[vertex_layout],
+                buffers: &[scene_vertex_layout],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -324,13 +468,19 @@ impl GpuRenderer {
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
-                front_face: wgpu::FrontFace::Cw,
-                cull_mode: Some(wgpu::Face::Back),
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back), // Back-face culling enabled
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -359,8 +509,11 @@ impl GpuRenderer {
             ui_render_pipeline,
             scene_render_pipeline,
             camera_buffer,
-            camera_bind_group,
-            camera_bind_group_layout,
+            light_buffer,
+            scene_bind_group,
+            scene_bind_group_layout,
+            depth_texture,
+            depth_view,
             viewport: ViewportInfo {
                 x: viewport_x,
                 y: viewport_y,
@@ -496,6 +649,16 @@ impl GpuRenderer {
             self.surface_config.width = window_width;
             self.surface_config.height = window_height;
             self.surface.configure(&self.device, &self.surface_config);
+
+            // Recreate depth texture at new size
+            let (depth_texture, depth_view) = create_depth_texture(
+                &self.device,
+                window_width,
+                window_height,
+                TextureFormat::Depth32Float,
+            );
+            self.depth_texture = depth_texture;
+            self.depth_view = depth_view;
         }
     }
 
@@ -541,12 +704,19 @@ impl GpuRenderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
 
-            // === Phase 1: Draw UI backgrounds (full surface, no camera) ===
+            // === Phase 1: Draw UI backgrounds (full surface, no camera, no depth) ===
             if self.ui_num_indices > 0 {
                 render_pass.set_pipeline(&self.ui_render_pipeline);
                 render_pass.set_viewport(
@@ -569,15 +739,10 @@ impl GpuRenderer {
                 render_pass.draw_indexed(0..self.ui_num_indices, 0, 0..1);
             }
 
-            // === Phase 2: Draw 3D scene (with camera projection) ===
+            // === Phase 2: Draw 3D scene (with camera projection and depth testing) ===
             if self.scene_num_indices > 0 {
                 render_pass.set_pipeline(&self.scene_render_pipeline);
-                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-
-                println!("Drawing scene with {} indices, viewport: ({}, {}, {}, {})",
-                         self.scene_num_indices,
-                         self.viewport.x, self.viewport.y,
-                         self.viewport.width, self.viewport.height);
+                render_pass.set_bind_group(0, &self.scene_bind_group, &[]);
 
                 // Set viewport to the scene area - this makes NDC coords (-1 to 1) map to this region
                 render_pass.set_viewport(
@@ -761,7 +926,6 @@ pub fn init_gpu_renderer<R: Runtime>(
     viewport_width: u32,
     viewport_height: u32,
 ) -> Result<String, String> {
-    println!("[init_gpu_renderer] Received viewport: x={}, y={}, width={}, height={}", viewport_x, viewport_y, viewport_width, viewport_height);
     // Must run on main thread for Metal
     let mut renderer = pollster::block_on(GpuRenderer::new(&window, viewport_x, viewport_y, viewport_width, viewport_height))?;
 
@@ -788,8 +952,6 @@ pub async fn update_gpu_viewport(
     width: u32,
     height: u32,
 ) -> Result<(), String> {
-    println!("update_gpu_viewport called: x={}, y={}, width={}, height={}", x, y, width, height);
-
     // Store the viewport offset for use during resize
     {
         let mut offset = VIEWPORT_OFFSET.lock().unwrap();
@@ -799,11 +961,7 @@ pub async fn update_gpu_viewport(
     let mut renderer = GPU_RENDERER.lock().unwrap();
 
     if let Some(ref mut renderer) = *renderer {
-        println!("Surface dimensions: {}x{}", renderer.surface_config.width, renderer.surface_config.height);
         renderer.update_viewport(x, y, width, height);
-        println!("Viewport now set to: x={}, y={}, w={}, h={}",
-                 renderer.viewport.x, renderer.viewport.y,
-                 renderer.viewport.width, renderer.viewport.height);
         Ok(())
     } else {
         Err("GPU renderer not initialized".to_string())
@@ -847,9 +1005,6 @@ pub async fn render_scene_gpu(
     scene_vertices: Vec<f64>,  // JS numbers come as f64
     scene_indices: Vec<u32>,
 ) -> Result<(), String> {
-    println!("render_scene_gpu called with {} vertices, {} indices",
-             scene_vertices.len(), scene_indices.len());
-
     let mut renderer = GPU_RENDERER.lock().unwrap();
 
     if let Some(ref mut renderer) = *renderer {
@@ -873,6 +1028,70 @@ pub async fn render_scene_gpu(
         renderer.update_scene_data(&scene_vertices_f32, &scene_indices);
         renderer.render()?;
         println!("render_scene_gpu completed successfully");
+        Ok(())
+    } else {
+        Err("GPU renderer not initialized".to_string())
+    }
+}
+
+/// Generate mesh from current mould state and render directly to GPU
+/// This is more efficient than round-tripping through JS
+#[tauri::command]
+pub async fn generate_and_render_gpu(
+    resolution: Option<u32>,
+    fast_mode: Option<bool>,
+) -> Result<(), String> {
+    let res = resolution.unwrap_or(32);
+    let fast = fast_mode.unwrap_or(false);
+
+    // Ensure default moulds exist if not initialized by frontend
+    crate::mesh_generation::ensure_default_state();
+
+    // Generate mesh in background thread
+    let mesh_result = tokio::task::spawn_blocking(move || {
+        crate::mesh_generation::generate_mesh_from_state_with_quality(res, fast)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?;
+
+    let mesh = match mesh_result {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("Mesh generation failed: {}", e);
+            return Err(e);
+        }
+    };
+
+    // Interleave vertices and normals: [pos.x, pos.y, pos.z, norm.x, norm.y, norm.z, ...]
+    let vertex_count = mesh.vertices.len() / 3;
+    let mut interleaved = Vec::with_capacity(vertex_count * 6);
+
+    for i in 0..vertex_count {
+        // Position
+        interleaved.push(mesh.vertices[i * 3]);
+        interleaved.push(mesh.vertices[i * 3 + 1]);
+        interleaved.push(mesh.vertices[i * 3 + 2]);
+        // Normal
+        interleaved.push(mesh.normals[i * 3]);
+        interleaved.push(mesh.normals[i * 3 + 1]);
+        interleaved.push(mesh.normals[i * 3 + 2]);
+    }
+
+    let mut renderer = GPU_RENDERER.lock().unwrap();
+
+    if let Some(ref mut renderer) = *renderer {
+        // Generate UI background quads
+        let scale = get_scale_factor();
+        let (ui_vertices, ui_indices) = generate_ui_bounds(
+            renderer.surface_config.width,
+            renderer.surface_config.height,
+            scale,
+        );
+
+        // Update buffers and render
+        renderer.update_ui_data(&ui_vertices, &ui_indices);
+        renderer.update_scene_data(&interleaved, &mesh.indices);
+        renderer.render()?;
         Ok(())
     } else {
         Err("GPU renderer not initialized".to_string())

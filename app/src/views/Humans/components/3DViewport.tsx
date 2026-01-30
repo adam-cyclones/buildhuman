@@ -28,23 +28,23 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
 
   // Handle profile ring selection (now managed entirely within viewport)
   const handleProfileRingClicked = (mouldId: string, segmentIndex: number) => {
-    console.log("3DViewport: Profile ring clicked", mouldId, segmentIndex);
     setSelectedProfileRing({ mouldId, segmentIndex });
   };
 
   // GPU renderer is initialized in Rust's setup() - just update viewport bounds here
   onMount(async () => {
-    if (props.renderMode === "gpu" && viewportContentRef) {
+    if (props.renderMode === "gpu") {
+      // Wait a frame for the ref to be assigned
+      await new Promise(resolve => requestAnimationFrame(resolve));
+
+      if (!viewportContentRef) {
+        console.error("viewportContentRef not available after waiting");
+        return;
+      }
+
       try {
         const rect = viewportContentRef.getBoundingClientRect();
         const scaleFactor = window.devicePixelRatio || 2;
-
-        console.log("Updating GPU viewport bounds:", {
-          x: Math.round(rect.left * scaleFactor),
-          y: Math.round(rect.top * scaleFactor),
-          width: Math.round(rect.width * scaleFactor),
-          height: Math.round(rect.height * scaleFactor)
-        });
 
         await invoke("update_gpu_viewport", {
           x: Math.round(rect.left * scaleFactor),
@@ -53,24 +53,13 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
           height: Math.round(rect.height * scaleFactor)
         });
 
-        // Test render: triangle that extends beyond viewport to test scissor clipping
-        // One vertex goes outside NDC bounds to verify clipping works
-        const testVertices: number[] = [
-          // Position (x, y, z) + Color (r, g, b)
-          0.0,  0.8, 0.0,   1.0, 0.0, 0.0,  // 0: top center - red
-         -0.8, -0.8, 0.0,   0.0, 1.0, 0.0,  // 1: bottom left - green
-          1.5, -0.8, 0.0,   0.0, 0.0, 1.0,  // 2: bottom right - blue (EXTENDS PAST RIGHT EDGE)
-        ];
-        // CCW winding when viewed from +Z: 0 -> 1 -> 2 (top -> bottom-left -> bottom-right)
-        const testIndices: number[] = [0, 1, 2];
-
-        await invoke("render_scene_gpu", {
-          sceneVertices: testVertices,
-          sceneIndices: testIndices
+        // Generate mesh from moulds and render to GPU
+        await invoke("generate_and_render_gpu", {
+          resolution: props.voxelResolution,
+          fastMode: props.voxelResolution >= 96  // Use fast mode for higher resolutions
         });
-        console.log("Test triangle rendered");
       } catch (error) {
-        console.error("Failed to update GPU viewport:", error);
+        console.error("Failed to render to GPU:", error);
       }
     }
   });
@@ -80,7 +69,6 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
     if (props.renderMode === "gpu") {
       try {
         await invoke("shutdown_gpu_renderer");
-        console.log("GPU renderer shut down");
       } catch (error) {
         console.error("Failed to shutdown GPU renderer:", error);
       }
