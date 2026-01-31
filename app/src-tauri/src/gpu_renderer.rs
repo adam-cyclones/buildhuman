@@ -1,5 +1,6 @@
 use std::sync::Arc;
-use tauri::{Runtime, WebviewWindow, Manager};
+use nalgebra::{Matrix4, Point3, Vector3};
+use tauri::{Runtime, WebviewWindow};
 use wgpu::{
     util::DeviceExt, Device, Queue, Surface, SurfaceConfiguration, TextureFormat,
 };
@@ -17,7 +18,7 @@ pub struct OrbitCamera {
     pub yaw: f32,      // Horizontal rotation (radians)
     pub pitch: f32,    // Vertical rotation (radians), clamped to avoid gimbal lock
     pub distance: f32, // Distance from target
-    pub target: [f32; 3], // Point the camera orbits around
+    pub target: Point3<f32>, // Point the camera orbits around
 }
 
 impl Default for OrbitCamera {
@@ -26,165 +27,96 @@ impl Default for OrbitCamera {
             yaw: 0.0,
             pitch: 0.0,
             distance: 2.0,
-            target: [0.0, 0.3, 0.0], // Center on the mesh (roughly torso height)
+            target: Point3::new(0.0, 0.3, 0.0), // Center on the mesh (roughly torso height)
         }
     }
 }
 
 impl OrbitCamera {
     /// Calculate camera position from spherical coordinates
-    pub fn position(&self) -> [f32; 3] {
+    pub fn position(&self) -> Point3<f32> {
         let cos_pitch = self.pitch.cos();
         let sin_pitch = self.pitch.sin();
         let cos_yaw = self.yaw.cos();
         let sin_yaw = self.yaw.sin();
 
-        [
-            self.target[0] + self.distance * cos_pitch * sin_yaw,
-            self.target[1] + self.distance * sin_pitch,
-            self.target[2] + self.distance * cos_pitch * cos_yaw,
-        ]
+        Point3::new(
+            self.target.x + self.distance * cos_pitch * sin_yaw,
+            self.target.y + self.distance * sin_pitch,
+            self.target.z + self.distance * cos_pitch * cos_yaw,
+        )
     }
 
-    /// Build view matrix (look-at)
-    pub fn view_matrix(&self) -> [[f32; 4]; 4] {
+    /// Build view matrix using nalgebra's look_at_rh (right-handed, -Z forward)
+    pub fn view_matrix(&self) -> Matrix4<f32> {
         let eye = self.position();
-        let target = self.target;
-
-        // Forward vector (from eye to target) - this becomes -Z in view space
-        let f = normalize([
-            target[0] - eye[0],
-            target[1] - eye[1],
-            target[2] - eye[2],
-        ]);
-
-        // Right vector (cross product of forward and world up)
-        let up = [0.0_f32, 1.0, 0.0];
-        let r = normalize(cross(f, up));
-
-        // Recalculate up to be orthogonal
-        let u = cross(r, f);
-
-        // View matrix: rotation part is transpose of [r, u, -f], then translation
-        // Column-major for WGSL
-        [
-            [r[0], u[0], -f[0], 0.0],
-            [r[1], u[1], -f[1], 0.0],
-            [r[2], u[2], -f[2], 0.0],
-            [-dot(r, eye), -dot(u, eye), dot(f, eye), 1.0],
-        ]
+        let up = Vector3::new(0.0, 1.0, 0.0);
+        Matrix4::look_at_rh(&eye, &self.target, &up)
     }
 
-    /// Build orthographic projection matrix
-    pub fn ortho_projection(&self, aspect: f32) -> [[f32; 4]; 4] {
+    /// Build orthographic projection matrix for WGPU (Z maps to [0, 1])
+    /// Uses distance-based scaling for intuitive zoom behavior
+    pub fn ortho_projection(&self, aspect: f32) -> Matrix4<f32> {
         // Orthographic size scales with distance for intuitive zoom
-        let half_size = self.distance * 0.5;
+        let half_height = self.distance * 0.5;
+        let half_width = half_height * aspect;
 
-        let (scale_x, scale_y) = if aspect > 1.0 {
-            (1.0 / (half_size * aspect), 1.0 / half_size)
-        } else {
-            (1.0 / half_size, aspect / half_size)
-        };
+        // Simple orthographic that maps a reasonable Z range to [0, 1]
+        let z_scale = 0.1_f32;  // Compress Z to fit in [0, 1]
+        let z_offset = 0.5_f32; // Center the range
 
-        // Orthographic projection for WGPU (Z maps to [0, 1])
-        // Near/far planes in view space (negative Z is forward)
-        let near = 0.1_f32;
-        let far = 10.0_f32;
-
-        // Standard orthographic projection for WGPU NDC
-        // Z in view space: -near to -far maps to NDC Z: 0 to 1
-        [
-            [scale_x, 0.0, 0.0, 0.0],
-            [0.0, scale_y, 0.0, 0.0],
-            [0.0, 0.0, 1.0 / (far - near), 0.0],
-            [0.0, 0.0, -near / (far - near), 1.0],
-        ]
+        // nalgebra Matrix4::new() takes row-major input
+        // WGSL expects column-major with translation in column 3
+        // Standard projection matrix has translation in the last COLUMN (not row)
+        // So we need: [sx, 0, 0, tx], [0, sy, 0, ty], [0, 0, sz, tz], [0, 0, 0, 1]
+        // Which in row-major input means we transpose the visual layout
+        #[rustfmt::skip]
+        let proj = Matrix4::new(
+            1.0 / half_width, 0.0,               0.0,      0.0,
+            0.0,              1.0 / half_height, 0.0,      0.0,
+            0.0,              0.0,               z_scale,  z_offset,
+            0.0,              0.0,               0.0,      1.0,
+        );
+        proj
     }
 
-    /// Build combined view-projection matrix
-    pub fn view_projection(&self, aspect: f32) -> [[f32; 4]; 4] {
+    /// Build CameraUniform from current state using proper view + projection matrices
+    pub fn to_uniform(&self, aspect: f32) -> CameraUniform {
         let view = self.view_matrix();
         let proj = self.ortho_projection(aspect);
-        mat4_mul(proj, view)
-    }
-
-    /// Build CameraUniform from current state
-    pub fn to_uniform(&self, aspect: f32) -> CameraUniform {
-        // Use simpler approach: just rotation around Y axis for yaw, X for pitch
-        // Camera orbits around target at given distance
-
-        let cos_yaw = self.yaw.cos();
-        let sin_yaw = self.yaw.sin();
-        let cos_pitch = self.pitch.cos();
-        let sin_pitch = self.pitch.sin();
-
-        // Rotation matrix: first pitch (X), then yaw (Y)
-        // This rotates the scene, equivalent to orbiting camera
-        let rot = [
-            [cos_yaw, sin_yaw * sin_pitch, sin_yaw * cos_pitch, 0.0],
-            [0.0, cos_pitch, -sin_pitch, 0.0],
-            [-sin_yaw, cos_yaw * sin_pitch, cos_yaw * cos_pitch, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ];
-
-        // Orthographic scale based on distance
-        let half_size = self.distance * 0.5;
-        let (scale_x, scale_y) = if aspect > 1.0 {
-            (1.0 / (half_size * aspect), 1.0 / half_size)
-        } else {
-            (1.0 / half_size, aspect / half_size)
-        };
-
-        // Simple ortho projection (same as before that worked)
-        let proj = [
-            [scale_x, 0.0, 0.0, 0.0],
-            [0.0, scale_y, 0.0, 0.0],
-            [0.0, 0.0, 0.1, 0.0],
-            [0.0, -self.target[1] * scale_y, 0.5, 1.0],
-        ];
-
-        // Combine: proj * rot
-        let view_proj = mat4_mul(proj, rot);
+        let view_proj = proj * view;
+        let pos = self.position();
 
         CameraUniform {
-            view_proj,
-            view: rot,
-            camera_pos: self.position(),
+            view_proj: matrix_to_array(&view_proj),
+            view: matrix_to_array(&view),
+            camera_pos: [pos.x, pos.y, pos.z],
             _padding: 0.0,
         }
     }
 }
 
-// Matrix/vector math helpers
-fn normalize(v: [f32; 3]) -> [f32; 3] {
+/// Convert nalgebra Matrix4 to column-major [[f32; 4]; 4] for WGSL
+fn matrix_to_array(m: &Matrix4<f32>) -> [[f32; 4]; 4] {
+    // nalgebra stores column-major internally
+    // as_slice() returns the data in column-major order: [col0, col1, col2, col3]
+    let data = m.as_slice();
+    [
+        [data[0], data[1], data[2], data[3]],    // column 0
+        [data[4], data[5], data[6], data[7]],    // column 1
+        [data[8], data[9], data[10], data[11]],  // column 2
+        [data[12], data[13], data[14], data[15]], // column 3
+    ]
+}
+
+/// Normalize a 3D vector (used for lighting)
+fn normalize_vec3(v: [f32; 3]) -> [f32; 3] {
     let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
     if len > 0.0001 {
         [v[0] / len, v[1] / len, v[2] / len]
     } else {
         [0.0, 0.0, 1.0]
     }
-}
-
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn mat4_mul(a: [[f32; 4]; 4], b: [[f32; 4]; 4]) -> [[f32; 4]; 4] {
-    let mut result = [[0.0_f32; 4]; 4];
-    for i in 0..4 {
-        for j in 0..4 {
-            result[i][j] = a[0][j] * b[i][0] + a[1][j] * b[i][1] + a[2][j] * b[i][2] + a[3][j] * b[i][3];
-        }
-    }
-    result
 }
 
 /// UI layout bounds (in pixels from top-left)
@@ -227,46 +159,6 @@ impl CameraUniform {
             _padding: 0.0,
         }
     }
-
-    /// Create orthographic projection that maintains aspect ratio
-    /// Camera positioned at (0, 0, 5) looking at origin
-    fn orthographic(aspect: f32) -> Self {
-        // Orthographic bounds - the mesh is roughly -0.2 to 0.8, so show -1 to 1
-        let half_size = 1.0_f32;
-
-        let (scale_x, scale_y) = if aspect > 1.0 {
-            (1.0 / (half_size * aspect), 1.0 / half_size)
-        } else {
-            (1.0 / half_size, aspect / half_size)
-        };
-
-        // Camera at (0, 0.3, 3) looking at (0, 0.3, 0) - center on the mesh
-        let camera_pos = [0.0_f32, 0.3, 3.0];
-
-        // Simple orthographic: just scale X and Y, and remap Z to [0,1]
-        // No view translation needed since we're doing orthographic
-        let view_proj = [
-            [scale_x, 0.0, 0.0, 0.0],
-            [0.0, scale_y, 0.0, 0.0],      // Y is not flipped - WGPU NDC is Y-up at clip space
-            [0.0, 0.0, 0.1, 0.0],          // Scale Z into reasonable depth range
-            [0.0, -0.3 * scale_y, 0.5, 1.0], // Translate to center mesh, offset Z to middle
-        ];
-
-        // View matrix for lighting calculations (identity since we're orthographic)
-        let view = [
-            [1.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        ];
-
-        Self {
-            view_proj,
-            view,
-            camera_pos,
-            _padding: 0.0,
-        }
-    }
 }
 
 /// Light uniform data - must match shader layout
@@ -284,7 +176,7 @@ pub struct LightUniform {
 impl Default for LightUniform {
     fn default() -> Self {
         // Directional light from upper-front-right
-        let dir = normalize([1.0, 1.0, 1.0]);
+        let dir = normalize_vec3([1.0, 1.0, 1.0]);
         Self {
             direction: dir,
             _padding1: 0.0,

@@ -36,6 +36,12 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
   let lastMouseX = 0;
   let lastMouseY = 0;
 
+  // Momentum/inertia state for smooth rotation
+  let velocityYaw = 0;
+  let velocityPitch = 0;
+  let velocityDistance = 0;
+  let animationFrameId: number | null = null;
+
   // Camera update state - prevent overlapping calls
   let cameraUpdatePending = false;
   let pendingCameraState: { yaw: number; pitch: number; distance: number } | null = null;
@@ -70,12 +76,57 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
     }
   };
 
+  // Animation loop for momentum-based camera movement
+  const startMomentumAnimation = () => {
+    if (animationFrameId !== null) return;
+
+    const animate = () => {
+      const friction = 0.92; // Decay factor (lower = more friction)
+      const threshold = 0.0001; // Stop when velocity is negligible
+
+      // Apply friction
+      velocityYaw *= friction;
+      velocityPitch *= friction;
+      velocityDistance *= friction;
+
+      // Check if we should stop animating
+      const totalVelocity = Math.abs(velocityYaw) + Math.abs(velocityPitch) + Math.abs(velocityDistance);
+      if (totalVelocity < threshold) {
+        animationFrameId = null;
+        return;
+      }
+
+      // Apply velocity to camera state
+      const newYaw = cameraYaw() + velocityYaw;
+      const newPitch = Math.max(-1.5, Math.min(1.5, cameraPitch() + velocityPitch));
+      const newDistance = Math.max(0.5, Math.min(10, cameraDistance() + velocityDistance));
+
+      setCameraYaw(newYaw);
+      setCameraPitch(newPitch);
+      setCameraDistance(newDistance);
+      void updateCamera(newYaw, newPitch, newDistance);
+
+      animationFrameId = requestAnimationFrame(animate);
+    };
+
+    animationFrameId = requestAnimationFrame(animate);
+  };
+
   // Mouse event handlers for orbit camera
   const handleMouseDown = (e: MouseEvent) => {
     if (props.renderMode !== "gpu") return;
     isDragging = true;
     lastMouseX = e.clientX;
     lastMouseY = e.clientY;
+
+    // Stop any ongoing momentum animation when user grabs
+    if (animationFrameId !== null) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+    velocityYaw = 0;
+    velocityPitch = 0;
+
     e.preventDefault();
   };
 
@@ -90,8 +141,12 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
     // Sensitivity for rotation
     const sensitivity = 0.01;
 
-    const newYaw = cameraYaw() + deltaX * sensitivity;
-    const newPitch = cameraPitch() - deltaY * sensitivity;
+    // Store velocity for momentum
+    velocityYaw = deltaX * sensitivity;
+    velocityPitch = -deltaY * sensitivity;
+
+    const newYaw = cameraYaw() + velocityYaw;
+    const newPitch = cameraPitch() + velocityPitch;
 
     // Clamp pitch to avoid gimbal lock
     const clampedPitch = Math.max(-1.5, Math.min(1.5, newPitch));
@@ -102,6 +157,12 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
   };
 
   const handleMouseUp = () => {
+    if (isDragging && props.renderMode === "gpu") {
+      // Start momentum animation if there's velocity
+      if (Math.abs(velocityYaw) > 0.001 || Math.abs(velocityPitch) > 0.001) {
+        startMomentumAnimation();
+      }
+    }
     isDragging = false;
   };
 
@@ -109,15 +170,17 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
     if (props.renderMode !== "gpu") return;
     e.preventDefault();
 
-    // Zoom sensitivity
-    const zoomFactor = 0.001;
-    const newDistance = cameraDistance() + e.deltaY * zoomFactor * cameraDistance();
+    // Zoom sensitivity - apply as velocity for smooth zoom
+    const zoomFactor = 0.002;
+    velocityDistance = e.deltaY * zoomFactor * cameraDistance();
 
-    // Clamp distance
-    const clampedDistance = Math.max(0.5, Math.min(10, newDistance));
+    // Immediate update plus start momentum for smooth continuation
+    const newDistance = Math.max(0.5, Math.min(10, cameraDistance() + velocityDistance));
+    setCameraDistance(newDistance);
+    void updateCamera(cameraYaw(), cameraPitch(), newDistance);
 
-    setCameraDistance(clampedDistance);
-    void updateCamera(cameraYaw(), cameraPitch(), clampedDistance);
+    // Start momentum animation for smooth zoom decay
+    startMomentumAnimation();
   };
 
   // GPU renderer is initialized in Rust's setup() - just update viewport bounds here
@@ -153,8 +216,14 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
     }
   });
 
-  // Cleanup GPU renderer on unmount
+  // Cleanup GPU renderer and animation on unmount
   onCleanup(async () => {
+    // Cancel any ongoing momentum animation
+    if (animationFrameId !== null) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+
     if (props.renderMode === "gpu") {
       try {
         await invoke("shutdown_gpu_renderer");
