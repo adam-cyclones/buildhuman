@@ -6,6 +6,7 @@ mod settings;
 mod mesh;
 mod mesh_generation;
 mod gpu_renderer;
+mod gpu_compute;
 
 use mesh::MeshData;
 use tauri::{Manager, Listener, Emitter, async_runtime, RunEvent, WindowEvent};
@@ -233,6 +234,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             gpu_renderer::render_mesh_gpu,
             gpu_renderer::render_scene_gpu,
             gpu_renderer::generate_and_render_gpu,
+            gpu_renderer::generate_and_render_gpu_compute,
             gpu_renderer::update_gpu_camera,
             gpu_renderer::get_gpu_camera,
             gpu_renderer::shutdown_gpu_renderer,

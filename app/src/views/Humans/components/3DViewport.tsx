@@ -183,7 +183,38 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
     startMomentumAnimation();
   };
 
-  // GPU renderer is initialized in Rust's setup() - just update viewport bounds here
+  // Helper to trigger GPU render (called after Rust sync is complete)
+  const renderToGpu = async () => {
+    if (props.renderMode !== "gpu" || !viewportContentRef) return;
+
+    try {
+      const rect = viewportContentRef.getBoundingClientRect();
+      const scaleFactor = window.devicePixelRatio || 2;
+
+      await invoke("update_gpu_viewport", {
+        x: Math.round(rect.left * scaleFactor),
+        y: Math.round(rect.top * scaleFactor),
+        width: Math.round(rect.width * scaleFactor),
+        height: Math.round(rect.height * scaleFactor)
+      });
+
+      // Generate mesh from moulds and render to GPU
+      await invoke("generate_and_render_gpu", {
+        resolution: props.voxelResolution,
+        fastMode: props.voxelResolution >= 96  // Use fast mode for higher resolutions
+      });
+    } catch (error) {
+      console.error("Failed to render to GPU:", error);
+    }
+  };
+
+  // Handle callback when VoxelMorphScene has synced data to Rust
+  const handleRustSyncComplete = () => {
+    // Now that Rust has the full humanoid data, render to GPU
+    void renderToGpu();
+  };
+
+  // Initialize GPU renderer on mount if in GPU mode
   onMount(async () => {
     if (props.renderMode === "gpu") {
       // Wait a frame for the ref to be assigned
@@ -194,25 +225,26 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
         return;
       }
 
+      // Initialize GPU renderer if not already initialized (handles case where
+      // settings.render_mode was "cpu" at startup but user switched to GPU mode)
       try {
         const rect = viewportContentRef.getBoundingClientRect();
         const scaleFactor = window.devicePixelRatio || 2;
 
-        await invoke("update_gpu_viewport", {
-          x: Math.round(rect.left * scaleFactor),
-          y: Math.round(rect.top * scaleFactor),
-          width: Math.round(rect.width * scaleFactor),
-          height: Math.round(rect.height * scaleFactor)
+        await invoke("init_gpu_renderer", {
+          viewportX: Math.round(rect.left * scaleFactor),
+          viewportY: Math.round(rect.top * scaleFactor),
+          viewportWidth: Math.round(rect.width * scaleFactor),
+          viewportHeight: Math.round(rect.height * scaleFactor)
         });
-
-        // Generate mesh from moulds and render to GPU
-        await invoke("generate_and_render_gpu", {
-          resolution: props.voxelResolution,
-          fastMode: props.voxelResolution >= 96  // Use fast mode for higher resolutions
-        });
+        console.log("GPU renderer initialized from frontend");
       } catch (error) {
-        console.error("Failed to render to GPU:", error);
+        // May fail if already initialized - that's OK
+        console.log("GPU renderer init:", error);
       }
+
+      // Note: Don't render here - wait for VoxelMorphScene to sync data to Rust first
+      // The handleRustSyncComplete callback will trigger the render
     }
   });
 
@@ -265,7 +297,9 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
         </div>
       </div>
       <div class="viewport-content" ref={viewportContentRef}>
-        {props.renderMode === "cpu" ? (
+        {/* VoxelMorphScene always renders to initialize skeleton/moulds and sync to Rust.
+            In GPU mode, its Three.js canvas is hidden but the scene still runs. */}
+        <div style={props.renderMode === "gpu" ? "display: none;" : ""}>
           <VoxelMorphScene
             mouldRadius={props.mouldRadius}
             voxelResolution={props.voxelResolution}
@@ -281,8 +315,10 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
             onJointSelected={props.onJointSelected}
             onJointClicked={props.onJointClicked}
             onProfileRingClicked={handleProfileRingClicked}
+            onRustSyncComplete={handleRustSyncComplete}
           />
-        ) : (
+        </div>
+        {props.renderMode === "gpu" && (
           <div
             style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: auto; background: transparent; cursor: grab;"
             onMouseDown={handleMouseDown}

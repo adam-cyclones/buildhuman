@@ -4,6 +4,8 @@ use tauri::{Runtime, WebviewWindow};
 use wgpu::{
     util::DeviceExt, Device, Queue, Surface, SurfaceConfiguration, TextureFormat,
 };
+use crate::gpu_compute::GpuComputePipeline;
+use crate::mesh::types::{Pt3, AABB};
 
 pub struct ViewportInfo {
     pub x: u32,
@@ -548,6 +550,9 @@ impl GpuRenderer {
         let scene_vertex_buffer = device.create_buffer_init(&empty_buffer_desc);
         let scene_index_buffer = device.create_buffer_init(&empty_buffer_desc);
 
+        // Initialize GPU compute pipeline separately
+        init_compute_pipeline(device.clone(), queue.clone());
+
         Ok(Self {
             device,
             queue,
@@ -984,18 +989,35 @@ pub fn init_gpu_renderer<R: Runtime>(
     viewport_width: u32,
     viewport_height: u32,
 ) -> Result<String, String> {
+    // Check if already initialized
+    {
+        let existing = GPU_RENDERER.lock().unwrap();
+        if existing.is_some() {
+            return Ok("GPU renderer already initialized".to_string());
+        }
+    }
+
     // Must run on main thread for Metal
     let mut renderer = pollster::block_on(GpuRenderer::new(&window, viewport_x, viewport_y, viewport_width, viewport_height))?;
 
-    // Do an initial render with a test triangle
-    let vertices: Vec<f32> = vec![
-        0.0,  -0.5, 0.0,  // top now bottom
-       -0.5,  0.5, 0.0,  // bottom left now top left
-        0.5,  0.5, 0.0,  // bottom right now top right
-    ];
-    let indices: Vec<u32> = vec![0, 1, 2];
-    renderer.update_ui_data(&vertices, &indices);
+    // Store viewport offset for resize handler
+    {
+        let mut offset = VIEWPORT_OFFSET.lock().unwrap();
+        *offset = (viewport_x, viewport_y);
+    }
+
+    // Generate proper UI bounds and do initial render
+    let scale = get_scale_factor();
+    let (ui_vertices, ui_indices) = generate_ui_bounds(
+        renderer.surface_config.width,
+        renderer.surface_config.height,
+        scale,
+    );
+    renderer.update_ui_data(&ui_vertices, &ui_indices);
     renderer.render()?;
+
+    // Initialize GPU compute pipeline
+    init_compute_pipeline(renderer.device.clone(), renderer.queue.clone());
 
     let mut global_renderer = GPU_RENDERER.lock().unwrap();
     *global_renderer = Some(renderer);
@@ -1180,6 +1202,92 @@ pub async fn generate_and_render_gpu(
         renderer.update_ui_data(&ui_vertices, &ui_indices);
         renderer.update_scene_data(&interleaved, &mesh.indices);
         renderer.render()?;
+        Ok(())
+    } else {
+        Err("GPU renderer not initialized".to_string())
+    }
+}
+
+// Global GPU compute pipeline storage (separate from renderer to avoid mutex issues)
+static GPU_COMPUTE: Lazy<Mutex<Option<GpuComputePipeline>>> = Lazy::new(|| Mutex::new(None));
+
+/// Initialize GPU compute pipeline (called after renderer is created)
+pub fn init_compute_pipeline(device: Arc<Device>, queue: Arc<Queue>) {
+    let mut compute = GPU_COMPUTE.lock().unwrap();
+    *compute = Some(GpuComputePipeline::new(device, queue));
+    println!("GPU compute pipeline initialized");
+}
+
+/// Generate mesh using GPU compute shaders and render directly
+/// This is faster than CPU mesh generation for high resolutions (96+)
+/// Uses the shared skeleton/mould state from the scene inspector
+#[tauri::command]
+pub async fn generate_and_render_gpu_compute(
+    resolution: Option<u32>,
+) -> Result<(), String> {
+    let res = resolution.unwrap_or(64);
+
+    // Ensure default moulds exist if not initialized by frontend
+    crate::mesh_generation::ensure_default_state();
+
+    // Get mould manager from shared state (same data as scene inspector)
+    // Must rebuild cache to compute world-space positions
+    let mould_manager = crate::mesh_generation::get_mould_manager_for_gpu()?;
+
+    let bounds = AABB {
+        min: Pt3::new(-1.0, -1.0, -1.0),
+        max: Pt3::new(1.0, 1.5, 1.0),
+    };
+
+    // Take compute pipeline out of mutex to run async operation
+    let mut compute_opt = {
+        let mut guard = GPU_COMPUTE.lock().unwrap();
+        guard.take()
+    };
+
+    let result = if let Some(ref mut compute) = compute_opt {
+        compute.generate_mesh(&mould_manager, res, bounds).await
+    } else {
+        Err("GPU compute pipeline not initialized".to_string())
+    };
+
+    // Put compute pipeline back
+    {
+        let mut guard = GPU_COMPUTE.lock().unwrap();
+        *guard = compute_opt;
+    }
+
+    let mesh = result?;
+
+    // Interleave vertices and normals for rendering
+    let vertex_count = mesh.vertices.len() / 3;
+    let mut interleaved = Vec::with_capacity(vertex_count * 6);
+
+    for i in 0..vertex_count {
+        interleaved.push(mesh.vertices[i * 3]);
+        interleaved.push(mesh.vertices[i * 3 + 1]);
+        interleaved.push(mesh.vertices[i * 3 + 2]);
+        interleaved.push(mesh.normals[i * 3]);
+        interleaved.push(mesh.normals[i * 3 + 1]);
+        interleaved.push(mesh.normals[i * 3 + 2]);
+    }
+
+    // Update render buffers and display
+    let mut renderer = GPU_RENDERER.lock().unwrap();
+    if let Some(ref mut renderer) = *renderer {
+        let scale = get_scale_factor();
+        let (ui_vertices, ui_indices) = generate_ui_bounds(
+            renderer.surface_config.width,
+            renderer.surface_config.height,
+            scale,
+        );
+
+        renderer.update_ui_data(&ui_vertices, &ui_indices);
+        renderer.update_scene_data(&interleaved, &mesh.indices);
+        renderer.render()?;
+
+        println!("GPU compute: generated {} vertices, {} triangles at resolution {}",
+                 vertex_count, mesh.indices.len() / 3, res);
         Ok(())
     } else {
         Err("GPU renderer not initialized".to_string())

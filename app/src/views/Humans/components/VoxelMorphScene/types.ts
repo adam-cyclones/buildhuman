@@ -19,6 +19,7 @@ export type VoxelMorphSceneProps = {
   onJointClicked?: (jointId: string) => void;
   onProfileRingClicked?: (mouldId: string, segmentIndex: number) => void;
   onProfileRadiusChange?: (mouldId: string, segmentIndex: number, controlPointIndex: number, newRadius: number) => void;
+  onRustSyncComplete?: () => void;
 };
 
 export type SceneState = {

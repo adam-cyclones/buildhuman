@@ -274,4 +274,69 @@ impl MouldManager {
 
         result
     }
+
+    /// Get moulds with world-space coordinates for GPU compute
+    /// Returns mould data with center/end_point transformed to world space
+    /// ProfiledCapsules are converted to regular Capsules with average radius
+    pub fn get_moulds_world_space(&self) -> Vec<WorldSpaceMould> {
+        if !self.cache_valid {
+            panic!("Cache must be rebuilt before calling get_moulds_world_space");
+        }
+
+        let mut result = Vec::new();
+
+        for (id, mould) in &self.moulds {
+            let cached = self.mould_cache.get(id).expect("Mould not in cache");
+
+            // For profiled capsules, calculate average radius from all profiles
+            let effective_radius = if mould.shape == MouldShape::ProfiledCapsule {
+                if let Some(ref profiles) = mould.radial_profiles {
+                    let total: f32 = profiles.iter()
+                        .flat_map(|ring| ring.iter())
+                        .sum();
+                    let count = profiles.iter()
+                        .map(|ring| ring.len())
+                        .sum::<usize>();
+                    if count > 0 {
+                        total / count as f32
+                    } else {
+                        mould.radius
+                    }
+                } else {
+                    mould.radius
+                }
+            } else {
+                mould.radius
+            };
+
+            // Convert profiled capsule to regular capsule for GPU
+            let effective_shape = if mould.shape == MouldShape::ProfiledCapsule {
+                MouldShape::Capsule
+            } else {
+                mould.shape.clone()
+            };
+
+            result.push(WorldSpaceMould {
+                id: id.clone(),
+                shape: effective_shape,
+                world_center: cached.world_center,
+                world_end: cached.world_end,
+                radius: effective_radius,
+                blend_radius: mould.blend_radius,
+            });
+        }
+
+        result
+    }
+}
+
+/// Mould data with world-space coordinates (for GPU compute)
+#[derive(Debug, Clone)]
+pub struct WorldSpaceMould {
+    pub id: String,
+    pub shape: MouldShape,
+    pub world_center: Pt3,
+    pub world_end: Option<Pt3>,
+    pub radius: f32,
+    pub blend_radius: f32,
 }

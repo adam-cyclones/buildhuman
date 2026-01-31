@@ -834,6 +834,11 @@ export default function VoxelMorphScene(props: VoxelMorphSceneProps) {
     // Sync skeleton and moulds to Rust backend (immediate) - await to ensure Rust is ready
     await scheduleSyncToRustBackend(true);
 
+    // Notify parent that Rust sync is complete (for GPU rendering)
+    if (props.onRustSyncComplete) {
+      props.onRustSyncComplete();
+    }
+
     isInitialized = true;
   };
 

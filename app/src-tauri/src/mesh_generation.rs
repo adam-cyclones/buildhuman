@@ -286,6 +286,23 @@ pub fn generate_mesh_from_state(resolution: u32) -> Result<MeshData, String> {
     generate_mesh_from_state_with_quality(resolution, false)
 }
 
+/// Get a cloned MouldManager with cache rebuilt for GPU compute
+/// This allows GPU compute to use the same skeleton/mould state as the CPU renderer
+pub fn get_mould_manager_for_gpu() -> Result<MouldManager, String> {
+    let mut state = MESH_STATE.lock().unwrap();
+
+    let mould_manager = state
+        .mould_manager
+        .as_mut()
+        .ok_or("No mould manager initialized")?;
+
+    // Rebuild cache to compute world-space positions
+    mould_manager.rebuild_cache();
+
+    // Clone the mould manager so GPU compute has its own copy
+    Ok(mould_manager.clone())
+}
+
 /// Generate high-resolution mesh using sparse brick map storage
 /// Recommended for resolutions >= 128
 /// Uses two-pass algorithm to only allocate memory near the surface
