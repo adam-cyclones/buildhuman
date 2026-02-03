@@ -198,10 +198,9 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
         height: Math.round(rect.height * scaleFactor)
       });
 
-      // Generate mesh from moulds and render to GPU
-      await invoke("generate_and_render_gpu", {
-        resolution: props.voxelResolution,
-        fastMode: props.voxelResolution >= 96  // Use fast mode for higher resolutions
+      // Generate mesh using GPU compute shaders and render
+      await invoke("generate_and_render_gpu_compute", {
+        resolution: props.voxelResolution
       });
     } catch (error) {
       console.error("Failed to render to GPU:", error);

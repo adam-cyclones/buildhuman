@@ -2,14 +2,14 @@
 // Evaluates signed distance field for voxel grid in parallel
 // Each thread handles one voxel
 
-// Grid parameters
+// Grid parameters (must match Rust GridParams layout exactly - 64 bytes total)
 struct GridParams {
-    resolution: u32,
-    bounds_min: vec3<f32>,
-    bounds_max: vec3<f32>,
-    cell_size: f32,
-    num_moulds: u32,
-    _padding: vec3<f32>,
+    resolution_pad: vec4<u32>,  // x = resolution, yzw = padding (offset 0)
+    bounds_min: vec4<f32>,      // xyz = min bounds, w = unused (offset 16)
+    bounds_max_cell: vec4<f32>, // xyz = max bounds, w = cell_size (offset 32)
+    num_moulds: u32,            // offset 48
+    iso_value: f32,             // offset 52
+    _pad: vec2<f32>,            // offset 56, padding to 64
 };
 
 // Mould primitive data (matches Rust MouldData)
@@ -55,6 +55,10 @@ fn capsule_sdf(point: vec3<f32>, a: vec3<f32>, b: vec3<f32>, radius: f32) -> f32
 
 // Smooth minimum for blending SDFs
 fn smooth_min_poly(a: f32, b: f32, k: f32) -> f32 {
+    // Guard against zero blend radius (would cause division by zero)
+    if (k < 0.0001) {
+        return min(a, b);
+    }
     let h = max(k - abs(a - b), 0.0);
     return min(a, b) - h * h * 0.25 / k;
 }
@@ -68,22 +72,25 @@ fn index_to_coords(index: u32, res: u32) -> vec3<u32> {
 }
 
 // Convert grid coordinates to world position
-fn grid_to_world(coords: vec3<u32>, params: GridParams) -> vec3<f32> {
-    return params.bounds_min + vec3<f32>(coords) * params.cell_size;
+fn grid_to_world(coords: vec3<u32>, cell_size: f32, bounds_min: vec3<f32>) -> vec3<f32> {
+    return bounds_min + vec3<f32>(coords) * cell_size;
 }
 
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let index = global_id.x;
-    let total_voxels = params.resolution * params.resolution * params.resolution;
+    let resolution = params.resolution_pad.x;
+    let total_voxels = resolution * resolution * resolution;
 
     if (index >= total_voxels) {
         return;
     }
 
     // Get 3D coordinates and world position
-    let coords = index_to_coords(index, params.resolution);
-    let world_pos = grid_to_world(coords, params);
+    let coords = index_to_coords(index, resolution);
+    let cell_size = params.bounds_max_cell.w;
+    let bounds_min = params.bounds_min.xyz;
+    let world_pos = grid_to_world(coords, cell_size, bounds_min);
 
     // Evaluate SDF for all moulds
     var result = 1e10;  // Large positive = far outside

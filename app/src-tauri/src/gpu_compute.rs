@@ -1,41 +1,52 @@
 // GPU Compute Pipeline for Mesh Generation
-// Evaluates SDF grid and performs dual contouring entirely on GPU
+// Evaluates SDF grid and generates mesh entirely on GPU
+//
+// Algorithm (surface voxelization, not true dual contouring):
+// 1. SDF Evaluation: Compute signed distance at each grid vertex
+// 2. Surface Cell Detection: Find cells where corners cross the iso-surface
+// 3. Vertex Placement: One vertex per surface cell (at cell center)
+// 4. Face Generation: Create quad faces between adjacent surface cells
 
 use std::sync::Arc;
 use wgpu::{util::DeviceExt, Device, Queue};
 use crate::mesh::types::{MeshData, MouldShape, Pt3, AABB};
-use crate::mesh::mould::{MouldManager, WorldSpaceMould};
+use crate::mesh::mould::MouldManager;
 
-const NUM_RADIAL_PROFILE_SAMPLES_PER_SEGMENT: usize = 8;
-const NUM_RADIAL_PROFILE_SEGMENTS: usize = 8;
-
-/// GPU-compatible mould data (16-byte aligned for WGSL)
+/// GPU-compatible mould data (must match WGSL Mould struct layout exactly)
+/// Layout: 3 vec4s = 48 bytes total
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct GpuMould {
+    // vec4 0: center.xyz + shape
     center: [f32; 3],
-    shape: u32,  // 0=Sphere, 1=Capsule, 2=ProfiledCapsule
+    shape: u32,  // 0=Sphere, 1=Capsule
+    // vec4 1: end_point.xyz + radius
     end_point: [f32; 3],
     radius: f32,
+    // vec4 2: blend_radius + padding
     blend_radius: f32,
-    use_splines: u32, // 0 = false, 1 = true
-    radial_profiles: [f32; NUM_RADIAL_PROFILE_SAMPLES_PER_SEGMENT * NUM_RADIAL_PROFILE_SEGMENTS],
+    _padding: [f32; 3],
 }
 
-/// Grid parameters uniform
+/// Grid parameters uniform (must match WGSL layout exactly)
+/// Using vec4 for all vector types to ensure 16-byte alignment matches WGSL
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct GridParams {
+    // vec4 0: resolution in x, padding in yzw
     resolution: u32,
-    _pad0: [f32; 3],  // Align bounds_min to 16 bytes
-    bounds_min: [f32; 3],
-    _pad1: f32,
+    _pad0: [u32; 3],
+    // vec4 1: bounds_min xyz, padding in w
+    bounds_min: [f32; 4],
+    // vec4 2: bounds_max xyz, cell_size in w
     bounds_max: [f32; 3],
     cell_size: f32,
+    // vec4 3: num_moulds, iso_value, padding
     num_moulds: u32,
     iso_value: f32,
-    _padding: [f32; 2],
+    _pad1: [f32; 2],
 }
+// Total: 64 bytes (4 vec4s)
 
 /// Atomic counters for variable-length output
 #[repr(C)]
@@ -432,14 +443,13 @@ impl GpuComputePipeline {
         // Upload params
         let params = GridParams {
             resolution,
-            _pad0: [0.0; 3],
-            bounds_min: [bounds.min.x, bounds.min.y, bounds.min.z],
-            _pad1: 0.0,
+            _pad0: [0; 3],
+            bounds_min: [bounds.min.x, bounds.min.y, bounds.min.z, 0.0],
             bounds_max: [bounds.max.x, bounds.max.y, bounds.max.z],
             cell_size,
             num_moulds: gpu_moulds.len() as u32,
             iso_value: 0.0,
-            _padding: [0.0; 2],
+            _pad1: [0.0; 2],
         };
         self.queue.write_buffer(&self.params_buffer, 0, bytemuck::cast_slice(&[params]));
 

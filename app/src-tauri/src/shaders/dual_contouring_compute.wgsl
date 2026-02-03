@@ -1,16 +1,15 @@
-// Dual Contouring Compute Shader
+// Surface Voxelization Compute Shader
 // Phase 1: Detect surface cells and generate vertices
 // Phase 2: Generate face indices between adjacent cells
 
-// Grid parameters (same as SDF compute)
+// Grid parameters (must match Rust GridParams layout exactly - 64 bytes total)
 struct GridParams {
-    resolution: u32,
-    bounds_min: vec3<f32>,
-    bounds_max: vec3<f32>,
-    cell_size: f32,
-    num_moulds: u32,
-    iso_value: f32,
-    _padding: vec2<f32>,
+    resolution_pad: vec4<u32>,  // x = resolution, yzw = padding (offset 0)
+    bounds_min: vec4<f32>,      // xyz = min bounds, w = unused (offset 16)
+    bounds_max_cell: vec4<f32>, // xyz = max bounds, w = cell_size (offset 32)
+    num_moulds: u32,            // offset 48
+    iso_value: f32,             // offset 52
+    _pad: vec2<f32>,            // offset 56, padding to 64
 };
 
 // Output counters for variable-length output
@@ -53,8 +52,8 @@ fn cell_coords_to_index(coords: vec3<u32>, res: u32) -> u32 {
 }
 
 // Convert grid coordinates to world position
-fn grid_to_world(coords: vec3<f32>, params: GridParams) -> vec3<f32> {
-    return params.bounds_min + coords * params.cell_size;
+fn grid_to_world(coords: vec3<f32>, cell_size: f32, bounds_min: vec3<f32>) -> vec3<f32> {
+    return bounds_min + coords * cell_size;
 }
 
 // Get SDF value at grid point
@@ -91,10 +90,9 @@ fn cell_intersects_surface(x: u32, y: u32, z: u32, res: u32, iso: f32) -> bool {
 }
 
 // Compute SDF gradient using central differences
-fn compute_gradient(pos: vec3<f32>, params: GridParams) -> vec3<f32> {
+fn compute_gradient(pos: vec3<f32>, res: u32, cell_size: f32, bounds_min: vec3<f32>) -> vec3<f32> {
     // Convert world pos to grid coordinates (fractional)
-    let grid_pos = (pos - params.bounds_min) / params.cell_size;
-    let res = params.resolution;
+    let grid_pos = (pos - bounds_min) / cell_size;
 
     // Sample SDF at offset positions using trilinear interpolation
     // For simplicity, use grid-aligned sampling
@@ -102,9 +100,9 @@ fn compute_gradient(pos: vec3<f32>, params: GridParams) -> vec3<f32> {
     let gy = clamp(u32(grid_pos.y), 0u, res - 2u);
     let gz = clamp(u32(grid_pos.z), 0u, res - 2u);
 
-    let dx = (get_sdf(min(gx + 1u, res - 1u), gy, gz, res) - get_sdf(max(gx, 1u) - 1u, gy, gz, res)) / (2.0 * params.cell_size);
-    let dy = (get_sdf(gx, min(gy + 1u, res - 1u), gz, res) - get_sdf(gx, max(gy, 1u) - 1u, gz, res)) / (2.0 * params.cell_size);
-    let dz = (get_sdf(gx, gy, min(gz + 1u, res - 1u), res) - get_sdf(gx, gy, max(gz, 1u) - 1u, res)) / (2.0 * params.cell_size);
+    let dx = (get_sdf(min(gx + 1u, res - 1u), gy, gz, res) - get_sdf(max(gx, 1u) - 1u, gy, gz, res)) / (2.0 * cell_size);
+    let dy = (get_sdf(gx, min(gy + 1u, res - 1u), gz, res) - get_sdf(gx, max(gy, 1u) - 1u, gz, res)) / (2.0 * cell_size);
+    let dz = (get_sdf(gx, gy, min(gz + 1u, res - 1u), res) - get_sdf(gx, gy, max(gz, 1u) - 1u, res)) / (2.0 * cell_size);
 
     return vec3<f32>(dx, dy, dz);
 }
@@ -114,7 +112,9 @@ fn compute_gradient(pos: vec3<f32>, params: GridParams) -> vec3<f32> {
 // ============================================================================
 @compute @workgroup_size(64, 1, 1)
 fn detect_surface_cells(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let res = params.resolution;
+    let res = params.resolution_pad.x;
+    let cell_size = params.bounds_max_cell.w;
+    let bounds_min = params.bounds_min.xyz;
     let cell_res = res - 1u;
     let total_cells = cell_res * cell_res * cell_res;
     let cell_index = global_id.x;
@@ -145,11 +145,12 @@ fn detect_surface_cells(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Compute vertex position (cell center for fast mode)
     let cell_center = grid_to_world(
         vec3<f32>(f32(x) + 0.5, f32(y) + 0.5, f32(z) + 0.5),
-        params
+        cell_size,
+        bounds_min
     );
 
     // Compute normal from SDF gradient
-    let gradient = compute_gradient(cell_center, params);
+    let gradient = compute_gradient(cell_center, res, cell_size, bounds_min);
     let normal = normalize(gradient);
 
     // Write vertex data (position + normal = 6 floats)
@@ -167,7 +168,7 @@ fn detect_surface_cells(@builtin(global_invocation_id) global_id: vec3<u32>) {
 // ============================================================================
 @compute @workgroup_size(64, 1, 1)
 fn generate_faces(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let res = params.resolution;
+    let res = params.resolution_pad.x;
     let cell_res = res - 1u;
     let total_cells = cell_res * cell_res * cell_res;
     let cell_index = global_id.x;

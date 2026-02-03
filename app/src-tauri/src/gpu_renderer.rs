@@ -1145,21 +1145,32 @@ pub async fn render_scene_gpu(
 }
 
 /// Generate mesh from current mould state and render directly to GPU
-/// This is more efficient than round-tripping through JS
+/// Uses GPU compute for mesh generation (faster than CPU for any resolution)
+/// Falls back to CPU if GPU compute is not available
 #[tauri::command]
 pub async fn generate_and_render_gpu(
     resolution: Option<u32>,
     fast_mode: Option<bool>,
 ) -> Result<(), String> {
-    let res = resolution.unwrap_or(32);
-    let fast = fast_mode.unwrap_or(false);
+    let res = resolution.unwrap_or(64);
+    let _fast = fast_mode.unwrap_or(false);
 
     // Ensure default moulds exist if not initialized by frontend
     crate::mesh_generation::ensure_default_state();
 
-    // Generate mesh in background thread
+    // Try GPU compute first
+    let gpu_result = generate_mesh_gpu_compute_internal(res).await;
+
+    match gpu_result {
+        Ok(()) => return Ok(()),
+        Err(e) => {
+            println!("GPU compute failed ({}), falling back to CPU", e);
+        }
+    }
+
+    // Fallback to CPU mesh generation
     let mesh_result = tokio::task::spawn_blocking(move || {
-        crate::mesh_generation::generate_mesh_from_state_with_quality(res, fast)
+        crate::mesh_generation::generate_mesh_from_state_with_quality(res, true) // fast mode for CPU fallback
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?;
@@ -1167,7 +1178,7 @@ pub async fn generate_and_render_gpu(
     let mesh = match mesh_result {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("Mesh generation failed: {}", e);
+            eprintln!("CPU mesh generation failed: {}", e);
             return Err(e);
         }
     };
@@ -1177,11 +1188,9 @@ pub async fn generate_and_render_gpu(
     let mut interleaved = Vec::with_capacity(vertex_count * 6);
 
     for i in 0..vertex_count {
-        // Position
         interleaved.push(mesh.vertices[i * 3]);
         interleaved.push(mesh.vertices[i * 3 + 1]);
         interleaved.push(mesh.vertices[i * 3 + 2]);
-        // Normal
         interleaved.push(mesh.normals[i * 3]);
         interleaved.push(mesh.normals[i * 3 + 1]);
         interleaved.push(mesh.normals[i * 3 + 2]);
@@ -1190,7 +1199,6 @@ pub async fn generate_and_render_gpu(
     let mut renderer = GPU_RENDERER.lock().unwrap();
 
     if let Some(ref mut renderer) = *renderer {
-        // Generate UI background quads
         let scale = get_scale_factor();
         let (ui_vertices, ui_indices) = generate_ui_bounds(
             renderer.surface_config.width,
@@ -1198,10 +1206,74 @@ pub async fn generate_and_render_gpu(
             scale,
         );
 
-        // Update buffers and render
         renderer.update_ui_data(&ui_vertices, &ui_indices);
         renderer.update_scene_data(&interleaved, &mesh.indices);
         renderer.render()?;
+        Ok(())
+    } else {
+        Err("GPU renderer not initialized".to_string())
+    }
+}
+
+/// Internal function for GPU compute mesh generation
+async fn generate_mesh_gpu_compute_internal(resolution: u32) -> Result<(), String> {
+    // Get mould manager from shared state
+    let mould_manager = crate::mesh_generation::get_mould_manager_for_gpu()?;
+
+    let bounds = AABB {
+        min: Pt3::new(-1.0, -1.0, -1.0),
+        max: Pt3::new(1.0, 1.5, 1.0),
+    };
+
+    // Take compute pipeline out of mutex to run async operation
+    let mut compute_opt = {
+        let mut guard = GPU_COMPUTE.lock().unwrap();
+        guard.take()
+    };
+
+    let result = if let Some(ref mut compute) = compute_opt {
+        compute.generate_mesh(&mould_manager, resolution, bounds).await
+    } else {
+        Err("GPU compute pipeline not initialized".to_string())
+    };
+
+    // Put compute pipeline back
+    {
+        let mut guard = GPU_COMPUTE.lock().unwrap();
+        *guard = compute_opt;
+    }
+
+    let mesh = result?;
+
+    // Interleave vertices and normals for rendering
+    let vertex_count = mesh.vertices.len() / 3;
+    let mut interleaved = Vec::with_capacity(vertex_count * 6);
+
+    for i in 0..vertex_count {
+        interleaved.push(mesh.vertices[i * 3]);
+        interleaved.push(mesh.vertices[i * 3 + 1]);
+        interleaved.push(mesh.vertices[i * 3 + 2]);
+        interleaved.push(mesh.normals[i * 3]);
+        interleaved.push(mesh.normals[i * 3 + 1]);
+        interleaved.push(mesh.normals[i * 3 + 2]);
+    }
+
+    // Update render buffers and display
+    let mut renderer = GPU_RENDERER.lock().unwrap();
+    if let Some(ref mut renderer) = *renderer {
+        let scale = get_scale_factor();
+        let (ui_vertices, ui_indices) = generate_ui_bounds(
+            renderer.surface_config.width,
+            renderer.surface_config.height,
+            scale,
+        );
+
+        renderer.update_ui_data(&ui_vertices, &ui_indices);
+        renderer.update_scene_data(&interleaved, &mesh.indices);
+        renderer.render()?;
+
+        println!("GPU compute: {} vertices, {} triangles at resolution {}",
+                 vertex_count, mesh.indices.len() / 3, resolution);
         Ok(())
     } else {
         Err("GPU renderer not initialized".to_string())
