@@ -1649,6 +1649,18 @@ pub async fn generate_and_render_gpu_compute(
 }
 
 #[tauri::command]
+pub async fn set_skeleton_visible(visible: bool) -> Result<(), String> {
+    let mut renderer = GPU_RENDERER.lock().unwrap();
+    if let Some(ref mut renderer) = *renderer {
+        renderer.set_show_skeleton(visible);
+        renderer.render()?;
+        Ok(())
+    } else {
+        Err("GPU renderer not initialized".to_string())
+    }
+}
+
+#[tauri::command]
 pub async fn set_wireframe_mode(enabled: bool) -> Result<(), String> {
     let mut renderer = GPU_RENDERER.lock().unwrap();
     if let Some(ref mut renderer) = *renderer {

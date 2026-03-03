@@ -23,6 +23,7 @@ type ThreeDViewportProps = {
 
 const ThreeDViewport = (props: ThreeDViewportProps) => {
   const [showWireframe, setShowWireframe] = createSignal(false);
+  const [showSkeletonLocal, setShowSkeletonLocal] = createSignal(true);
   let viewportContentRef: HTMLDivElement | undefined;
 
   // Humanoid data state
@@ -369,6 +370,22 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
           <div class="viewport-tab">UV Editor</div>
         </div>
         <div class="viewport-tools">
+          <button
+            class="tool-btn"
+            title="Toggle Skeleton"
+            onClick={async () => {
+              const next = !showSkeletonLocal();
+              setShowSkeletonLocal(next);
+              if (gpuInitialized()) {
+                await invoke("set_skeleton_visible", { visible: next });
+              }
+            }}
+            style={{
+              background: showSkeletonLocal() ? 'rgba(255, 255, 255, 0.2)' : 'transparent'
+            }}
+          >
+            <Icon name="user" size={16} />
+          </button>
           <button
             class="tool-btn"
             title="Toggle Wireframe"

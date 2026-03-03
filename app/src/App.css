@@ -213,6 +213,7 @@ html.gpu-mode, html.gpu-mode body, html.gpu-mode #root, html.gpu-mode .app, html
 .viewport-content {
   flex: 1;
   overflow: hidden;
+  position: relative;
 }
 
 /* Inspector */
