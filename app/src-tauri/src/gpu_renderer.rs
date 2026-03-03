@@ -52,7 +52,12 @@ impl OrbitCamera {
     /// Build view matrix using nalgebra's look_at_rh (right-handed, -Z forward)
     pub fn view_matrix(&self) -> Matrix4<f32> {
         let eye = self.position();
-        let up = Vector3::new(0.0, 1.0, 0.0);
+        // Flip up vector when in the bottom hemisphere so over-the-pole rotation works
+        let up = if self.pitch.cos() >= 0.0 {
+            Vector3::new(0.0, 1.0, 0.0)
+        } else {
+            Vector3::new(0.0, -1.0, 0.0)
+        };
         Matrix4::look_at_rh(&eye, &self.target, &up)
     }
 
@@ -172,7 +177,7 @@ pub struct LightUniform {
     color: [f32; 3],
     _padding2: f32,
     ambient: [f32; 3],
-    _padding3: f32,
+    alpha: f32, // Material transparency (0.0 = invisible, 1.0 = opaque)
 }
 
 impl Default for LightUniform {
@@ -185,7 +190,7 @@ impl Default for LightUniform {
             color: [1.0, 0.98, 0.95], // Slightly warm white
             _padding2: 0.0,
             ambient: [0.15, 0.15, 0.18], // Cool ambient
-            _padding3: 0.0,
+            alpha: 0.6, // Semi-transparent to see skeleton through mesh
         }
     }
 }
@@ -221,9 +226,11 @@ pub struct GpuRenderer {
     surface_config: SurfaceConfiguration,
     ui_render_pipeline: wgpu::RenderPipeline,
     scene_render_pipeline: wgpu::RenderPipeline,
+    debug_render_pipeline: wgpu::RenderPipeline,  // Unlit pipeline for skeleton/debug
     camera_buffer: wgpu::Buffer,
     light_buffer: wgpu::Buffer,
     scene_bind_group: wgpu::BindGroup,
+    debug_bind_group: wgpu::BindGroup,
     scene_bind_group_layout: wgpu::BindGroupLayout,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
@@ -237,8 +244,14 @@ pub struct GpuRenderer {
     scene_index_buffer: wgpu::Buffer,
     scene_vertex_buffer_size: u64,
     scene_index_buffer_size: u64,
+    debug_vertex_buffer: wgpu::Buffer,
+    debug_index_buffer: wgpu::Buffer,
+    debug_vertex_buffer_size: u64,
+    debug_index_buffer_size: u64,
     ui_num_indices: u32,
     scene_num_indices: u32,
+    debug_num_indices: u32,
+    show_skeleton: bool,
 }
 
 impl GpuRenderer {
@@ -419,6 +432,43 @@ impl GpuRenderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/basic.wgsl").into()),
         });
 
+        // Debug shader - unlit vertex colors with camera transform (for skeleton visualization)
+        let debug_shader_source = r#"
+            struct CameraUniform {
+                view_proj: mat4x4<f32>,
+                view: mat4x4<f32>,
+                camera_pos: vec3<f32>,
+                _padding: f32,
+            };
+            @group(0) @binding(0)
+            var<uniform> camera: CameraUniform;
+
+            struct VertexInput {
+                @location(0) position: vec3<f32>,
+                @location(1) color: vec3<f32>,
+            };
+            struct VertexOutput {
+                @builtin(position) position: vec4<f32>,
+                @location(0) color: vec3<f32>,
+            };
+            @vertex
+            fn vs_main(input: VertexInput) -> VertexOutput {
+                var output: VertexOutput;
+                output.position = camera.view_proj * vec4<f32>(input.position, 1.0);
+                output.color = input.color;
+                return output;
+            }
+            @fragment
+            fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+                return vec4<f32>(input.color, 1.0);
+            }
+        "#;
+
+        let debug_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Debug Shader"),
+            source: wgpu::ShaderSource::Wgsl(debug_shader_source.into()),
+        });
+
         // UI pipeline - no bind groups, direct NDC
         let ui_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -501,11 +551,81 @@ impl GpuRenderer {
             vertex: wgpu::VertexState {
                 module: &scene_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[scene_vertex_layout],
+                buffers: &[scene_vertex_layout.clone()],
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &scene_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None, // Disable culling for transparency (see both sides)
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        // Debug pipeline - uses camera bind group but unlit shader (for skeleton/debug viz)
+        // Uses only camera binding (binding 0), ignoring light binding
+        let debug_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Debug Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let debug_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Debug Pipeline Layout"),
+                bind_group_layouts: &[&debug_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let debug_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Debug Render Pipeline"),
+            layout: Some(&debug_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &debug_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[scene_vertex_layout], // Same layout: position + color
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &debug_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_format,
@@ -518,15 +638,15 @@ impl GpuRenderer {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back), // Back-face culling enabled
+                cull_mode: None, // No culling for debug geometry
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
             },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: depth_format,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Less,
+                depth_write_enabled: false, // Don't write to depth buffer
+                depth_compare: wgpu::CompareFunction::Always, // Always draw on top
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -549,6 +669,20 @@ impl GpuRenderer {
         let ui_index_buffer = device.create_buffer_init(&empty_buffer_desc);
         let scene_vertex_buffer = device.create_buffer_init(&empty_buffer_desc);
         let scene_index_buffer = device.create_buffer_init(&empty_buffer_desc);
+        let debug_vertex_buffer = device.create_buffer_init(&empty_buffer_desc);
+        let debug_index_buffer = device.create_buffer_init(&empty_buffer_desc);
+
+        // Create debug bind group (camera only, no lights)
+        let debug_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Debug Bind Group"),
+            layout: &debug_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+            ],
+        });
 
         // Initialize GPU compute pipeline separately
         init_compute_pipeline(device.clone(), queue.clone());
@@ -560,9 +694,11 @@ impl GpuRenderer {
             surface_config,
             ui_render_pipeline,
             scene_render_pipeline,
+            debug_render_pipeline,
             camera_buffer,
             light_buffer,
             scene_bind_group,
+            debug_bind_group,
             scene_bind_group_layout,
             depth_texture,
             depth_view,
@@ -581,8 +717,14 @@ impl GpuRenderer {
             scene_index_buffer,
             scene_vertex_buffer_size: 0,
             scene_index_buffer_size: 0,
+            debug_vertex_buffer,
+            debug_index_buffer,
+            debug_vertex_buffer_size: 0,
+            debug_index_buffer_size: 0,
             ui_num_indices: 0,
             scene_num_indices: 0,
+            debug_num_indices: 0,
+            show_skeleton: true, // Enable skeleton by default
         })
     }
 
@@ -598,8 +740,8 @@ impl GpuRenderer {
 
     /// Update orbit camera parameters and refresh the uniform buffer
     pub fn set_camera(&mut self, yaw: f32, pitch: f32, distance: f32) {
-        // Clamp pitch to avoid gimbal lock (slightly less than 90 degrees)
-        self.camera.pitch = pitch.clamp(-1.5, 1.5);
+        // Allow full over-the-pole rotation; up-vector flip in view_matrix handles the singularity
+        self.camera.pitch = pitch;
         self.camera.yaw = yaw;
         self.camera.distance = distance.max(0.5); // Minimum distance
         self.update_camera_uniform();
@@ -689,6 +831,50 @@ impl GpuRenderer {
         self.queue.write_buffer(&self.scene_index_buffer, 0, bytemuck::cast_slice(indices));
 
         self.scene_num_indices = indices.len() as u32;
+    }
+
+    /// Update debug/skeleton vertex and index buffers
+    pub fn update_debug_data(&mut self, vertices: &[f32], indices: &[u32]) {
+        if vertices.is_empty() || indices.is_empty() {
+            self.debug_num_indices = 0;
+            return;
+        }
+
+        let vertex_stride = std::mem::size_of::<[f32; 6]>() as wgpu::BufferAddress;
+        let required_vertex_size = (vertices.len() * std::mem::size_of::<f32>()) as u64;
+
+        if required_vertex_size > self.debug_vertex_buffer_size {
+            self.debug_vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Debug Vertex Buffer"),
+                size: required_vertex_size.max(vertex_stride),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.debug_vertex_buffer_size = required_vertex_size;
+        }
+
+        self.queue.write_buffer(&self.debug_vertex_buffer, 0, bytemuck::cast_slice(vertices));
+
+        let required_index_size = (indices.len() * std::mem::size_of::<u32>()) as u64;
+
+        if required_index_size > self.debug_index_buffer_size {
+            self.debug_index_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Debug Index Buffer"),
+                size: required_index_size.max(std::mem::size_of::<u32>() as u64),
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.debug_index_buffer_size = required_index_size;
+        }
+
+        self.queue.write_buffer(&self.debug_index_buffer, 0, bytemuck::cast_slice(indices));
+
+        self.debug_num_indices = indices.len() as u32;
+    }
+
+    /// Set skeleton visibility
+    pub fn set_show_skeleton(&mut self, show: bool) {
+        self.show_skeleton = show;
     }
 
     pub fn update_viewport(&mut self, x: u32, y: u32, width: u32, height: u32) {
@@ -828,6 +1014,33 @@ impl GpuRenderer {
                 render_pass.set_vertex_buffer(0, self.scene_vertex_buffer.slice(..));
                 render_pass.set_index_buffer(self.scene_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 render_pass.draw_indexed(0..self.scene_num_indices, 0, 0..1);
+            }
+
+            // === Phase 3: Draw debug/skeleton geometry (unlit, with camera projection) ===
+            if self.show_skeleton && self.debug_num_indices > 0 {
+                render_pass.set_pipeline(&self.debug_render_pipeline);
+                render_pass.set_bind_group(0, &self.debug_bind_group, &[]);
+
+                // Same viewport as scene
+                render_pass.set_viewport(
+                    self.viewport.x as f32,
+                    self.viewport.y as f32,
+                    self.viewport.width as f32,
+                    self.viewport.height as f32,
+                    0.0,
+                    1.0,
+                );
+
+                render_pass.set_scissor_rect(
+                    self.viewport.x,
+                    self.viewport.y,
+                    self.viewport.width,
+                    self.viewport.height,
+                );
+
+                render_pass.set_vertex_buffer(0, self.debug_vertex_buffer.slice(..));
+                render_pass.set_index_buffer(self.debug_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                render_pass.draw_indexed(0..self.debug_num_indices, 0, 0..1);
             }
         }
 
@@ -1016,8 +1229,7 @@ pub fn init_gpu_renderer<R: Runtime>(
     renderer.update_ui_data(&ui_vertices, &ui_indices);
     renderer.render()?;
 
-    // Initialize GPU compute pipeline
-    init_compute_pipeline(renderer.device.clone(), renderer.queue.clone());
+    // Note: GPU compute pipeline is initialized inside GpuRenderer::new()
 
     let mut global_renderer = GPU_RENDERER.lock().unwrap();
     *global_renderer = Some(renderer);
@@ -1232,7 +1444,8 @@ async fn generate_mesh_gpu_compute_internal(resolution: u32) -> Result<(), Strin
     };
 
     let result = if let Some(ref mut compute) = compute_opt {
-        compute.generate_mesh(&mould_manager, resolution, bounds).await
+        // Use Surface Nets (simpler and more robust than Dual Contouring)
+        compute.generate_mesh_surface_nets(&mould_manager, resolution, bounds).await
     } else {
         Err("GPU compute pipeline not initialized".to_string())
     };
@@ -1258,6 +1471,10 @@ async fn generate_mesh_gpu_compute_internal(resolution: u32) -> Result<(), Strin
         interleaved.push(mesh.normals[i * 3 + 2]);
     }
 
+    // Generate skeleton debug geometry
+    let (debug_vertices, debug_indices) = crate::mesh_generation::generate_skeleton_debug_geometry()
+        .unwrap_or_else(|_| (Vec::new(), Vec::new()));
+
     // Update render buffers and display
     let mut renderer = GPU_RENDERER.lock().unwrap();
     if let Some(ref mut renderer) = *renderer {
@@ -1270,10 +1487,11 @@ async fn generate_mesh_gpu_compute_internal(resolution: u32) -> Result<(), Strin
 
         renderer.update_ui_data(&ui_vertices, &ui_indices);
         renderer.update_scene_data(&interleaved, &mesh.indices);
+        renderer.update_debug_data(&debug_vertices, &debug_indices);
         renderer.render()?;
 
-        println!("GPU compute: {} vertices, {} triangles at resolution {}",
-                 vertex_count, mesh.indices.len() / 3, resolution);
+        println!("GPU compute: {} vertices, {} triangles, {} debug indices at resolution {}",
+                 vertex_count, mesh.indices.len() / 3, debug_indices.len(), resolution);
         Ok(())
     } else {
         Err("GPU renderer not initialized".to_string())
@@ -1318,7 +1536,8 @@ pub async fn generate_and_render_gpu_compute(
     };
 
     let result = if let Some(ref mut compute) = compute_opt {
-        compute.generate_mesh(&mould_manager, res, bounds).await
+        // Use Surface Nets (simpler and more robust than Dual Contouring)
+        compute.generate_mesh_surface_nets(&mould_manager, res, bounds).await
     } else {
         Err("GPU compute pipeline not initialized".to_string())
     };
@@ -1344,6 +1563,10 @@ pub async fn generate_and_render_gpu_compute(
         interleaved.push(mesh.normals[i * 3 + 2]);
     }
 
+    // Generate skeleton debug geometry
+    let (debug_vertices, debug_indices) = crate::mesh_generation::generate_skeleton_debug_geometry()
+        .unwrap_or_else(|_| (Vec::new(), Vec::new()));
+
     // Update render buffers and display
     let mut renderer = GPU_RENDERER.lock().unwrap();
     if let Some(ref mut renderer) = *renderer {
@@ -1356,6 +1579,7 @@ pub async fn generate_and_render_gpu_compute(
 
         renderer.update_ui_data(&ui_vertices, &ui_indices);
         renderer.update_scene_data(&interleaved, &mesh.indices);
+        renderer.update_debug_data(&debug_vertices, &debug_indices);
         renderer.render()?;
 
         println!("GPU compute: generated {} vertices, {} triangles at resolution {}",
