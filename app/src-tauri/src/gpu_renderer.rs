@@ -1502,8 +1502,9 @@ async fn generate_mesh_gpu_compute_internal(resolution: u32) -> Result<(), Strin
     };
 
     let result = if let Some(ref mut compute) = compute_opt {
-        // Use Surface Nets (simpler and more robust than Dual Contouring)
-        compute.generate_mesh_surface_nets(&mould_manager, resolution, bounds).await
+        // Sparse brick path: detects surface bricks first, allocates output sized to
+        // actual geometry rather than (resolution-1)^3, supports all resolutions safely
+        compute.generate_mesh_sparse(&mould_manager, resolution, bounds, false).await
     } else {
         Err("GPU compute pipeline not initialized".to_string())
     };
@@ -1594,8 +1595,7 @@ pub async fn generate_and_render_gpu_compute(
     };
 
     let result = if let Some(ref mut compute) = compute_opt {
-        // Use Surface Nets (simpler and more robust than Dual Contouring)
-        compute.generate_mesh_surface_nets(&mould_manager, res, bounds).await
+        compute.generate_mesh_sparse(&mould_manager, res, bounds, false).await
     } else {
         Err("GPU compute pipeline not initialized".to_string())
     };
