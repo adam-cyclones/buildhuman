@@ -226,6 +226,7 @@ pub struct GpuRenderer {
     surface_config: SurfaceConfiguration,
     ui_render_pipeline: wgpu::RenderPipeline,
     scene_render_pipeline: wgpu::RenderPipeline,
+    wireframe_render_pipeline: wgpu::RenderPipeline,
     debug_render_pipeline: wgpu::RenderPipeline,  // Unlit pipeline for skeleton/debug
     camera_buffer: wgpu::Buffer,
     light_buffer: wgpu::Buffer,
@@ -252,6 +253,7 @@ pub struct GpuRenderer {
     scene_num_indices: u32,
     debug_num_indices: u32,
     show_skeleton: bool,
+    wireframe_enabled: bool,
 }
 
 impl GpuRenderer {
@@ -288,7 +290,7 @@ impl GpuRenderer {
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("BuildHuman GPU Device"),
-                    required_features: wgpu::Features::empty(),
+                    required_features: wgpu::Features::POLYGON_MODE_LINE,
                     required_limits: wgpu::Limits::default(),
                     memory_hints: Default::default(),
                 },
@@ -589,6 +591,50 @@ impl GpuRenderer {
             cache: None,
         });
 
+        let wireframe_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Wireframe Render Pipeline"),
+            layout: Some(&scene_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &scene_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[scene_vertex_layout.clone()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &scene_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Line,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
         // Debug pipeline - uses camera bind group but unlit shader (for skeleton/debug viz)
         // Uses only camera binding (binding 0), ignoring light binding
         let debug_bind_group_layout =
@@ -694,6 +740,7 @@ impl GpuRenderer {
             surface_config,
             ui_render_pipeline,
             scene_render_pipeline,
+            wireframe_render_pipeline,
             debug_render_pipeline,
             camera_buffer,
             light_buffer,
@@ -725,6 +772,7 @@ impl GpuRenderer {
             scene_num_indices: 0,
             debug_num_indices: 0,
             show_skeleton: true, // Enable skeleton by default
+            wireframe_enabled: false,
         })
     }
 
@@ -877,6 +925,11 @@ impl GpuRenderer {
         self.show_skeleton = show;
     }
 
+    /// Toggle wireframe rendering mode
+    pub fn set_wireframe(&mut self, enabled: bool) {
+        self.wireframe_enabled = enabled;
+    }
+
     pub fn update_viewport(&mut self, x: u32, y: u32, width: u32, height: u32) {
         // Clamp viewport to not exceed surface dimensions
         let clamped_width = width.min(self.surface_config.width.saturating_sub(x));
@@ -990,7 +1043,12 @@ impl GpuRenderer {
 
             // === Phase 2: Draw 3D scene (with camera projection and depth testing) ===
             if self.scene_num_indices > 0 {
-                render_pass.set_pipeline(&self.scene_render_pipeline);
+                let scene_pipeline = if self.wireframe_enabled {
+                    &self.wireframe_render_pipeline
+                } else {
+                    &self.scene_render_pipeline
+                };
+                render_pass.set_pipeline(scene_pipeline);
                 render_pass.set_bind_group(0, &self.scene_bind_group, &[]);
 
                 // Set viewport to the scene area - this makes NDC coords (-1 to 1) map to this region
@@ -1584,6 +1642,18 @@ pub async fn generate_and_render_gpu_compute(
 
         println!("GPU compute: generated {} vertices, {} triangles at resolution {}",
                  vertex_count, mesh.indices.len() / 3, res);
+        Ok(())
+    } else {
+        Err("GPU renderer not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn set_wireframe_mode(enabled: bool) -> Result<(), String> {
+    let mut renderer = GPU_RENDERER.lock().unwrap();
+    if let Some(ref mut renderer) = *renderer {
+        renderer.set_wireframe(enabled);
+        renderer.render()?;
         Ok(())
     } else {
         Err("GPU renderer not initialized".to_string())

@@ -12,7 +12,6 @@ use mesh::MeshData;
 use tauri::{Manager, Listener, Emitter, async_runtime, RunEvent, WindowEvent};
 use tokio::sync::oneshot;
 use tokio::time;
-use std::sync::Arc;
 
 // A helper function to serialize mesh data into a byte buffer
 fn serialize_mesh_to_bytes(mesh: MeshData) -> Vec<u8> {
@@ -163,46 +162,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Clean up stale .blend files from previous session
             println!("BuildHuman starting up...");
 
-            // Check if GPU mode is enabled and initialize renderer on main thread
-            let settings = settings::load_settings_sync();
-            if settings.render_mode == "gpu" {
-                println!("GPU mode enabled, initializing wgpu renderer...");
+            // Initialize GPU renderer on main thread
+            println!("Initializing wgpu renderer...");
 
-                if let Some(window) = app.get_webview_window("main") {
-                    // Get actual physical size and scale factor (accounts for Retina/HiDPI)
-                    let size = window.inner_size().unwrap_or(tauri::PhysicalSize { width: 1400, height: 900 });
-                    let scale_factor = window.scale_factor().unwrap_or(2.0);
-                    let width = size.width;
-                    let height = size.height;
-                    println!("Window physical size: {}x{}, scale factor: {}", width, height, scale_factor);
+            if let Some(window) = app.get_webview_window("main") {
+                // Get actual physical size and scale factor (accounts for Retina/HiDPI)
+                let size = window.inner_size().unwrap_or(tauri::PhysicalSize { width: 1400, height: 900 });
+                let scale_factor = window.scale_factor().unwrap_or(2.0);
+                let width = size.width;
+                let height = size.height;
+                println!("Window physical size: {}x{}, scale factor: {}", width, height, scale_factor);
 
-                    // Store scale factor for resize handler
-                    gpu_renderer::set_scale_factor(scale_factor);
+                // Store scale factor for resize handler
+                gpu_renderer::set_scale_factor(scale_factor);
 
-                    // Use catch_unwind to prevent GPU init failures from crashing the app
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        async_runtime::block_on(
-                            gpu_renderer::GpuRenderer::new(&window, 0, 0, width, height)
-                        )
-                    }));
+                // Use catch_unwind to prevent GPU init failures from crashing the app
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    async_runtime::block_on(
+                        gpu_renderer::GpuRenderer::new(&window, 0, 0, width, height)
+                    )
+                }));
 
-                    match result {
-                        Ok(Ok(mut renderer)) => {
-                            // Do an initial render with UI bounds using physical size
-                            let (vertices, indices) = gpu_renderer::generate_ui_bounds(width, height, scale_factor);
-                            if let Err(e) = renderer.render_with_scene(&vertices, &indices, &[], &[]) {
-                                println!("Initial render failed: {}", e);
-                            } else {
-                                println!("GPU renderer initialized and rendered UI bounds");
-                            }
-                            gpu_renderer::set_global_renderer(renderer);
+                match result {
+                    Ok(Ok(mut renderer)) => {
+                        // Do an initial render with UI bounds using physical size
+                        let (vertices, indices) = gpu_renderer::generate_ui_bounds(width, height, scale_factor);
+                        if let Err(e) = renderer.render_with_scene(&vertices, &indices, &[], &[]) {
+                            println!("Initial render failed: {}", e);
+                        } else {
+                            println!("GPU renderer initialized and rendered UI bounds");
                         }
-                        Ok(Err(e)) => {
-                            println!("Failed to initialize GPU renderer: {}", e);
-                        }
-                        Err(panic_info) => {
-                            println!("GPU renderer initialization panicked: {:?}", panic_info);
-                        }
+                        gpu_renderer::set_global_renderer(renderer);
+                    }
+                    Ok(Err(e)) => {
+                        println!("Failed to initialize GPU renderer: {}", e);
+                    }
+                    Err(panic_info) => {
+                        println!("GPU renderer initialization panicked: {:?}", panic_info);
                     }
                 }
             }
@@ -237,6 +233,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             gpu_renderer::generate_and_render_gpu_compute,
             gpu_renderer::update_gpu_camera,
             gpu_renderer::get_gpu_camera,
+            gpu_renderer::set_wireframe_mode,
             gpu_renderer::shutdown_gpu_renderer,
         ])
         .build(generate_tauri_context())

@@ -372,7 +372,13 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
           <button
             class="tool-btn"
             title="Toggle Wireframe"
-            onClick={() => setShowWireframe(!showWireframe())}
+            onClick={async () => {
+              const next = !showWireframe();
+              setShowWireframe(next);
+              if (gpuInitialized()) {
+                await invoke("set_wireframe_mode", { enabled: next });
+              }
+            }}
             style={{
               background: showWireframe() ? 'rgba(255, 255, 255, 0.2)' : 'transparent'
             }}
