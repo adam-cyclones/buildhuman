@@ -11,7 +11,7 @@ pub mod voxel_grid;
 // Re-export commonly used items
 pub use brick_map::BrickMap;
 pub use dual_contouring::{dual_contouring, dual_contouring_fast, dual_contouring_brick_map};
-pub use mould::{MouldManager, WorldSpaceMould};
+pub use mould::MouldManager;
 pub use skeleton::Skeleton;
 pub use types::{JointData, MeshData, MouldData, Pt3, AABB};
 pub use voxel_grid::VoxelGrid;

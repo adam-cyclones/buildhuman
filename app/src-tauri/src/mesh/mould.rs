@@ -10,6 +10,8 @@ pub struct Mould {
     pub center: Pt3, // Local offset from parent bone
     pub radius: f32,
     pub blend_radius: f32,
+    pub blend_group: u32,
+    pub separation_bias: f32,
     pub parent_joint_id: Option<String>,
     // Capsule-specific
     pub end_point: Option<Pt3>,
@@ -28,6 +30,8 @@ impl From<MouldData> for Mould {
             center: data.center.into(),
             radius: data.radius,
             blend_radius: data.blend_radius,
+            blend_group: data.blend_group.unwrap_or(0),
+            separation_bias: data.separation_bias.unwrap_or(0.0),
             parent_joint_id: data.parent_joint_id,
             end_point: data.end_point.map(|p| p.into()),
             radial_profiles: data.radial_profiles,
@@ -226,6 +230,9 @@ impl MouldManager {
 
         // Blend all moulds with smooth min using CACHED transforms
         let mut result = f32::INFINITY;
+        let mut best_group: u32 = 0;
+        let mut best_sep: f32 = 0.0;
+        let mut initialized = false;
 
         for (id, mould) in &self.moulds {
             // Use cached world-space positions - HUGE performance win!
@@ -269,7 +276,33 @@ impl MouldManager {
                 }
             };
 
-            result = smooth_min_poly(result, sdf_value, mould.blend_radius);
+            if !initialized {
+                result = sdf_value;
+                best_group = mould.blend_group;
+                best_sep = mould.separation_bias;
+                initialized = true;
+                continue;
+            }
+
+            let compatible = best_group == 0
+                || mould.blend_group == 0
+                || best_group == mould.blend_group;
+
+            if compatible {
+                result = smooth_min_poly(result, sdf_value, mould.blend_radius);
+                if best_group == 0 || mould.blend_group == 0 {
+                    best_group = 0;
+                    best_sep = best_sep.max(mould.separation_bias);
+                }
+            } else {
+                let min_before = result.min(sdf_value);
+                let separation = best_sep.max(mould.separation_bias);
+                result = crate::mesh::sdf::union_with_separation(result, sdf_value, separation);
+                if sdf_value <= min_before {
+                    best_group = mould.blend_group;
+                    best_sep = mould.separation_bias;
+                }
+            }
         }
 
         result
@@ -277,53 +310,106 @@ impl MouldManager {
 
     /// Get moulds with world-space coordinates for GPU compute
     /// Returns mould data with center/end_point transformed to world space
-    /// ProfiledCapsules are converted to regular Capsules with average radius
     pub fn get_moulds_world_space(&self) -> Vec<WorldSpaceMould> {
         if !self.cache_valid {
             panic!("Cache must be rebuilt before calling get_moulds_world_space");
         }
 
         let mut result = Vec::new();
+        let mut joint_best: HashMap<String, (String, Pt3, f32, f32)> = HashMap::new();
+
+        let max_profile_radius = |mould: &Mould| -> f32 {
+            if mould.shape == MouldShape::ProfiledCapsule {
+                if let Some(ref profiles) = mould.radial_profiles {
+                    let mut max_r = mould.radius;
+                    for ring in profiles {
+                        for &r in ring {
+                            if r > max_r {
+                                max_r = r;
+                            }
+                        }
+                    }
+                    return max_r;
+                }
+            }
+            mould.radius
+        };
 
         for (id, mould) in &self.moulds {
             let cached = self.mould_cache.get(id).expect("Mould not in cache");
 
-            // For profiled capsules, calculate average radius from all profiles
-            let effective_radius = if mould.shape == MouldShape::ProfiledCapsule {
-                if let Some(ref profiles) = mould.radial_profiles {
-                    let total: f32 = profiles.iter()
-                        .flat_map(|ring| ring.iter())
-                        .sum();
-                    let count = profiles.iter()
-                        .map(|ring| ring.len())
-                        .sum::<usize>();
-                    if count > 0 {
-                        total / count as f32
-                    } else {
-                        mould.radius
-                    }
-                } else {
-                    mould.radius
-                }
-            } else {
-                mould.radius
-            };
-
-            // Convert profiled capsule to regular capsule for GPU
-            let effective_shape = if mould.shape == MouldShape::ProfiledCapsule {
-                MouldShape::Capsule
-            } else {
-                mould.shape.clone()
-            };
-
             result.push(WorldSpaceMould {
                 id: id.clone(),
-                shape: effective_shape,
+                shape: mould.shape.clone(),
                 world_center: cached.world_center,
                 world_end: cached.world_end,
-                radius: effective_radius,
+                radius: mould.radius,
                 blend_radius: mould.blend_radius,
+                blend_group: mould.blend_group,
+                separation_bias: mould.separation_bias,
+                radial_profiles: mould.radial_profiles.clone(),
+                use_splines: mould.use_splines,
             });
+
+            if let Some(ref joint_id) = mould.parent_joint_id {
+                let effective_radius = max_profile_radius(mould);
+                let entry = joint_best.entry(joint_id.clone());
+                match entry {
+                    std::collections::hash_map::Entry::Vacant(v) => {
+                        v.insert((
+                            id.clone(),
+                            cached.world_center,
+                            effective_radius,
+                            mould.blend_radius,
+                        ));
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut o) => {
+                        if effective_radius > o.get().2 {
+                            o.insert((
+                                id.clone(),
+                                cached.world_center,
+                                effective_radius,
+                                mould.blend_radius,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(ref skeleton) = self.skeleton {
+            for joint in skeleton.get_joints() {
+                if let Some(ref parent_id) = joint.parent_id {
+                    let parent = joint_best.get(parent_id);
+                    let child = joint_best.get(&joint.id);
+                    if let (Some(parent), Some(child)) = (parent, child) {
+                        let (parent_mould_id, parent_pos, parent_radius, parent_blend) = parent;
+                        let (child_mould_id, child_pos, child_radius, child_blend) = child;
+
+                        let base_radius = parent_radius.max(*child_radius);
+                        let distance = (*child_pos - *parent_pos).magnitude();
+                        let overlap_threshold = (parent_radius + child_radius) * 0.85;
+                        let cap_radius = distance * 0.5;
+                        let bridge_radius = base_radius.min(cap_radius) * 0.7;
+                        let bridge_blend = parent_blend.max(*child_blend) * 0.5;
+
+                        if distance > overlap_threshold && bridge_radius > 0.0001 {
+                            result.push(WorldSpaceMould {
+                                id: format!("bridge:{}->{}", parent_mould_id, child_mould_id),
+                                shape: MouldShape::Capsule,
+                                world_center: *parent_pos,
+                                world_end: Some(*child_pos),
+                                radius: bridge_radius,
+                                blend_radius: bridge_blend,
+                                blend_group: 0,
+                                separation_bias: 0.0,
+                                radial_profiles: None,
+                                use_splines: false,
+                            });
+                        }
+                    }
+                }
+            }
         }
 
         result
@@ -339,4 +425,8 @@ pub struct WorldSpaceMould {
     pub world_end: Option<Pt3>,
     pub radius: f32,
     pub blend_radius: f32,
+    pub blend_group: u32,
+    pub separation_bias: f32,
+    pub radial_profiles: Option<Vec<Vec<f32>>>,
+    pub use_splines: bool,
 }

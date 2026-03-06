@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Skeleton } from "../../../morphing/skeleton";
-import type { MouldManager } from "../../../morphing/mould-manager";
+import type { Skeleton } from "./skeleton";
+import type { MouldManager } from "./mould-manager";
 
 export const syncToRustBackend = async (
   skeleton: Skeleton,

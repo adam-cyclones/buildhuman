@@ -8,8 +8,6 @@ use crate::mesh::{
 };
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
-use crate::mesh::types::Vec3;
-use std::f32::consts::PI;
 
 /// Global state holding the skeleton and mould manager
 pub struct MeshGeneratorState {
@@ -47,7 +45,7 @@ static MESH_STATE: Lazy<Mutex<MeshGeneratorState>> = Lazy::new(|| {
 });
 
 /// Ensure default skeleton and moulds exist if not initialized.
-/// Creates a simple test capsule for GPU rendering testing.
+/// Builds a full humanoid baseline for GPU rendering.
 pub fn ensure_default_state() {
     let mut state = MESH_STATE.lock().unwrap();
 
@@ -55,7 +53,7 @@ pub fn ensure_default_state() {
         return; // Already initialized
     }
 
-    // Create minimal skeleton with just root and a few joints
+    // Create a full humanoid skeleton (mirrors VoxelMorphScene defaults)
     use crate::mesh::skeleton::Joint;
     use crate::mesh::mould::Mould;
     use crate::mesh::types::{Quat, MouldShape};
@@ -65,58 +63,566 @@ pub fn ensure_default_state() {
 
     let mut skeleton = Skeleton::new();
 
+    // Root joint (pelvis)
     skeleton.add_joint(Joint {
-        id: "root".to_string(),
+        id: "pelvis".to_string(),
         local_offset: Vector3::new(0.0, 0.0, 0.0),
         local_rotation: identity_quat,
         parent_id: None,
-        children: vec!["torso".to_string()],
+        children: vec![
+            "spine-lower".to_string(),
+            "hip-left".to_string(),
+            "hip-right".to_string(),
+        ],
+    });
+
+    // Spine chain
+    skeleton.add_joint(Joint {
+        id: "spine-lower".to_string(),
+        local_offset: Vector3::new(0.0, 0.15, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("pelvis".to_string()),
+        children: vec!["spine-upper".to_string()],
     });
     skeleton.add_joint(Joint {
-        id: "torso".to_string(),
-        local_offset: Vector3::new(0.0, 0.5, 0.0),
+        id: "spine-upper".to_string(),
+        local_offset: Vector3::new(0.0, 0.15, 0.0),
         local_rotation: identity_quat,
-        parent_id: Some("root".to_string()),
+        parent_id: Some("spine-lower".to_string()),
+        children: vec!["chest".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "chest".to_string(),
+        local_offset: Vector3::new(0.0, 0.15, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("spine-upper".to_string()),
+        children: vec![
+            "neck".to_string(),
+            "shoulder-left".to_string(),
+            "shoulder-right".to_string(),
+        ],
+    });
+
+    // Neck and head
+    skeleton.add_joint(Joint {
+        id: "neck".to_string(),
+        local_offset: Vector3::new(0.0, 0.15, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("chest".to_string()),
         children: vec!["head".to_string()],
     });
     skeleton.add_joint(Joint {
         id: "head".to_string(),
-        local_offset: Vector3::new(0.0, 0.3, 0.0),
+        local_offset: Vector3::new(0.0, 0.1, 0.0),
         local_rotation: identity_quat,
-        parent_id: Some("torso".to_string()),
+        parent_id: Some("neck".to_string()),
+        children: vec![],
+    });
+
+    // Left arm chain
+    skeleton.add_joint(Joint {
+        id: "shoulder-left".to_string(),
+        local_offset: Vector3::new(-0.15, 0.05, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("chest".to_string()),
+        children: vec!["elbow-left".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "elbow-left".to_string(),
+        local_offset: Vector3::new(-0.25, 0.0, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("shoulder-left".to_string()),
+        children: vec!["wrist-left".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "wrist-left".to_string(),
+        local_offset: Vector3::new(-0.2, 0.0, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("elbow-left".to_string()),
+        children: vec!["hand-left".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "hand-left".to_string(),
+        local_offset: Vector3::new(-0.08, 0.0, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("wrist-left".to_string()),
+        children: vec![],
+    });
+
+    // Right arm chain
+    skeleton.add_joint(Joint {
+        id: "shoulder-right".to_string(),
+        local_offset: Vector3::new(0.15, 0.05, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("chest".to_string()),
+        children: vec!["elbow-right".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "elbow-right".to_string(),
+        local_offset: Vector3::new(0.25, 0.0, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("shoulder-right".to_string()),
+        children: vec!["wrist-right".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "wrist-right".to_string(),
+        local_offset: Vector3::new(0.2, 0.0, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("elbow-right".to_string()),
+        children: vec!["hand-right".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "hand-right".to_string(),
+        local_offset: Vector3::new(0.08, 0.0, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("wrist-right".to_string()),
+        children: vec![],
+    });
+
+    // Left leg chain
+    skeleton.add_joint(Joint {
+        id: "hip-left".to_string(),
+        local_offset: Vector3::new(-0.1, 0.0, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("pelvis".to_string()),
+        children: vec!["knee-left".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "knee-left".to_string(),
+        local_offset: Vector3::new(0.0, -0.4, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("hip-left".to_string()),
+        children: vec!["ankle-left".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "ankle-left".to_string(),
+        local_offset: Vector3::new(0.0, -0.35, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("knee-left".to_string()),
+        children: vec!["foot-left".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "foot-left".to_string(),
+        local_offset: Vector3::new(0.0, 0.0, 0.12),
+        local_rotation: identity_quat,
+        parent_id: Some("ankle-left".to_string()),
+        children: vec![],
+    });
+
+    // Right leg chain
+    skeleton.add_joint(Joint {
+        id: "hip-right".to_string(),
+        local_offset: Vector3::new(0.1, 0.0, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("pelvis".to_string()),
+        children: vec!["knee-right".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "knee-right".to_string(),
+        local_offset: Vector3::new(0.0, -0.4, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("hip-right".to_string()),
+        children: vec!["ankle-right".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "ankle-right".to_string(),
+        local_offset: Vector3::new(0.0, -0.35, 0.0),
+        local_rotation: identity_quat,
+        parent_id: Some("knee-right".to_string()),
+        children: vec!["foot-right".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "foot-right".to_string(),
+        local_offset: Vector3::new(0.0, 0.0, 0.12),
+        local_rotation: identity_quat,
+        parent_id: Some("ankle-right".to_string()),
         children: vec![],
     });
 
     state.skeleton = Some(skeleton.clone());
 
-    // Create mould manager with simple capsules
+    // Create mould manager with full humanoid moulds
     let mut mould_manager = MouldManager::new();
     mould_manager.set_skeleton(skeleton);
 
-    // Add a simple torso capsule
-    mould_manager.add_mould(Mould {
-        id: "torso".to_string(),
-        shape: MouldShape::Capsule,
-        center: Pt3::new(0.0, 0.0, 0.0),
-        end_point: Some(Pt3::new(0.0, 0.5, 0.0)),
-        radius: 0.15,
-        blend_radius: 0.05,
-        parent_joint_id: Some("root".to_string()),
-        radial_profiles: None,
-        use_splines: false,
-    });
+    let blend_radius = 0.2;
 
-    // Add a simple head sphere
+    // Head (profiled capsule)
     mould_manager.add_mould(Mould {
         id: "head".to_string(),
-        shape: MouldShape::Sphere,
+        shape: MouldShape::ProfiledCapsule,
         center: Pt3::new(0.0, 0.0, 0.0),
-        end_point: None,
-        radius: 0.12,
-        blend_radius: 0.03,
+        end_point: Some(Pt3::new(0.0, 0.1, 0.0)),
+        radius: 0.5 * 0.15,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
         parent_joint_id: Some("head".to_string()),
-        radial_profiles: None,
-        use_splines: false,
+        radial_profiles: Some(vec![
+            vec![0.060, 0.065, 0.080, 0.065, 0.060, 0.055, 0.045, 0.055],
+            vec![0.068, 0.072, 0.088, 0.072, 0.068, 0.062, 0.050, 0.062],
+            vec![0.074, 0.078, 0.092, 0.078, 0.074, 0.068, 0.054, 0.068],
+            vec![0.076, 0.080, 0.090, 0.080, 0.076, 0.070, 0.056, 0.070],
+            vec![0.078, 0.082, 0.088, 0.082, 0.078, 0.072, 0.058, 0.072],
+            vec![0.074, 0.078, 0.084, 0.078, 0.074, 0.068, 0.056, 0.068],
+        ]),
+        use_splines: true,
+    });
+
+    // Neck
+    mould_manager.add_mould(Mould {
+        id: "neck".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.0, 0.1, 0.0)),
+        radius: 0.5 * 0.08,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("neck".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.042, 0.044, 0.040, 0.044, 0.042, 0.046, 0.050, 0.046],
+            vec![0.040, 0.041, 0.038, 0.041, 0.040, 0.043, 0.046, 0.043],
+            vec![0.038, 0.039, 0.036, 0.039, 0.038, 0.040, 0.042, 0.040],
+            vec![0.036, 0.037, 0.034, 0.037, 0.036, 0.038, 0.039, 0.038],
+            vec![0.034, 0.035, 0.033, 0.035, 0.034, 0.036, 0.037, 0.036],
+            vec![0.033, 0.034, 0.032, 0.034, 0.033, 0.035, 0.036, 0.035],
+        ]),
+        use_splines: true,
+    });
+
+    // Chest (profiled capsule - ribcage)
+    mould_manager.add_mould(Mould {
+        id: "chest".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, -0.02, 0.0),
+        end_point: Some(Pt3::new(0.0, 0.18, 0.0)),
+        radius: 0.5 * 0.18,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("chest".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.090, 0.092, 0.095, 0.092, 0.090, 0.092, 0.096, 0.092],
+            vec![0.100, 0.103, 0.108, 0.103, 0.100, 0.103, 0.110, 0.103],
+            vec![0.110, 0.114, 0.120, 0.114, 0.110, 0.114, 0.122, 0.114],
+            vec![0.106, 0.110, 0.116, 0.110, 0.106, 0.110, 0.118, 0.110],
+            vec![0.098, 0.101, 0.106, 0.101, 0.098, 0.101, 0.108, 0.101],
+        ]),
+        use_splines: true,
+    });
+
+    // Upper spine (profiled capsule - taper into neck)
+    mould_manager.add_mould(Mould {
+        id: "spine-upper".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.0, 0.15, 0.0)),
+        radius: 0.5 * 0.15,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("spine-upper".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.090, 0.092, 0.095, 0.092, 0.090, 0.092, 0.096, 0.092],
+            vec![0.088, 0.090, 0.093, 0.090, 0.088, 0.090, 0.094, 0.090],
+            vec![0.084, 0.086, 0.089, 0.086, 0.084, 0.086, 0.090, 0.086],
+            vec![0.080, 0.082, 0.085, 0.082, 0.080, 0.082, 0.086, 0.082],
+            vec![0.076, 0.078, 0.081, 0.078, 0.076, 0.078, 0.082, 0.078],
+        ]),
+        use_splines: true,
+    });
+
+    // Lower spine (profiled capsule - waist taper)
+    mould_manager.add_mould(Mould {
+        id: "spine-lower".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.0, 0.15, 0.0)),
+        radius: 0.5 * 0.16,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("spine-lower".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.090, 0.092, 0.095, 0.092, 0.090, 0.092, 0.096, 0.092],
+            vec![0.084, 0.086, 0.089, 0.086, 0.084, 0.086, 0.090, 0.086],
+            vec![0.078, 0.080, 0.083, 0.080, 0.078, 0.080, 0.084, 0.080],
+            vec![0.074, 0.076, 0.079, 0.076, 0.074, 0.076, 0.080, 0.076],
+            vec![0.072, 0.074, 0.077, 0.074, 0.072, 0.074, 0.078, 0.074],
+        ]),
+        use_splines: true,
+    });
+
+    // Pelvis (profiled capsule)
+    mould_manager.add_mould(Mould {
+        id: "pelvis".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, -0.04, 0.0),
+        end_point: Some(Pt3::new(0.0, 0.16, 0.0)),
+        radius: 0.5 * 0.17,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("pelvis".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.095, 0.095, 0.095, 0.095, 0.095, 0.095, 0.095, 0.095],
+            vec![0.105, 0.105, 0.105, 0.105, 0.105, 0.105, 0.105, 0.105],
+            vec![0.112, 0.112, 0.112, 0.112, 0.112, 0.112, 0.112, 0.112],
+            vec![0.108, 0.108, 0.108, 0.108, 0.108, 0.108, 0.108, 0.108],
+            vec![0.102, 0.102, 0.102, 0.102, 0.102, 0.102, 0.102, 0.102],
+        ]),
+        use_splines: true,
+    });
+
+    // Left arm
+    mould_manager.add_mould(Mould {
+        id: "upper-arm-left".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(-0.25, 0.0, 0.0)),
+        radius: 0.5 * 0.07,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("shoulder-left".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.050, 0.052, 0.055, 0.052, 0.050, 0.052, 0.056, 0.052],
+            vec![0.046, 0.048, 0.051, 0.048, 0.046, 0.048, 0.052, 0.048],
+            vec![0.042, 0.044, 0.047, 0.044, 0.042, 0.044, 0.048, 0.044],
+            vec![0.038, 0.040, 0.043, 0.040, 0.038, 0.040, 0.044, 0.040],
+            vec![0.034, 0.035, 0.037, 0.035, 0.034, 0.035, 0.038, 0.035],
+            vec![0.031, 0.032, 0.033, 0.032, 0.031, 0.032, 0.034, 0.032],
+        ]),
+        use_splines: true,
+    });
+
+    mould_manager.add_mould(Mould {
+        id: "forearm-left".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(-0.2, 0.0, 0.0)),
+        radius: 0.5 * 0.06,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("elbow-left".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.030, 0.031, 0.032, 0.031, 0.029, 0.030, 0.031, 0.031],
+            vec![0.032, 0.033, 0.034, 0.033, 0.031, 0.032, 0.033, 0.033],
+            vec![0.033, 0.034, 0.035, 0.034, 0.032, 0.033, 0.034, 0.034],
+            vec![0.030, 0.031, 0.032, 0.031, 0.029, 0.030, 0.031, 0.031],
+            vec![0.026, 0.027, 0.028, 0.027, 0.025, 0.026, 0.027, 0.027],
+            vec![0.022, 0.023, 0.024, 0.023, 0.021, 0.022, 0.023, 0.023],
+        ]),
+        use_splines: true,
+    });
+
+    mould_manager.add_mould(Mould {
+        id: "hand-left".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(-0.10, 0.0, 0.0)),
+        radius: 0.5 * 0.07,
+        blend_radius: 0.08,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("hand-left".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.044, 0.044, 0.044, 0.044, 0.044, 0.044, 0.044, 0.044],
+            vec![0.050, 0.050, 0.050, 0.050, 0.050, 0.050, 0.050, 0.050],
+            vec![0.048, 0.048, 0.048, 0.048, 0.048, 0.048, 0.048, 0.048],
+        ]),
+        use_splines: true,
+    });
+
+    // Right arm
+    mould_manager.add_mould(Mould {
+        id: "upper-arm-right".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.25, 0.0, 0.0)),
+        radius: 0.5 * 0.07,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("shoulder-right".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.050, 0.052, 0.055, 0.052, 0.050, 0.052, 0.056, 0.052],
+            vec![0.046, 0.048, 0.051, 0.048, 0.046, 0.048, 0.052, 0.048],
+            vec![0.042, 0.044, 0.047, 0.044, 0.042, 0.044, 0.048, 0.044],
+            vec![0.038, 0.040, 0.043, 0.040, 0.038, 0.040, 0.044, 0.040],
+            vec![0.034, 0.035, 0.037, 0.035, 0.034, 0.035, 0.038, 0.035],
+            vec![0.031, 0.032, 0.033, 0.032, 0.031, 0.032, 0.034, 0.032],
+        ]),
+        use_splines: true,
+    });
+
+    mould_manager.add_mould(Mould {
+        id: "forearm-right".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.2, 0.0, 0.0)),
+        radius: 0.5 * 0.06,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("elbow-right".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.030, 0.031, 0.032, 0.031, 0.029, 0.030, 0.031, 0.031],
+            vec![0.032, 0.033, 0.034, 0.033, 0.031, 0.032, 0.033, 0.033],
+            vec![0.033, 0.034, 0.035, 0.034, 0.032, 0.033, 0.034, 0.034],
+            vec![0.030, 0.031, 0.032, 0.031, 0.029, 0.030, 0.031, 0.031],
+            vec![0.026, 0.027, 0.028, 0.027, 0.025, 0.026, 0.027, 0.027],
+            vec![0.022, 0.023, 0.024, 0.023, 0.021, 0.022, 0.023, 0.023],
+        ]),
+        use_splines: true,
+    });
+
+    mould_manager.add_mould(Mould {
+        id: "hand-right".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.10, 0.0, 0.0)),
+        radius: 0.5 * 0.07,
+        blend_radius: 0.08,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("hand-right".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.044, 0.044, 0.044, 0.044, 0.044, 0.044, 0.044, 0.044],
+            vec![0.050, 0.050, 0.050, 0.050, 0.050, 0.050, 0.050, 0.050],
+            vec![0.048, 0.048, 0.048, 0.048, 0.048, 0.048, 0.048, 0.048],
+        ]),
+        use_splines: true,
+    });
+
+    // Left leg
+    mould_manager.add_mould(Mould {
+        id: "thigh-left".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.0, -0.4, 0.0)),
+        radius: 0.5 * 0.1,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("hip-left".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.068, 0.070, 0.072, 0.070, 0.066, 0.068, 0.072, 0.070],
+            vec![0.064, 0.066, 0.068, 0.066, 0.062, 0.064, 0.068, 0.066],
+            vec![0.058, 0.060, 0.062, 0.060, 0.056, 0.058, 0.062, 0.060],
+            vec![0.052, 0.054, 0.056, 0.054, 0.050, 0.052, 0.056, 0.054],
+            vec![0.046, 0.048, 0.050, 0.048, 0.044, 0.046, 0.050, 0.048],
+            vec![0.042, 0.043, 0.045, 0.043, 0.041, 0.042, 0.045, 0.043],
+        ]),
+        use_splines: true,
+    });
+
+    mould_manager.add_mould(Mould {
+        id: "shin-left".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.0, -0.35, 0.0)),
+        radius: 0.5 * 0.08,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("knee-left".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.040, 0.041, 0.043, 0.041, 0.038, 0.040, 0.043, 0.041],
+            vec![0.044, 0.046, 0.048, 0.046, 0.042, 0.044, 0.048, 0.046],
+            vec![0.050, 0.052, 0.054, 0.052, 0.048, 0.050, 0.054, 0.052],
+            vec![0.046, 0.048, 0.050, 0.048, 0.044, 0.046, 0.050, 0.048],
+            vec![0.040, 0.041, 0.043, 0.041, 0.038, 0.040, 0.043, 0.041],
+            vec![0.035, 0.036, 0.037, 0.036, 0.033, 0.034, 0.037, 0.036],
+        ]),
+        use_splines: true,
+    });
+
+    mould_manager.add_mould(Mould {
+        id: "foot-left".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.0, 0.0, 0.12)),
+        radius: 0.5 * 0.06,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("ankle-left".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.032, 0.033, 0.036, 0.033, 0.032, 0.020, 0.015, 0.020],
+            vec![0.036, 0.037, 0.038, 0.037, 0.036, 0.010, 0.005, 0.010],
+            vec![0.038, 0.039, 0.039, 0.039, 0.038, 0.012, 0.008, 0.012],
+            vec![0.036, 0.037, 0.037, 0.037, 0.036, 0.018, 0.015, 0.018],
+            vec![0.030, 0.031, 0.032, 0.031, 0.030, 0.016, 0.014, 0.016],
+            vec![0.022, 0.023, 0.024, 0.023, 0.022, 0.018, 0.017, 0.018],
+        ]),
+        use_splines: true,
+    });
+
+    // Right leg
+    mould_manager.add_mould(Mould {
+        id: "thigh-right".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.0, -0.4, 0.0)),
+        radius: 0.5 * 0.1,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("hip-right".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.068, 0.070, 0.072, 0.070, 0.066, 0.068, 0.072, 0.070],
+            vec![0.064, 0.066, 0.068, 0.066, 0.062, 0.064, 0.068, 0.066],
+            vec![0.058, 0.060, 0.062, 0.060, 0.056, 0.058, 0.062, 0.060],
+            vec![0.052, 0.054, 0.056, 0.054, 0.050, 0.052, 0.056, 0.054],
+            vec![0.046, 0.048, 0.050, 0.048, 0.044, 0.046, 0.050, 0.048],
+            vec![0.042, 0.043, 0.045, 0.043, 0.041, 0.042, 0.045, 0.043],
+        ]),
+        use_splines: true,
+    });
+
+    mould_manager.add_mould(Mould {
+        id: "shin-right".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.0, -0.35, 0.0)),
+        radius: 0.5 * 0.08,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("knee-right".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.040, 0.041, 0.043, 0.041, 0.038, 0.040, 0.043, 0.041],
+            vec![0.044, 0.046, 0.048, 0.046, 0.042, 0.044, 0.048, 0.046],
+            vec![0.050, 0.052, 0.054, 0.052, 0.048, 0.050, 0.054, 0.052],
+            vec![0.046, 0.048, 0.050, 0.048, 0.044, 0.046, 0.050, 0.048],
+            vec![0.040, 0.041, 0.043, 0.041, 0.038, 0.040, 0.043, 0.041],
+            vec![0.035, 0.036, 0.037, 0.036, 0.033, 0.034, 0.037, 0.036],
+        ]),
+        use_splines: true,
+    });
+
+    mould_manager.add_mould(Mould {
+        id: "foot-right".to_string(),
+        shape: MouldShape::ProfiledCapsule,
+        center: Pt3::new(0.0, 0.0, 0.0),
+        end_point: Some(Pt3::new(0.0, 0.0, 0.12)),
+        radius: 0.5 * 0.06,
+        blend_radius: 0.06,
+        blend_group: 0,
+        separation_bias: 0.0,
+        parent_joint_id: Some("ankle-right".to_string()),
+        radial_profiles: Some(vec![
+            vec![0.032, 0.033, 0.036, 0.033, 0.032, 0.020, 0.015, 0.020],
+            vec![0.036, 0.037, 0.038, 0.037, 0.036, 0.010, 0.005, 0.010],
+            vec![0.038, 0.039, 0.039, 0.039, 0.038, 0.012, 0.008, 0.012],
+            vec![0.036, 0.037, 0.037, 0.037, 0.036, 0.018, 0.015, 0.018],
+            vec![0.030, 0.031, 0.032, 0.031, 0.030, 0.016, 0.014, 0.016],
+            vec![0.022, 0.023, 0.024, 0.023, 0.022, 0.018, 0.017, 0.018],
+        ]),
+        use_splines: true,
     });
 
     state.mould_manager = Some(mould_manager);
@@ -330,7 +836,8 @@ pub fn generate_mesh_from_state_brick_map(
     };
 
     // Create or reuse brick map for incremental updates
-    let surface_thickness = 0.2; // Allocate bricks within 0.2 units of surface
+    // Must exceed max blend_radius (0.2) to capture blending regions between moulds
+    let surface_thickness = 0.4;
     let needs_rebuild = brick_map_resolution.map(|res| res != resolution).unwrap_or(true)
         || brick_map.is_none();
 
@@ -391,6 +898,8 @@ fn mould_data_changed(old: &MouldData, new: &MouldData) -> bool {
     }
     let radius_changed = (old.radius - new.radius).abs() > 1e-4;
     let blend_changed = (old.blend_radius - new.blend_radius).abs() > 1e-4;
+    let group_changed = old.blend_group != new.blend_group;
+    let sep_changed = (old.separation_bias.unwrap_or(0.0) - new.separation_bias.unwrap_or(0.0)).abs() > 1e-4;
     let center_changed = vec3_changed(&old.center, &new.center);
     let end_changed = match (&old.end_point, &new.end_point) {
         (None, None) => false,
@@ -398,7 +907,7 @@ fn mould_data_changed(old: &MouldData, new: &MouldData) -> bool {
         _ => true,
     };
 
-    radius_changed || blend_changed || center_changed || end_changed
+    radius_changed || blend_changed || group_changed || sep_changed || center_changed || end_changed
 }
 
 fn vec3_changed(a: &crate::mesh::types::Vec3Data, b: &crate::mesh::types::Vec3Data) -> bool {
@@ -523,4 +1032,125 @@ fn extract_mesh_ring_vertices(
     }
 
     Ok(ring_points)
+}
+
+/// Generate skeleton debug visualization geometry for GPU rendering
+/// Returns interleaved vertex data [pos.x, pos.y, pos.z, norm.x, norm.y, norm.z, ...] and indices
+/// Joint color is encoded in the normals (yellow = 1,1,0 for joints, cyan = 0,1,1 for bones)
+pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String> {
+    let state = MESH_STATE.lock().unwrap();
+
+    let skeleton = state.skeleton.as_ref().ok_or("No skeleton initialized")?;
+
+    let mut vertices: Vec<f32> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    let joint_radius = 0.03_f32;
+    let bone_radius = 0.008_f32;
+
+    // Joint color (yellow) - encoded as "normal" for unlit rendering
+    let joint_color = [1.0_f32, 1.0, 0.0];
+    // Bone color (cyan)
+    let bone_color = [0.0_f32, 1.0, 1.0];
+
+    // Generate geometry for each joint
+    for joint in skeleton.get_joints() {
+        let world_transform = skeleton.get_world_transform_immutable(&joint.id);
+        let pos = world_transform.translation.vector;
+
+        // Generate octahedron for joint (6 vertices, 8 triangles)
+        let base_idx = (vertices.len() / 6) as u32;
+
+        // Octahedron vertices: +X, -X, +Y, -Y, +Z, -Z
+        let offsets = [
+            [joint_radius, 0.0, 0.0],
+            [-joint_radius, 0.0, 0.0],
+            [0.0, joint_radius, 0.0],
+            [0.0, -joint_radius, 0.0],
+            [0.0, 0.0, joint_radius],
+            [0.0, 0.0, -joint_radius],
+        ];
+
+        for offset in &offsets {
+            vertices.extend_from_slice(&[
+                pos.x + offset[0],
+                pos.y + offset[1],
+                pos.z + offset[2],
+                joint_color[0],
+                joint_color[1],
+                joint_color[2],
+            ]);
+        }
+
+        // Octahedron faces (8 triangles)
+        // Top half (+Y)
+        indices.extend_from_slice(&[base_idx + 2, base_idx + 4, base_idx + 0]); // +Y, +Z, +X
+        indices.extend_from_slice(&[base_idx + 2, base_idx + 0, base_idx + 5]); // +Y, +X, -Z
+        indices.extend_from_slice(&[base_idx + 2, base_idx + 5, base_idx + 1]); // +Y, -Z, -X
+        indices.extend_from_slice(&[base_idx + 2, base_idx + 1, base_idx + 4]); // +Y, -X, +Z
+        // Bottom half (-Y)
+        indices.extend_from_slice(&[base_idx + 3, base_idx + 0, base_idx + 4]); // -Y, +X, +Z
+        indices.extend_from_slice(&[base_idx + 3, base_idx + 5, base_idx + 0]); // -Y, -Z, +X
+        indices.extend_from_slice(&[base_idx + 3, base_idx + 1, base_idx + 5]); // -Y, -X, -Z
+        indices.extend_from_slice(&[base_idx + 3, base_idx + 4, base_idx + 1]); // -Y, +Z, -X
+
+        // Generate bone to parent (cylinder approximation with 6 sides)
+        if let Some(parent_id) = &joint.parent_id {
+            let parent_transform = skeleton.get_world_transform_immutable(parent_id);
+            let parent_pos = parent_transform.translation.vector;
+
+            // Direction from parent to child
+            let dir = pos - parent_pos;
+            let length = dir.magnitude();
+            if length > 0.001 {
+                let dir_norm = dir / length;
+
+                // Create orthonormal basis
+                let up = if dir_norm.y.abs() < 0.9 {
+                    nalgebra::Vector3::new(0.0, 1.0, 0.0)
+                } else {
+                    nalgebra::Vector3::new(1.0, 0.0, 0.0)
+                };
+                let right = dir_norm.cross(&up).normalize();
+                let actual_up = right.cross(&dir_norm);
+
+                let base_idx = (vertices.len() / 6) as u32;
+
+                // 6-sided cylinder (12 vertices for 2 rings)
+                let segments = 6;
+                for ring in 0..2 {
+                    let ring_center = if ring == 0 { parent_pos } else { pos };
+                    for i in 0..segments {
+                        let angle = (i as f32) * std::f32::consts::TAU / (segments as f32);
+                        let cos_a = angle.cos();
+                        let sin_a = angle.sin();
+                        let offset = right * cos_a * bone_radius + actual_up * sin_a * bone_radius;
+
+                        vertices.extend_from_slice(&[
+                            ring_center.x + offset.x,
+                            ring_center.y + offset.y,
+                            ring_center.z + offset.z,
+                            bone_color[0],
+                            bone_color[1],
+                            bone_color[2],
+                        ]);
+                    }
+                }
+
+                // Cylinder triangles (connecting the two rings)
+                for i in 0..segments {
+                    let next = (i + 1) % segments;
+                    let i0 = base_idx + i as u32;
+                    let i1 = base_idx + next as u32;
+                    let i2 = base_idx + (segments + i) as u32;
+                    let i3 = base_idx + (segments + next) as u32;
+
+                    indices.extend_from_slice(&[i0, i2, i1]);
+                    indices.extend_from_slice(&[i1, i2, i3]);
+                }
+            }
+        }
+    }
+
+    Ok((vertices, indices))
 }

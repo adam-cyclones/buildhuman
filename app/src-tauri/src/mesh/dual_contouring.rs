@@ -119,7 +119,7 @@ fn dual_contouring_impl(
                 let s0 = grid.get(x, y + 1, z + 1) < iso_value;
                 let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along X-axis
-                    create_face_x(&cell_vertices, &mut local_indices, x, y, z, s0);
+                    create_face_x(&cell_vertices, &mut local_indices, x, y, z, !s0);
                 }
             }
 
@@ -129,7 +129,7 @@ fn dual_contouring_impl(
                 let s0 = grid.get(x + 1, y, z + 1) < iso_value;
                 let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along Y-axis
-                    create_face_y(&cell_vertices, &mut local_indices, x, y, z, s0);
+                    create_face_y(&cell_vertices, &mut local_indices, x, y, z, !s0);
                 }
             }
 
@@ -139,7 +139,7 @@ fn dual_contouring_impl(
                 let s0 = grid.get(x + 1, y + 1, z) < iso_value;
                 let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along Z-axis
-                    create_face_z(&cell_vertices, &mut local_indices, x, y, z, !s0);
+                    create_face_z(&cell_vertices, &mut local_indices, x, y, z, s0);
                 }
             }
 
@@ -747,7 +747,7 @@ fn dual_contouring_generic<G: Grid + Sync>(
                 let s0 = grid.get(x, y + 1, z + 1) < iso_value;
                 let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along X-axis
-                    create_face_x(&cell_vertices, &mut local_indices, x, y, z, s0);
+                    create_face_x(&cell_vertices, &mut local_indices, x, y, z, !s0);
                 }
             }
 
@@ -757,7 +757,7 @@ fn dual_contouring_generic<G: Grid + Sync>(
                 let s0 = grid.get(x + 1, y, z + 1) < iso_value;
                 let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along Y-axis
-                    create_face_y(&cell_vertices, &mut local_indices, x, y, z, s0);
+                    create_face_y(&cell_vertices, &mut local_indices, x, y, z, !s0);
                 }
             }
 
@@ -767,7 +767,7 @@ fn dual_contouring_generic<G: Grid + Sync>(
                 let s0 = grid.get(x + 1, y + 1, z) < iso_value;
                 let s1 = grid.get(x + 1, y + 1, z + 1) < iso_value;
                 if s0 != s1 { // Sign change along Z-axis
-                    create_face_z(&cell_vertices, &mut local_indices, x, y, z, !s0);
+                    create_face_z(&cell_vertices, &mut local_indices, x, y, z, s0);
                 }
             }
 

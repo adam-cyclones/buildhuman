@@ -56,6 +56,10 @@ pub struct MouldData {
     pub center: Vec3Data,
     pub radius: f32,
     pub blend_radius: f32,
+    /// Optional group for blending. Moulds with different non-zero groups resist merging.
+    pub blend_group: Option<u32>,
+    /// Optional separation bias used when moulds are in different blend groups.
+    pub separation_bias: Option<f32>,
     pub parent_joint_id: Option<String>,
     pub end_point: Option<Vec3Data>,
     // Profiled capsule-specific properties

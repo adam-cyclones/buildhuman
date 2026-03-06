@@ -28,8 +28,22 @@ pub fn capsule_sdf(point: &Pt3, a: &Pt3, b: &Pt3, radius: f32) -> f32 {
 /// Smooth minimum (polynomial approximation)
 /// Blends two SDF values with smooth transition
 pub fn smooth_min_poly(a: f32, b: f32, k: f32) -> f32 {
+    if k <= 0.0 {
+        return a.min(b);
+    }
     let h = (k - (a - b).abs()).max(0.0);
     a.min(b) - h * h * 0.25 / k
+}
+
+/// Union with a small separation bias to discourage merging between unrelated parts.
+/// When both distances are inside (negative), push the result outward by `separation`.
+pub fn union_with_separation(a: f32, b: f32, separation: f32) -> f32 {
+    let m = a.min(b);
+    if a < 0.0 && b < 0.0 {
+        m + separation
+    } else {
+        m
+    }
 }
 
 /// Signed distance function for a profiled capsule with radial control points

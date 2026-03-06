@@ -93,10 +93,14 @@ impl Skeleton {
 
     /// Recursively compute world transform for a joint
     fn compute_world_transform(&self, joint_id: &str) -> Transform {
-        let joint = self
-            .joints
-            .get(joint_id)
-            .expect("Joint not found in skeleton");
+        let joint = match self.joints.get(joint_id) {
+            Some(j) => j,
+            None => {
+                // Return identity transform if joint not found
+                // This can happen during sync when moulds reference joints not yet added
+                return Transform::identity();
+            }
+        };
 
         let local_transform = Transform::from_parts(
             joint.local_offset.into(),

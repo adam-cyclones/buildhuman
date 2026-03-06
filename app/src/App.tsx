@@ -22,7 +22,6 @@ interface AppSettings {
   custom_assets_folder: string;
   moderator_api_key: string;
   moderator_mode: boolean;
-  render_mode: string;
 }
 
 function App() {
@@ -44,25 +43,19 @@ function App() {
     // Load app settings
     try {
       const settings = await invoke<AppSettings>("get_app_settings");
-      // Ensure render_mode has a default
-      if (!settings.render_mode) {
-        settings.render_mode = "cpu";
-      }
       setAppSettings(settings);
 
-      // Apply GPU mode CSS if needed
-      if (settings.render_mode === "gpu") {
-        document.documentElement.classList.add("gpu-mode");
-        document.body.classList.add("gpu-mode");
+      // Always apply GPU mode CSS (GPU is the only render mode now)
+      document.documentElement.classList.add("gpu-mode");
+      document.body.classList.add("gpu-mode");
 
-        // Force repaint on transparent windows (macOS WebKit quirk)
+      // Force repaint on transparent windows (macOS WebKit quirk)
+      requestAnimationFrame(() => {
+        document.body.style.opacity = "0.99";
         requestAnimationFrame(() => {
-          document.body.style.opacity = "0.99";
-          requestAnimationFrame(() => {
-            document.body.style.opacity = "1";
-          });
+          document.body.style.opacity = "1";
         });
-      }
+      });
     } catch (error) {
       console.error("Failed to load app settings:", error);
     }
@@ -233,7 +226,7 @@ function App() {
       <div class={`main-container full-width`}>
         <Switch>
           <Match when={activeTab() === "Humans" && appSettings()}>
-            <Humans renderMode={appSettings()!.render_mode || "cpu"} />
+            <Humans />
           </Match>
           <Match when={activeTab() === "Asset Library"}>
             <AssetLibrary

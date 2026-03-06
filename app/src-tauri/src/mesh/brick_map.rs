@@ -63,6 +63,94 @@ pub struct BrickMap {
 }
 
 impl BrickMap {
+    /// Compute brick coordinates near the surface without allocating voxels.
+    /// This is a lightweight coarse pass suitable for GPU sparse dispatch.
+    pub fn compute_surface_brick_coords(
+        resolution: u32,
+        bounds: &AABB,
+        mould_manager: &MouldManager,
+        surface_thickness: f32,
+    ) -> Vec<BrickCoord> {
+        assert!(
+            resolution % BRICK_SIZE == 0,
+            "Resolution must be multiple of brick size ({})",
+            BRICK_SIZE
+        );
+
+        let brick_count = resolution / BRICK_SIZE;
+        let extent = bounds.max - bounds.min;
+        let voxel_size = extent.x / resolution as f32;
+        let bounds_min = bounds.min;
+
+        let brick_positions: Vec<_> = (0..brick_count)
+            .flat_map(|bz| {
+                (0..brick_count).flat_map(move |by| {
+                    (0..brick_count).map(move |bx| {
+                        let brick_coord = BrickCoord {
+                            x: bx as i32,
+                            y: by as i32,
+                            z: bz as i32,
+                        };
+
+                        (brick_coord, (bx, by, bz))
+                    })
+                })
+            })
+            .collect();
+
+        let mut surface_coords: Vec<BrickCoord> = brick_positions
+            .par_iter()
+            .filter_map(|(brick_coord, (bx, by, bz))| {
+                let brick_diagonal = voxel_size * (BRICK_SIZE as f32) * 0.866;
+                let mut min_abs = f32::INFINITY;
+
+                for dz in [0u32, BRICK_SIZE].iter().copied() {
+                    for dy in [0u32, BRICK_SIZE].iter().copied() {
+                        for dx in [0u32, BRICK_SIZE].iter().copied() {
+                            let voxel_x = (bx * BRICK_SIZE + dx) as f32;
+                            let voxel_y = (by * BRICK_SIZE + dy) as f32;
+                            let voxel_z = (bz * BRICK_SIZE + dz) as f32;
+
+                            let world_pos = Pt3::new(
+                                bounds_min.x + voxel_x * voxel_size,
+                                bounds_min.y + voxel_y * voxel_size,
+                                bounds_min.z + voxel_z * voxel_size,
+                            );
+
+                            let sdf = mould_manager.evaluate_sdf(&world_pos).abs();
+                            if sdf < min_abs {
+                                min_abs = sdf;
+                            }
+                        }
+                    }
+                }
+
+                if min_abs < surface_thickness + brick_diagonal {
+                    Some(*brick_coord)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Expand by 1 brick in all directions to ensure continuity across boundaries
+        let mut expanded = std::collections::HashSet::new();
+        let max_index = brick_count as i32 - 1;
+        for coord in surface_coords.drain(..) {
+            for dz in -1..=1 {
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        let x = (coord.x + dx).max(0).min(max_index);
+                        let y = (coord.y + dy).max(0).min(max_index);
+                        let z = (coord.z + dz).max(0).min(max_index);
+                        expanded.insert(BrickCoord { x, y, z });
+                    }
+                }
+            }
+        }
+
+        expanded.into_iter().collect()
+    }
     /// Create a new brick map with the given resolution and bounds
     /// Initially contains no bricks - call allocate_surface_bricks() to populate
     pub fn new(resolution: u32, bounds: AABB) -> Self {
