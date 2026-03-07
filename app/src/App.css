@@ -226,6 +226,7 @@ html.gpu-mode, html.gpu-mode body, html.gpu-mode #root, html.gpu-mode .app, html
   border-left: 1px solid var(--border);
   overflow: hidden;
   min-height: 0;
+  height: 100%;
 }
 
 .inspector-header {
@@ -241,6 +242,7 @@ html.gpu-mode, html.gpu-mode body, html.gpu-mode #root, html.gpu-mode .app, html
   overflow-y: auto;
   overflow-x: hidden;
   padding: 1rem;
+  min-height: 0;
 }
 
 /* Property Sections */
@@ -710,6 +712,7 @@ html.gpu-mode, html.gpu-mode body, html.gpu-mode #root, html.gpu-mode .app, html
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
 }
 
 .human-tabs {
@@ -817,6 +820,10 @@ html.gpu-mode, html.gpu-mode body, html.gpu-mode #root, html.gpu-mode .app, html
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border);
   font-size: 0.8rem;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--medium-gray);
 }
 
 .breadcrumb-back {
@@ -1021,6 +1028,10 @@ html.gpu-mode, html.gpu-mode body, html.gpu-mode #root, html.gpu-mode .app, html
 .bone-timeline-card-title {
   font-size: 0.8rem;
   line-height: 1.1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
 }
 
 .bone-timeline-card-subtitle {
@@ -1067,7 +1078,7 @@ html.gpu-mode, html.gpu-mode body, html.gpu-mode #root, html.gpu-mode .app, html
   display: flex;
   flex-direction: column;
   align-items: center;
-  height: 44px;
+  height: 56px;
   margin: 0.08rem 0 0.2rem;
 }
 
@@ -1077,20 +1088,72 @@ html.gpu-mode, html.gpu-mode body, html.gpu-mode #root, html.gpu-mode .app, html
   background: rgba(185, 185, 185, 0.45);
 }
 
-.bone-timeline-add-joint {
+.bone-timeline-joint-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  padding: 0.2rem 0.3rem;
+  margin: 0.1rem 0;
+  cursor: pointer;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.bone-timeline-joint-card:hover {
+  border-color: var(--accent);
+}
+
+.bone-timeline-joint-card.active {
+  border-color: var(--accent);
+  background: rgba(245, 200, 66, 0.16);
+}
+
+.bone-timeline-joint-label {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+  padding: 0.04rem 0.12rem;
+}
+
+.bone-node-badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.08rem 0.3rem;
+  font-size: 0.56rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.bone-node-badge-dim {
+  color: rgba(230, 230, 230, 0.62);
+  border-color: rgba(190, 190, 190, 0.38);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.bone-timeline-joint-card.active .bone-timeline-joint-label {
+  color: #f4f4f4;
+}
+
+.bone-timeline-joint-edit {
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.03);
   color: var(--text-secondary);
-  border-radius: 999px;
+  border-radius: 4px;
   font-size: 0.64rem;
   line-height: 1;
   padding: 0.16rem 0.34rem;
-  margin: 0.1rem 0;
   cursor: pointer;
   font-family: inherit;
 }
 
-.bone-timeline-add-joint:hover {
+.bone-timeline-joint-edit:hover {
   border-color: var(--accent);
   color: var(--text-primary);
 }
@@ -1294,15 +1357,15 @@ html.gpu-mode, html.gpu-mode body, html.gpu-mode #root, html.gpu-mode .app, html
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  flex-wrap: wrap;
+  justify-content: space-between;
   margin-bottom: 0.6rem;
 }
 
 .profile-ring-label {
   font-size: 0.8rem;
   color: var(--text-secondary);
-  min-width: 64px;
-  text-align: center;
+  min-width: 96px;
+  text-align: left;
 }
 
 .profile-nav-btn {
@@ -1328,6 +1391,65 @@ html.gpu-mode, html.gpu-mode body, html.gpu-mode #root, html.gpu-mode .app, html
 
 .profile-nav-btn:not(:disabled):hover {
   background: var(--border);
+}
+
+.profile-ring-strip-wrap {
+  display: grid;
+  grid-template-columns: 24px 1fr 24px;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+
+.profile-ring-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.08rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 0.16rem 0.24rem;
+  overflow-x: auto;
+}
+
+.profile-ring-tick {
+  border: 0;
+  background: transparent;
+  color: rgba(230, 230, 230, 0.62);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.82rem;
+  line-height: 1;
+  min-width: 14px;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.profile-ring-tick.active {
+  color: var(--accent);
+  text-shadow: 0 0 6px rgba(245, 200, 66, 0.45);
+}
+
+.profile-ring-insert {
+  border: 0;
+  border-top: 1px dashed rgba(220, 220, 220, 0.35);
+  background: transparent;
+  color: rgba(235, 235, 235, 0.55);
+  border-radius: 0;
+  width: 22px;
+  height: 14px;
+  font-size: 0.65rem;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translateY(-0.5px);
+}
+
+.profile-ring-insert:hover {
+  border-top-color: var(--accent);
+  color: var(--accent);
 }
 
 .profile-action-btn {

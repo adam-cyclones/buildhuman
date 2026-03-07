@@ -1,7 +1,7 @@
 // ProfileEditorPanel: Sidebar section for editing radial profiles of a profiled-capsule mould.
 // Shows ring navigation, ghost toggle, the 2D RingEditor, and handle count controls.
 
-import { Show } from "solid-js";
+import { For, Show } from "solid-js";
 import type { Mould } from "../morphing/types";
 import RingEditor from "./RingEditor";
 
@@ -23,6 +23,7 @@ type ProfileEditorPanelProps = {
 const ProfileEditorPanel = (props: ProfileEditorPanelProps) => {
   const ringCount = () => props.profiles.length;
   const activeRing = () => props.profiles[props.activeRingIndex] ?? [];
+  const activeSegmentAddress = () => `${props.mouldId}.segment-${props.activeRingIndex + 1}`;
 
   const ghostRing = () => {
     if (props.showGhostAbove) {
@@ -36,39 +37,63 @@ const ProfileEditorPanel = (props: ProfileEditorPanelProps) => {
 
   return (
     <div class="property-section">
-      <h4>Profile: {props.mouldId}</h4>
+      <h4>Profile: {activeSegmentAddress()}</h4>
 
-      {/* Ring navigation row */}
-      <div class="profile-ring-nav">
+      {/* Timeline segment selector */}
+      <div class="profile-ring-strip-wrap">
         <button
           class="profile-nav-btn"
           disabled={props.activeRingIndex === 0}
           onClick={() => props.onRingChange(props.activeRingIndex - 1)}
+          title="Previous segment"
         >
           ◀
         </button>
-        <span class="profile-ring-label">Ring {props.activeRingIndex + 1} / {ringCount()}</span>
+
+        <div class="profile-ring-strip" role="listbox" aria-label="Profile segments">
+          <For each={props.profiles}>
+            {(_, idx) => (
+              <>
+                <button
+                  class={`profile-ring-tick ${props.activeRingIndex === idx() ? "active" : ""}`}
+                  title={`Segment ${idx() + 1}`}
+                  onClick={() => props.onRingChange(idx())}
+                >
+                  |
+                </button>
+                <Show when={idx() < ringCount() - 1}>
+                  <button
+                    class="profile-ring-insert"
+                    title={`Insert segment after ${idx() + 1}`}
+                    onClick={() => props.onAddRing(idx())}
+                  >
+                    +
+                  </button>
+                </Show>
+              </>
+            )}
+          </For>
+        </div>
+
         <button
           class="profile-nav-btn"
           disabled={props.activeRingIndex >= ringCount() - 1}
           onClick={() => props.onRingChange(props.activeRingIndex + 1)}
+          title="Next segment"
         >
           ▶
         </button>
-        <button
-          class="profile-action-btn"
-          title="Add ring after current"
-          onClick={() => props.onAddRing(props.activeRingIndex)}
-        >
-          + Ring
-        </button>
+      </div>
+
+      <div class="profile-ring-nav">
+        <span class="profile-ring-label">Segment {props.activeRingIndex + 1} / {ringCount()}</span>
         <button
           class="profile-action-btn profile-action-btn--danger"
-          title="Remove current ring"
+          title="Remove current segment"
           disabled={!canRemoveRing()}
           onClick={() => props.onRemoveRing(props.activeRingIndex)}
         >
-          − Ring
+          − Segment
         </button>
       </div>
 

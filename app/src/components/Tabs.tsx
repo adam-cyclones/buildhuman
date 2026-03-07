@@ -4,13 +4,17 @@ import "./Tabs.css";
 interface TabsProps {
   tabs: string[];
   onTabChange: (tab: string) => void;
+  activeTab?: string;
 }
 
 const Tabs = (props: TabsProps) => {
   const [activeTab, setActiveTab] = createSignal(props.tabs[0]);
+  const currentActiveTab = () => props.activeTab ?? activeTab();
 
   const handleTabClick = (tab: string) => {
-    setActiveTab(tab);
+    if (props.activeTab === undefined) {
+      setActiveTab(tab);
+    }
     props.onTabChange(tab);
   };
 
@@ -19,7 +23,7 @@ const Tabs = (props: TabsProps) => {
       <For each={props.tabs}>
         {(tab) => (
           <button
-            class={`tab-btn ${activeTab() === tab ? "active" : ""}`}
+            class={`tab-btn ${currentActiveTab() === tab ? "active" : ""}`}
             onClick={() => handleTabClick(tab)}
           >
             {tab}

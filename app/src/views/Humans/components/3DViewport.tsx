@@ -16,12 +16,14 @@ type ThreeDViewportProps = {
   showSkeleton: boolean;
   selectedJointId: string | null;
   selectionHighlight?: { mode: "bone" | "shape" | "region"; value: string } | null;
+  activeProfileSegmentIndex?: number | null;
   mouldProfilesVersion?: number;
   onSkeletonReady?: (joints: Array<{ id: string; parentId?: string; children: string[] }>) => void;
   onMouldsReady?: (moulds: Array<{ id: string; shape: "sphere" | "capsule" | "profiled-capsule"; parentJointId?: string }>) => void;
   onMouldManagerReady?: (manager: MouldManager) => void;
   onJointSelected?: (jointId: string, offset: [number, number, number], rotation: [number, number, number, number], mouldRadius: number) => void;
   onJointClicked?: (jointId: string) => void;
+  onBoneClicked?: (parentId: string, childId: string) => void;
 }
 
 const ThreeDViewport = (props: ThreeDViewportProps) => {
@@ -82,6 +84,9 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
   let velocityPitch = 0;
   let velocityDistance = 0;
   let animationFrameId: number | null = null;
+  let leftPointerDown = false;
+  let leftPointerDownX = 0;
+  let leftPointerDownY = 0;
 
   // Camera update state - prevent overlapping calls
   let cameraUpdatePending = false;
@@ -162,6 +167,13 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
 
   // Mouse event handlers for orbit camera
   const handleMouseDown = (e: MouseEvent) => {
+    if (e.button === 0) {
+      leftPointerDown = true;
+      leftPointerDownX = e.clientX;
+      leftPointerDownY = e.clientY;
+      return;
+    }
+
     // Blender-style mouse controls: camera only on middle mouse drag.
     // This leaves left click available for selection/other interactions.
     if (e.button !== 1) return;
@@ -250,6 +262,7 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
   };
 
   const handleMouseUp = () => {
+    leftPointerDown = false;
     if (isDragging) {
       // Start momentum animation if there's velocity
       if (Math.abs(velocityYaw) > 0.001 || Math.abs(velocityPitch) > 0.001 || Math.abs(velocityDistance) > 0.001) {
@@ -258,6 +271,119 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
     }
     isDragging = false;
     dragMode = null;
+  };
+
+  const handleViewportClick = (e: MouseEvent) => {
+    if (!leftPointerDown || isDragging || !viewportContentRef || !currentSkeleton) return;
+
+    const moved = Math.hypot(e.clientX - leftPointerDownX, e.clientY - leftPointerDownY);
+    if (moved > 4) return;
+
+    const rect = viewportContentRef.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    const aspect = rect.width / rect.height;
+    const yaw = cameraYaw();
+    const pitch = cameraPitch();
+    const distance = cameraDistance();
+    const [targetX, targetY, targetZ] = cameraTarget();
+
+    const cosPitch = Math.cos(pitch);
+    const sinPitch = Math.sin(pitch);
+    const cosYaw = Math.cos(yaw);
+    const sinYaw = Math.sin(yaw);
+
+    const eyeX = targetX + distance * cosPitch * sinYaw;
+    const eyeY = targetY + distance * sinPitch;
+    const eyeZ = targetZ + distance * cosPitch * cosYaw;
+
+    const forwardX = targetX - eyeX;
+    const forwardY = targetY - eyeY;
+    const forwardZ = targetZ - eyeZ;
+    const forwardLen = Math.hypot(forwardX, forwardY, forwardZ) || 1;
+    const fx = forwardX / forwardLen;
+    const fy = forwardY / forwardLen;
+    const fz = forwardZ / forwardLen;
+
+    const rightX = cosYaw;
+    const rightY = 0;
+    const rightZ = -sinYaw;
+    const upX = fy * rightZ - fz * rightY;
+    const upY = fz * rightX - fx * rightZ;
+    const upZ = fx * rightY - fy * rightX;
+
+    const halfHeight = distance * 0.5;
+    const halfWidth = halfHeight * aspect;
+
+    const worldToScreen = (p: [number, number, number]) => {
+      const dx = p[0] - eyeX;
+      const dy = p[1] - eyeY;
+      const dz = p[2] - eyeZ;
+      const nx = (dx * rightX + dy * rightY + dz * rightZ) / halfWidth;
+      const ny = (dx * upX + dy * upY + dz * upZ) / halfHeight;
+      return {
+        x: rect.left + ((nx + 1) * 0.5) * rect.width,
+        y: rect.top + ((1 - ny) * 0.5) * rect.height,
+      };
+    };
+
+    const px = e.clientX;
+    const py = e.clientY;
+    const joints = currentSkeleton.getJoints();
+
+    let closestJoint: { id: string; dist: number } | null = null;
+    for (const j of joints) {
+      const wp = currentSkeleton.getWorldPosition(j.id);
+      const sp = worldToScreen(wp);
+      const d = Math.hypot(sp.x - px, sp.y - py);
+      if (!closestJoint || d < closestJoint.dist) {
+        closestJoint = { id: j.id, dist: d };
+      }
+    }
+
+    const JOINT_PICK_RADIUS_PX = 16;
+    if (closestJoint && closestJoint.dist <= JOINT_PICK_RADIUS_PX) {
+      props.onJointClicked?.(closestJoint.id);
+      return;
+    }
+
+    const pointSegmentDistance = (
+      ptx: number,
+      pty: number,
+      ax: number,
+      ay: number,
+      bx: number,
+      by: number,
+    ) => {
+      const abx = bx - ax;
+      const aby = by - ay;
+      const apx = ptx - ax;
+      const apy = pty - ay;
+      const abLenSq = abx * abx + aby * aby;
+      if (abLenSq < 1e-6) return Math.hypot(apx, apy);
+      const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / abLenSq));
+      const qx = ax + abx * t;
+      const qy = ay + aby * t;
+      return Math.hypot(ptx - qx, pty - qy);
+    };
+
+    let closestBone: { parentId: string; childId: string; dist: number } | null = null;
+    for (const child of joints) {
+      if (!child.parentId) continue;
+      const parent = currentSkeleton.getJoint(child.parentId);
+      if (!parent) continue;
+      const a = worldToScreen(currentSkeleton.getWorldPosition(parent.id));
+      const b = worldToScreen(currentSkeleton.getWorldPosition(child.id));
+      const d = pointSegmentDistance(px, py, a.x, a.y, b.x, b.y);
+      if (!closestBone || d < closestBone.dist) {
+        closestBone = { parentId: parent.id, childId: child.id, dist: d };
+      }
+    }
+
+    const BONE_PICK_RADIUS_PX = 10;
+    if (closestBone && closestBone.dist <= BONE_PICK_RADIUS_PX) {
+      props.onBoneClicked?.(closestBone.parentId, closestBone.childId);
+    }
   };
 
   const handleWheel = (e: WheelEvent) => {
@@ -424,13 +550,14 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
 
   // Update selection heatmap in debug skeleton overlay.
   createEffect(on(
-    () => [gpuInitialized(), props.selectedJointId, props.selectionHighlight] as const,
-    ([ready, selectedId, highlight]) => {
+    () => [gpuInitialized(), props.selectedJointId, props.selectionHighlight, props.activeProfileSegmentIndex] as const,
+    ([ready, selectedId, highlight, activeProfileSegmentIndex]) => {
       if (!ready) return;
       void invoke("set_debug_selection", {
         selectedJointId: selectedId,
         highlightMode: highlight?.mode ?? null,
-        highlightValue: highlight?.value ?? null
+        highlightValue: highlight?.value ?? null,
+        selectedProfileSegmentIndex: activeProfileSegmentIndex ?? null
       });
     },
     { defer: true }
@@ -601,6 +728,7 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
+          onClick={handleViewportClick}
           onWheel={handleWheel}
         />
       </div>

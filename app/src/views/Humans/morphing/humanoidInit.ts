@@ -161,6 +161,14 @@ export const initializeDefaultHumanoid = (): HumanoidData => {
     localOffset: [0, 0, 0.12],
     localRotation: identityRot,
     parentId: "ankle-left",
+    children: ["toe-left"],
+  });
+
+  skeleton.addJoint({
+    id: "toe-left",
+    localOffset: [0, 0, 0.08],
+    localRotation: identityRot,
+    parentId: "foot-left",
     children: [],
   });
 
@@ -194,6 +202,14 @@ export const initializeDefaultHumanoid = (): HumanoidData => {
     localOffset: [0, 0, 0.12],
     localRotation: identityRot,
     parentId: "ankle-right",
+    children: ["toe-right"],
+  });
+
+  skeleton.addJoint({
+    id: "toe-right",
+    localOffset: [0, 0, 0.08],
+    localRotation: identityRot,
+    parentId: "foot-right",
     children: [],
   });
 

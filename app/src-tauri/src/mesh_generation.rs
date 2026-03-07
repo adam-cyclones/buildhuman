@@ -25,6 +25,7 @@ pub struct MeshGeneratorState {
     selected_debug_joint_id: Option<String>,
     selected_highlight_mode: Option<String>,
     selected_highlight_value: Option<String>,
+    selected_profile_segment_index: Option<usize>,
 }
 
 impl MeshGeneratorState {
@@ -43,6 +44,7 @@ impl MeshGeneratorState {
             selected_debug_joint_id: None,
             selected_highlight_mode: None,
             selected_highlight_value: None,
+            selected_profile_segment_index: None,
         }
     }
 }
@@ -213,6 +215,13 @@ pub fn ensure_default_state() {
         local_offset: Vector3::new(0.0, 0.0, 0.12),
         local_rotation: identity_quat,
         parent_id: Some("ankle-left".to_string()),
+        children: vec!["toe-left".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "toe-left".to_string(),
+        local_offset: Vector3::new(0.0, 0.0, 0.08),
+        local_rotation: identity_quat,
+        parent_id: Some("foot-left".to_string()),
         children: vec![],
     });
 
@@ -243,6 +252,13 @@ pub fn ensure_default_state() {
         local_offset: Vector3::new(0.0, 0.0, 0.12),
         local_rotation: identity_quat,
         parent_id: Some("ankle-right".to_string()),
+        children: vec!["toe-right".to_string()],
+    });
+    skeleton.add_joint(Joint {
+        id: "toe-right".to_string(),
+        local_offset: Vector3::new(0.0, 0.0, 0.08),
+        local_rotation: identity_quat,
+        parent_id: Some("foot-right".to_string()),
         children: vec![],
     });
 
@@ -820,11 +836,13 @@ pub fn set_debug_selection(
     selected_joint_id: Option<String>,
     highlight_mode: Option<String>,
     highlight_value: Option<String>,
+    selected_profile_segment_index: Option<usize>,
 ) {
     let mut state = MESH_STATE.lock().unwrap();
     state.selected_debug_joint_id = selected_joint_id;
     state.selected_highlight_mode = highlight_mode;
     state.selected_highlight_value = highlight_value;
+    state.selected_profile_segment_index = selected_profile_segment_index;
 }
 
 fn body_region_from_id(id: &str) -> &'static str {
@@ -847,40 +865,50 @@ fn body_region_from_id(id: &str) -> &'static str {
         || l.ends_with("_r")
         || l.ends_with("-r")
         || l.ends_with(".r");
+    let is_armish = l.contains("arm")
+        || l.contains("hand")
+        || l.contains("forearm")
+        || l.contains("wrist")
+        || l.contains("elbow")
+        || l.contains("shoulder");
     if l.contains("head") || l.contains("neck") || l.contains("skull") || l.contains("face") {
         "HEAD & NECK"
-    } else if l.contains("torso")
-        || l.contains("chest")
-        || l.contains("spine")
-        || l.contains("shoulder")
-        || l.contains("pelvis")
-        || l.contains("abdomen")
-    {
-        "TORSO"
-    } else if (l.contains("arm") || l.contains("hand") || l.contains("forearm") || l.contains("wrist") || l.contains("elbow")) && has_left {
+    } else if is_armish && has_left {
         "LEFT ARM"
-    } else if (l.contains("arm") || l.contains("hand") || l.contains("forearm") || l.contains("wrist") || l.contains("elbow")) && has_right {
+    } else if is_armish && has_right {
         "RIGHT ARM"
     } else if (l.contains("leg")
         || l.contains("foot")
+        || l.contains("toe")
         || l.contains("thigh")
         || l.contains("calf")
         || l.contains("shin")
         || l.contains("knee")
-        || l.contains("ankle"))
+        || l.contains("ankle")
+        || l.contains("hip"))
         && has_left
     {
         "LEFT LEG"
     } else if (l.contains("leg")
         || l.contains("foot")
+        || l.contains("toe")
         || l.contains("thigh")
         || l.contains("calf")
         || l.contains("shin")
         || l.contains("knee")
-        || l.contains("ankle"))
+        || l.contains("ankle")
+        || l.contains("hip"))
         && has_right
     {
         "RIGHT LEG"
+    } else if l.contains("torso")
+        || l.contains("chest")
+        || l.contains("spine")
+        || l.contains("pelvis")
+        || l.contains("abdomen")
+        || l.contains("shoulder")
+    {
+        "TORSO"
     } else {
         "OTHER"
     }
@@ -912,6 +940,103 @@ fn distance_to_world_mould(point: &Pt3, mould: &crate::mesh::mould::WorldSpaceMo
             } else {
                 crate::mesh::sdf::sphere_sdf(point, &mould.world_center, mould.radius)
             }
+        }
+    }
+}
+
+fn append_cylinder_debug_geometry(
+    vertices: &mut Vec<f32>,
+    indices: &mut Vec<u32>,
+    a: nalgebra::Vector3<f32>,
+    b: nalgebra::Vector3<f32>,
+    radius: f32,
+    color: [f32; 3],
+) {
+    let dir = b - a;
+    let length = dir.magnitude();
+    if length <= 0.00001 {
+        return;
+    }
+    let dir_norm = dir / length;
+    let up = if dir_norm.y.abs() < 0.9 {
+        nalgebra::Vector3::new(0.0, 1.0, 0.0)
+    } else {
+        nalgebra::Vector3::new(1.0, 0.0, 0.0)
+    };
+    let right = dir_norm.cross(&up).normalize();
+    let actual_up = right.cross(&dir_norm);
+    let base_idx = (vertices.len() / 6) as u32;
+    let sides = 6_u32;
+
+    for ring in 0..2 {
+        let c = if ring == 0 { a } else { b };
+        for i in 0..sides {
+            let ang = (i as f32) * std::f32::consts::TAU / (sides as f32);
+            let offset = right * ang.cos() * radius + actual_up * ang.sin() * radius;
+            vertices.extend_from_slice(&[
+                c.x + offset.x,
+                c.y + offset.y,
+                c.z + offset.z,
+                color[0],
+                color[1],
+                color[2],
+            ]);
+        }
+    }
+
+    for i in 0..sides {
+        let next = (i + 1) % sides;
+        let i0 = base_idx + i;
+        let i1 = base_idx + next;
+        let i2 = base_idx + sides + i;
+        let i3 = base_idx + sides + next;
+        indices.extend_from_slice(&[i0, i2, i1]);
+        indices.extend_from_slice(&[i1, i2, i3]);
+    }
+}
+
+fn append_sphere_debug_geometry(
+    vertices: &mut Vec<f32>,
+    indices: &mut Vec<u32>,
+    center: nalgebra::Vector3<f32>,
+    radius: f32,
+    color: [f32; 3],
+) {
+    let lat_segments = 6_u32;
+    let lon_segments = 10_u32;
+    let base_idx = (vertices.len() / 6) as u32;
+    let ring = lon_segments + 1;
+
+    for lat in 0..=lat_segments {
+        let v = lat as f32 / lat_segments as f32;
+        let theta = v * std::f32::consts::PI;
+        let sin_theta = theta.sin();
+        let cos_theta = theta.cos();
+        for lon in 0..=lon_segments {
+            let u = lon as f32 / lon_segments as f32;
+            let phi = u * std::f32::consts::TAU;
+            let x = sin_theta * phi.cos();
+            let y = cos_theta;
+            let z = sin_theta * phi.sin();
+            vertices.extend_from_slice(&[
+                center.x + x * radius,
+                center.y + y * radius,
+                center.z + z * radius,
+                color[0],
+                color[1],
+                color[2],
+            ]);
+        }
+    }
+
+    for lat in 0..lat_segments {
+        for lon in 0..lon_segments {
+            let i0 = base_idx + lat * ring + lon;
+            let i1 = i0 + 1;
+            let i2 = i0 + ring;
+            let i3 = i2 + 1;
+            indices.extend_from_slice(&[i0, i2, i1]);
+            indices.extend_from_slice(&[i1, i2, i3]);
         }
     }
 }
@@ -1339,6 +1464,8 @@ pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String
     let selected_joint_id = state.selected_debug_joint_id.clone();
     let highlight_mode = state.selected_highlight_mode.clone();
     let highlight_value = state.selected_highlight_value.clone();
+    let selected_segment_index = state.selected_profile_segment_index;
+    let joint_only_highlight = highlight_mode.as_deref() == Some("bone");
 
     let mut vertices: Vec<f32> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
@@ -1355,6 +1482,8 @@ pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String
     let dim_color = [0.26_f32, 0.26, 0.26];
     let selected_color = [0.16_f32, 0.48, 1.0];
     let mut selected_joint_set: HashSet<String> = HashSet::new();
+    let mut selected_edge_set: HashSet<(String, String)> = HashSet::new();
+    let mut suppress_joint_highlight = false;
     if let (Some(mode), Some(value)) = (highlight_mode.as_deref(), highlight_value.as_deref()) {
         match mode {
             "bone" => {
@@ -1367,7 +1496,18 @@ pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String
                     for mould in mm.get_moulds() {
                         if mould.id == value {
                             if let Some(parent) = &mould.parent_joint_id {
-                                selected_joint_set.insert(parent.clone());
+                                suppress_joint_highlight = true;
+                                if let Some(parent_joint) = skeleton.get_joint(parent) {
+                                    if let Some(first_child) = parent_joint.children.first() {
+                                        selected_edge_set
+                                            .insert((parent.clone(), first_child.clone()));
+                                    } else if let Some(grand_parent) = &parent_joint.parent_id {
+                                        selected_edge_set
+                                            .insert((grand_parent.clone(), parent.clone()));
+                                    } else {
+                                        selected_joint_set.insert(parent.clone());
+                                    }
+                                }
                             }
                             break;
                         }
@@ -1384,14 +1524,14 @@ pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String
             _ => {}
         }
     }
-    if selected_joint_set.is_empty() {
+    if selected_joint_set.is_empty() && selected_edge_set.is_empty() {
         if let Some(sel) = selected_joint_id.as_ref() {
             if skeleton.get_joint(sel).is_some() {
                 selected_joint_set.insert(sel.clone());
             }
         }
     }
-    let has_selection = !selected_joint_set.is_empty();
+    let has_selection = !selected_joint_set.is_empty() || !selected_edge_set.is_empty();
 
     // Cache joint positions so we can render joints after bones.
     let mut joint_positions: Vec<(nalgebra::Vector3<f32>, String)> = Vec::new();
@@ -1412,8 +1552,13 @@ pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String
             let length = dir.magnitude();
             if length > 0.001 {
                 let dir_norm = dir / length;
-                let selected_bone =
-                    selected_joint_set.contains(parent_id) || selected_joint_set.contains(&joint.id);
+                let selected_bone = if joint_only_highlight {
+                    false
+                } else if !selected_edge_set.is_empty() {
+                    selected_edge_set.contains(&(parent_id.clone(), joint.id.clone()))
+                } else {
+                    selected_joint_set.contains(parent_id) || selected_joint_set.contains(&joint.id)
+                };
                 let bone_debug_color = if !has_selection {
                     bone_color
                 } else if selected_bone {
@@ -1473,7 +1618,7 @@ pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String
     let sphere_lat_segments = 8_u32;
     let sphere_lon_segments = 12_u32;
     for (pos, joint_id) in joint_positions {
-        let selected_joint = selected_joint_set.contains(&joint_id);
+        let selected_joint = selected_joint_set.contains(&joint_id) && !suppress_joint_highlight;
         let joint_debug_color = if !has_selection {
             joint_color
         } else if selected_joint {
@@ -1520,6 +1665,104 @@ pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String
 
                 indices.extend_from_slice(&[i0, i2, i1]);
                 indices.extend_from_slice(&[i1, i2, i3]);
+            }
+        }
+    }
+
+    // Selected profiled-capsule segment visualization in 3D viewport:
+    // - dashed guide along the selected bone axis
+    // - ring-center "O" markers at each profile segment
+    // - active segment marker emphasized
+    if let Some(mut mould_manager) = state.mould_manager.clone() {
+        mould_manager.rebuild_cache();
+
+        let selected_mould_id = if let (Some(mode), Some(value)) =
+            (highlight_mode.as_deref(), highlight_value.as_deref())
+        {
+            if mode == "shape" {
+                Some(value.to_string())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(mould_id) = selected_mould_id {
+            let source_mould = mould_manager
+                .get_moulds()
+                .iter()
+                .find(|m| m.id == mould_id)
+                .cloned();
+            let world_mould = mould_manager
+                .get_moulds_world_space()
+                .into_iter()
+                .find(|m| m.id == mould_id);
+
+            if let (Some(mould), Some(world)) = (source_mould, world_mould) {
+                if let (Some(end), Some(profiles)) = (world.world_end, mould.radial_profiles.as_ref()) {
+                    if !profiles.is_empty() {
+                        let start = nalgebra::Vector3::new(
+                            world.world_center.x,
+                            world.world_center.y,
+                            world.world_center.z,
+                        );
+                        let end_v = nalgebra::Vector3::new(end.x, end.y, end.z);
+                        let axis = end_v - start;
+                        let axis_len = axis.magnitude();
+                        if axis_len > 0.0001 {
+                            let axis_dir = axis / axis_len;
+                            let dash_color = [0.88_f32, 0.88, 0.88];
+                            let marker_color = [0.94_f32, 0.94, 0.94];
+                            let active_marker_color = [0.16_f32, 0.48, 1.0];
+
+                            let dash_count = (profiles.len().max(2) * 2).min(24);
+                            for i in 0..dash_count {
+                                if i % 2 == 1 {
+                                    continue;
+                                }
+                                let t0 = i as f32 / dash_count as f32;
+                                let t1 = (i + 1) as f32 / dash_count as f32;
+                                let a = start + axis * t0;
+                                let b = start + axis * t1;
+                                append_cylinder_debug_geometry(
+                                    &mut vertices,
+                                    &mut indices,
+                                    a,
+                                    b,
+                                    0.0012,
+                                    dash_color,
+                                );
+                            }
+
+                            let ring_count = profiles.len();
+                            for seg_idx in 0..ring_count {
+                                let t = if ring_count == 1 {
+                                    0.5
+                                } else {
+                                    seg_idx as f32 / (ring_count - 1) as f32
+                                };
+                                let center = start + axis_dir * (axis_len * t);
+                                let is_active = selected_segment_index
+                                    .map(|idx| idx == seg_idx)
+                                    .unwrap_or(false);
+                                let color = if is_active {
+                                    active_marker_color
+                                } else {
+                                    marker_color
+                                };
+                                let radius = if is_active { 0.010 } else { 0.0075 };
+                                append_sphere_debug_geometry(
+                                    &mut vertices,
+                                    &mut indices,
+                                    center,
+                                    radius,
+                                    color,
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
     }

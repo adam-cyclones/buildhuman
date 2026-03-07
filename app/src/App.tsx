@@ -204,7 +204,7 @@ function App() {
           />
         </div>
         <div class="app-title">
-          <Tabs tabs={tabs()} onTabChange={setActiveTab} />
+          <Tabs tabs={tabs()} activeTab={activeTab()} onTabChange={setActiveTab} />
         </div>
         <div class="menu-right">
           {appSettings()?.moderator_mode && (

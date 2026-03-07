@@ -1786,11 +1786,13 @@ pub async fn set_debug_selection(
     selected_joint_id: Option<String>,
     highlight_mode: Option<String>,
     highlight_value: Option<String>,
+    selected_profile_segment_index: Option<usize>,
 ) -> Result<(), String> {
     crate::mesh_generation::set_debug_selection(
         selected_joint_id,
         highlight_mode.clone(),
         highlight_value,
+        selected_profile_segment_index,
     );
     let (mut debug_vertices, mut debug_indices) =
         crate::mesh_generation::generate_skeleton_debug_geometry()

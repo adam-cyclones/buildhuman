@@ -20,10 +20,10 @@ const getBodyRegion = (id: string): BodyRegion => {
   const hasLeft = l.includes("left") || l.includes("_l") || l.includes("-l") || l.includes(".l") || l.startsWith("l_") || l.startsWith("l-") || l.endsWith("_l") || l.endsWith("-l") || l.endsWith(".l");
   const hasRight = l.includes("right") || l.includes("_r") || l.includes("-r") || l.includes(".r") || l.startsWith("r_") || l.startsWith("r-") || l.endsWith("_r") || l.endsWith("-r") || l.endsWith(".r");
   if (l.includes("head") || l.includes("neck") || l.includes("skull") || l.includes("face")) return "HEAD & NECK";
-  if ((l.includes("arm") || l.includes("hand") || l.includes("forearm") || l.includes("wrist") || l.includes("elbow")) && hasLeft) return "LEFT ARM";
-  if ((l.includes("arm") || l.includes("hand") || l.includes("forearm") || l.includes("wrist") || l.includes("elbow")) && hasRight) return "RIGHT ARM";
-  if ((l.includes("leg") || l.includes("foot") || l.includes("thigh") || l.includes("calf") || l.includes("shin") || l.includes("knee") || l.includes("ankle") || l.includes("hip")) && hasLeft) return "LEFT LEG";
-  if ((l.includes("leg") || l.includes("foot") || l.includes("thigh") || l.includes("calf") || l.includes("shin") || l.includes("knee") || l.includes("ankle") || l.includes("hip")) && hasRight) return "RIGHT LEG";
+  if ((l.includes("arm") || l.includes("hand") || l.includes("forearm") || l.includes("wrist") || l.includes("elbow") || l.includes("shoulder")) && hasLeft) return "LEFT ARM";
+  if ((l.includes("arm") || l.includes("hand") || l.includes("forearm") || l.includes("wrist") || l.includes("elbow") || l.includes("shoulder")) && hasRight) return "RIGHT ARM";
+  if ((l.includes("leg") || l.includes("foot") || l.includes("toe") || l.includes("thigh") || l.includes("calf") || l.includes("shin") || l.includes("knee") || l.includes("ankle") || l.includes("hip")) && hasLeft) return "LEFT LEG";
+  if ((l.includes("leg") || l.includes("foot") || l.includes("toe") || l.includes("thigh") || l.includes("calf") || l.includes("shin") || l.includes("knee") || l.includes("ankle") || l.includes("hip")) && hasRight) return "RIGHT LEG";
   if (l.includes("torso") || l.includes("chest") || l.includes("spine") || l.includes("shoulder") || l.includes("pelvis") || l.includes("abdomen")) return "TORSO";
   return "OTHER";
 };
@@ -68,6 +68,8 @@ const Humans = () => {
   const [jointRotation, setJointRotation] = createSignal<{ jointId: string; euler: [number, number, number] } | null>(null);
   const [showSkeleton, setShowSkeleton] = createSignal(true);
   const [selectedJointId, setSelectedJointId] = createSignal<string | null>(null);
+  const [selectedBoneEdge, setSelectedBoneEdge] = createSignal<{ parentId: string; childId: string } | null>(null);
+  const [selectedGraphType, setSelectedGraphType] = createSignal<"bone" | "joint" | null>(null);
   const [skeletonJoints, setSkeletonJoints] = createSignal<Array<{ id: string; parentId?: string; children: string[] }>>([]);
   const [moulds, setMoulds] = createSignal<Array<{ id: string; shape: "sphere" | "capsule" | "profiled-capsule"; parentJointId?: string }>>([]);
 
@@ -92,20 +94,47 @@ const Humans = () => {
   const [editingProfiles, setEditingProfiles] = createSignal<number[][] | null>(null);
   let mouldManagerRef: MouldManager | undefined;
 
-  // When joint is selected, auto-select its mould and copy profiles into editing state
+  const selectJoint = (jointId: string | null) => {
+    setSelectedGraphType(jointId ? "joint" : null);
+    setSelectedBoneEdge(null);
+    setSelectedJointId(jointId);
+  };
+
+  const selectBoneEdge = (parentId: string, childId: string) => {
+    setSelectedGraphType("bone");
+    setSelectedJointId(null);
+    setSelectedBoneEdge({ parentId, childId });
+  };
+
+  // When joint OR bone-edge is selected, auto-select related mould and copy profiles into editing state.
   createEffect(() => {
     const jointId = selectedJointId();
-    if (!jointId || !mouldManagerRef) {
+    const edge = selectedBoneEdge();
+    if ((!jointId && !edge) || !mouldManagerRef) {
       setSelectedMouldId(null);
       setEditingProfiles(null);
       return;
     }
-    const jointMoulds = mouldManagerRef.getMouldsByJoint(jointId);
-    const mould = jointMoulds[0];
+
+    let mould = null as ReturnType<MouldManager["getMouldsByJoint"]>[number] | null;
+    if (edge) {
+      const all = mouldManagerRef.getMoulds();
+      mould =
+        all.find(m => m.parentJointId === edge.parentId && Array.isArray(m.radialProfiles) && m.radialProfiles.length > 0) ??
+        all.find(m => m.parentJointId === edge.childId && Array.isArray(m.radialProfiles) && m.radialProfiles.length > 0) ??
+        all.find(m => m.parentJointId === edge.parentId) ??
+        all.find(m => m.parentJointId === edge.childId) ??
+        null;
+    } else if (jointId) {
+      const jointMoulds = mouldManagerRef.getMouldsByJoint(jointId);
+      mould = jointMoulds[0] ?? null;
+    }
+
     if (mould?.radialProfiles) {
+      const isMouldChanged = selectedMouldId() !== mould.id;
       setSelectedMouldId(mould.id);
       setEditingProfiles(mould.radialProfiles.map(r => [...r]));
-      setActiveRingIndex(0);
+      if (isMouldChanged) setActiveRingIndex(0);
     } else {
       setSelectedMouldId(null);
       setEditingProfiles(null);
@@ -125,11 +154,14 @@ const Humans = () => {
 
   // Handle joint selection - capture initial values for base offsets and mould radius
   const handleJointSelected = (
-    _jointId: string,
+    jointId: string,
     offset: [number, number, number],
     _rotation: [number, number, number, number],
     mouldRadius: number
   ) => {
+    // Ensure Properties panel switches to bone mode for viewport selections.
+    selectJoint(jointId);
+
     // Reset sliders to zero (user sees centered sliders)
     setSliderRotX(0);
     setSliderRotY(0);
@@ -418,7 +450,80 @@ const Humans = () => {
   // Browser navigation: region → bones
   const [selectedBrowserRegion, setSelectedBrowserRegion] = createSignal<string | null>(null);
 
+  const resolveEdgeMould = (parentId: string | null, childId: string) => {
+    if (!mouldManagerRef) return null as ReturnType<MouldManager["getMoulds"]>[number] | null;
+    const all = mouldManagerRef.getMoulds();
+    const childJoint = skeletonJoints().find(j => j.id === childId);
+    const childIsTerminal = !!childJoint && childJoint.children.length === 0;
+
+    // Deterministic edge mapping:
+    // - terminal edges (e.g. neck->head, wrist->hand) prefer child-side mould
+    // - otherwise prefer parent-side mould
+    const childProfiled = all.find(m => m.parentJointId === childId && Array.isArray(m.radialProfiles) && m.radialProfiles.length > 0);
+    const childAny = all.find(m => m.parentJointId === childId);
+
+    if (childIsTerminal) {
+      if (childProfiled) return childProfiled;
+      if (childAny) return childAny;
+    }
+
+    const parentProfiled = parentId
+      ? all.find(m => m.parentJointId === parentId && Array.isArray(m.radialProfiles) && m.radialProfiles.length > 0)
+      : undefined;
+    if (parentProfiled) return parentProfiled;
+
+    const parentAny = parentId ? all.find(m => m.parentJointId === parentId) : undefined;
+    if (parentAny) return parentAny;
+
+    if (childProfiled) return childProfiled;
+
+    return childAny ?? null;
+  };
+
+  const getEdgeMouldId = (edge: { parentId: string; childId: string } | null): string | null => {
+    if (!edge) return null;
+    return resolveEdgeMould(edge.parentId, edge.childId)?.id ?? null;
+  };
+
+  const getPreferredEdgeForJoint = (jointId: string | null): { parentId: string; childId: string } | null => {
+    if (!jointId) return null;
+    const byId = new Map(skeletonJoints().map(j => [j.id, j]));
+    const joint = byId.get(jointId);
+    if (!joint) return null;
+
+    const all = mouldManagerRef?.getMoulds() ?? [];
+    // Prefer downstream edge that actually has a mould target (parent or child).
+    const childWithMould =
+      joint.children.find(childId =>
+        byId.has(childId) &&
+        (
+          all.some(m => m.parentJointId === jointId) ||
+          all.some(m => m.parentJointId === childId)
+        )
+      ) ??
+      joint.children.find(childId => byId.has(childId));
+    if (childWithMould) return { parentId: jointId, childId: childWithMould };
+
+    if (joint.parentId && byId.has(joint.parentId)) {
+      return { parentId: joint.parentId, childId: jointId };
+    }
+    return null;
+  };
+
   const selectionHighlight = () => {
+    const edge = selectedBoneEdge();
+    if (edge) {
+      const edgeMouldId = getEdgeMouldId(edge);
+      if (edgeMouldId) {
+        // Bone-edge selection should map to the concrete bone/shape, not whole region.
+        return { mode: "shape" as const, value: edgeMouldId };
+      }
+      return { mode: "bone" as const, value: edge.childId };
+    }
+    if (selectedGraphType() === "joint" && selectedJointId()) {
+      // Joint selection should remain a true joint highlight in 3D (blue joint dot).
+      return { mode: "bone" as const, value: selectedJointId()! };
+    }
     if (selectedMouldId()) {
       return { mode: "shape" as const, value: selectedMouldId()! };
     }
@@ -432,15 +537,24 @@ const Humans = () => {
   };
 
   const navigateToRegion = (region: string) => {
-    // Region focus should not inherit stale bone/shape selection.
-    setSelectedJointId(null);
+    // Region focus should not inherit stale shape selection.
     setSelectedMouldId(null);
+    // Auto-select first bone edge in region; fallback to first joint.
+    const jointsInRegion = skeletonJoints().filter(j => getBodyRegion(j.id) === region);
+    const firstEdge = jointsInRegion.find(j => !!j.parentId && jointsInRegion.some(p => p.id === j.parentId));
+    if (firstEdge?.parentId) {
+      selectBoneEdge(firstEdge.parentId, firstEdge.id);
+    } else {
+      selectJoint(jointsInRegion[0]?.id ?? null);
+    }
     setSelectedBrowserRegion(region);
   };
 
   const navigateBack = () => {
     // Reset to root browser state and remove focus selection.
     setSelectedJointId(null);
+    setSelectedBoneEdge(null);
+    setSelectedGraphType(null);
     setSelectedMouldId(null);
     setSelectedBrowserRegion(null);
   };
@@ -462,8 +576,9 @@ const Humans = () => {
   const regionBoneGraph = () => {
     const region = selectedBrowserRegion();
     if (!region) return [] as Array<{
-      id: string;
-      parentId: string | null;
+      parentId: string;
+      childId: string;
+      terminalJointId?: string;
     }>;
 
     const all = skeletonJoints();
@@ -476,12 +591,12 @@ const Humans = () => {
       .filter(j => !j.parentId || !jointSet.has(j.parentId))
       .sort((a, b) => (indexById.get(a.id) ?? 0) - (indexById.get(b.id) ?? 0));
 
-    const rows: Array<{ id: string; parentId: string | null }> = [];
+    const rows: Array<{ parentId: string; childId: string }> = [];
     const visit = (
       id: string,
-      parentId: string | null,
+      parentId: string | null
     ) => {
-      rows.push({ id, parentId });
+      if (parentId) rows.push({ parentId, childId: id });
       const node = byId.get(id);
       if (!node) return;
       const kids = node.children.filter(c => jointSet.has(c));
@@ -491,12 +606,39 @@ const Humans = () => {
     };
 
     for (const root of roots) {
+      // For tiny chains (e.g. Head & Neck), include a root self-bone row
+      // so both parent and child bones are addressable in the graph.
+      if (joints.length <= 2) {
+        rows.push({ parentId: root.id, childId: root.id });
+      }
       visit(root.id, null);
     }
-    return rows;
+    const isLeafNoGeometryEdge = (parentId: string, childId: string): boolean => {
+      const child = byId.get(childId);
+      const inRegionChildren = child?.children.filter(c => jointSet.has(c)) ?? [];
+      return inRegionChildren.length === 0 && !boneHasGeometryInfluence(parentId, childId);
+    };
+
+    // Collapse terminal, non-geometry edges into a terminal joint marker
+    // so the graph ends on a joint card, not a full bone card.
+    const terminalJointByCarrierChild = new Map<string, string>();
+    for (const row of rows) {
+      if (isLeafNoGeometryEdge(row.parentId, row.childId)) {
+        terminalJointByCarrierChild.set(row.parentId, row.childId);
+      }
+    }
+
+    return rows
+      .filter(row => !isLeafNoGeometryEdge(row.parentId, row.childId))
+      .map(row => ({
+        ...row,
+        terminalJointId: terminalJointByCarrierChild.get(row.childId),
+      }));
   };
 
   const boneJokeLine = () => {
+    const edge = selectedBoneEdge();
+    if (edge) return `the ${edge.childId} bone's connected to the ${edge.parentId} bone`;
     const selected = selectedJointId();
     if (!selected) return "the hip bone's connected to the thigh bone";
     const parent = skeletonJoints().find(j => j.id === selected)?.parentId;
@@ -504,22 +646,35 @@ const Humans = () => {
     return `the ${selected} bone's connected to the ${parent} bone`;
   };
 
-  const getJointProfileSegmentCount = (jointId: string): number => {
+  const getBoneProfileSegmentCount = (parentId: string | null, childId: string): number => {
     // Keep this reactive when profile edits change ring counts.
     void mouldProfilesVersion();
-    const jointMoulds = mouldManagerRef?.getMouldsByJoint(jointId) ?? [];
-    const mouldWithProfiles = jointMoulds.find(m => Array.isArray(m.radialProfiles) && m.radialProfiles.length > 0);
+    const mouldWithProfiles = resolveEdgeMould(parentId, childId);
     return mouldWithProfiles?.radialProfiles?.length ?? 0;
   };
 
-  const openShapeEditorForJoint = (jointId: string) => {
-    setSelectedJointId(jointId);
-    setSceneTab("Properties");
+  const boneHasGeometryInfluence = (parentId: string | null, childId: string): boolean => {
+    void mouldProfilesVersion();
+    return !!resolveEdgeMould(parentId, childId);
   };
 
-  const addJointEvenly = (jointId: string) => {
-    // UI placeholder for upcoming joint insertion workflow.
-    console.info("Add joint evenly requested for", jointId);
+  const jointHasGeometryInfluence = (jointId: string): boolean => {
+    const all = moulds();
+    return all.some(m => m.parentJointId === jointId);
+  };
+
+  const getBoneLabel = (parentId: string, childId: string): string => {
+    const mould = resolveEdgeMould(parentId, childId);
+    return mould?.id ?? `${parentId} → ${childId}`;
+  };
+
+  const openShapeEditorForNode = (parentId: string | null, childId: string) => {
+    if (parentId) {
+      selectBoneEdge(parentId, childId);
+    } else {
+      selectJoint(childId);
+    }
+    setSceneTab("Properties");
   };
 
   const highlightMatch = (text: string, query: string) => {
@@ -547,17 +702,18 @@ const Humans = () => {
         showSkeleton={showSkeleton()}
         selectedJointId={selectedJointId()}
         selectionHighlight={selectionHighlight()}
+        activeProfileSegmentIndex={selectedMouldId() ? activeRingIndex() : null}
         mouldProfilesVersion={mouldProfilesVersion()}
         onSkeletonReady={setSkeletonJoints}
         onMouldsReady={setMoulds}
         onMouldManagerReady={handleMouldManagerReady}
         onJointSelected={handleJointSelected}
-        onJointClicked={setSelectedJointId}
+        onJointClicked={(jointId) => selectJoint(jointId)}
       />
 
       <div class="inspector">
         <div class="inspector-header">
-          <Tabs tabs={sceneTabs} onTabChange={setSceneTab} />
+          <Tabs tabs={sceneTabs} activeTab={sceneTab()} onTabChange={setSceneTab} />
         </div>
         <div class="inspector-content">
           <Switch>
@@ -609,30 +765,46 @@ const Humans = () => {
                         <For each={regionBoneGraph()}>
                           {(node, idx) => (
                             <>
-                              <div class={`bone-timeline-row ${selectedJointId() === node.id ? "active" : ""}`}>
+                              <div class={`bone-timeline-row ${(selectedGraphType() === "bone" && selectedBoneEdge()?.parentId === node.parentId && selectedBoneEdge()?.childId === node.childId) ? "active" : ""}`}>
                                 <div
                                   class="bone-timeline-card"
                                   role="button"
                                   tabindex={0}
-                                  title={node.parentId ? `${node.parentId} → ${node.id}` : node.id}
-                                  onClick={() => setSelectedJointId(node.id)}
+                                  title={`${node.parentId} → ${node.childId}`}
+                                  onClick={() => {
+                                    selectBoneEdge(node.parentId, node.childId);
+                                  }}
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter" || e.key === " ") {
                                       e.preventDefault();
-                                      setSelectedJointId(node.id);
+                                      selectBoneEdge(node.parentId, node.childId);
                                     }
                                   }}
                                 >
-                                  <span class="bone-timeline-card-title">{node.id}</span>
-                                  <span class="bone-timeline-card-subtitle">{(node.parentId ?? "root")} → {node.id}</span>
-                                  <span class="bone-timeline-card-metrics">profile segments: {getJointProfileSegmentCount(node.id)}</span>
+                                  <span class="bone-timeline-card-title">
+                                    {getBoneLabel(node.parentId, node.childId)}
+                                    <Show when={!boneHasGeometryInfluence(node.parentId, node.childId)}>
+                                      <span class="bone-node-badge bone-node-badge-dim">No Geometry</span>
+                                    </Show>
+                                  </span>
+                                  <span class="bone-timeline-card-subtitle">
+                                    {node.parentId === node.childId ? `${node.childId} root` : `${node.parentId} → ${node.childId}`}
+                                  </span>
+                                  <span class="bone-timeline-card-metrics">
+                                    <Show
+                                      when={boneHasGeometryInfluence(node.parentId, node.childId)}
+                                      fallback={"skeleton only: no geometry influence"}
+                                    >
+                                      profile segments: {getBoneProfileSegmentCount(node.parentId, node.childId)}
+                                    </Show>
+                                  </span>
                                   <span class="bone-timeline-card-actions">
                                     <button
                                       type="button"
                                       class="bone-card-action"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        openShapeEditorForJoint(node.id);
+                                        openShapeEditorForNode(node.parentId, node.childId);
                                       }}
                                     >
                                       Edit Shape
@@ -640,18 +812,46 @@ const Humans = () => {
                                   </span>
                                 </div>
                               </div>
-                              <Show when={idx() < regionBoneGraph().length - 1}>
-                                <div class="bone-timeline-connector" aria-hidden="true">
+                              <Show when={idx() < regionBoneGraph().length - 1 || !!node.terminalJointId}>
+                                <div class="bone-timeline-connector">
                                   <span class="bone-timeline-connector-line" />
-                                  <button
-                                    type="button"
-                                    class="bone-timeline-add-joint"
-                                    title={`Add joint between ${node.id} and next`}
-                                    onClick={() => addJointEvenly(node.id)}
+                                  <div
+                                    class={`bone-timeline-joint-card ${selectedGraphType() === "joint" && selectedJointId() === (idx() < regionBoneGraph().length - 1 ? node.childId : node.terminalJointId) ? "active" : ""}`}
+                                    role="button"
+                                    tabindex={0}
+                                    title={`Joint: ${idx() < regionBoneGraph().length - 1 ? node.childId : node.terminalJointId}`}
+                                    onClick={() => {
+                                      selectJoint(idx() < regionBoneGraph().length - 1 ? node.childId : node.terminalJointId!);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" || e.key === " ") {
+                                        e.preventDefault();
+                                        selectJoint(idx() < regionBoneGraph().length - 1 ? node.childId : node.terminalJointId!);
+                                      }
+                                    }}
                                   >
-                                    + Joint
-                                  </button>
-                                  <span class="bone-timeline-connector-arrow">▼</span>
+                                    <span class="bone-timeline-joint-label">
+                                      {idx() < regionBoneGraph().length - 1 ? node.childId : node.terminalJointId}
+                                      <Show when={!jointHasGeometryInfluence(idx() < regionBoneGraph().length - 1 ? node.childId : node.terminalJointId!)}>
+                                        <span class="bone-node-badge bone-node-badge-dim">No Geometry</span>
+                                      </Show>
+                                    </span>
+                                    <button
+                                      type="button"
+                                      class="bone-timeline-joint-edit"
+                                      title={`Edit joint: ${idx() < regionBoneGraph().length - 1 ? node.childId : node.terminalJointId}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        selectJoint(idx() < regionBoneGraph().length - 1 ? node.childId : node.terminalJointId!);
+                                        setSceneTab("Properties");
+                                      }}
+                                    >
+                                      Edit Joint
+                                    </button>
+                                  </div>
+                                  <Show when={idx() < regionBoneGraph().length - 1}>
+                                    <span class="bone-timeline-connector-arrow">▼</span>
+                                  </Show>
                                 </div>
                               </Show>
                             </>
@@ -702,7 +902,7 @@ const Humans = () => {
                               onClick={() => {
                                 setSearchQuery("");
                                 navigateToRegion(getBodyRegion(joint.id));
-                                setSelectedJointId(joint.id);
+                                selectJoint(joint.id);
                               }}
                             >
                               <span class="shape-row-icon">🦴</span>
@@ -720,75 +920,159 @@ const Humans = () => {
             <Match when={sceneTab() === "Properties"}>
               {selectedHuman() && (
                 <>
-                  <div class="property-section">
-                    <h4>Object</h4>
-                    <div class="property-group">
-                      <label>Name</label>
-                      <div class="input-with-button">
-                        <input
-                          type="text"
-                          class="property-input"
-                          value={selectedHuman()?.name}
-                          onInput={(e) => updateSelectedHuman({ name: e.currentTarget.value })}
-                        />
+                  <Show when={selectedMouldId() && editingProfiles()}>
+                    <ProfileEditorPanel
+                      mouldId={selectedMouldId()!}
+                      mould={mouldManagerRef!.getMould(selectedMouldId()!)!}
+                      profiles={editingProfiles()!}
+                      activeRingIndex={activeRingIndex()}
+                      showGhostAbove={showGhostAbove()}
+                      onRingChange={(idx) => setActiveRingIndex(idx)}
+                      onGhostToggle={(above) => setShowGhostAbove(above)}
+                      onAddRing={(afterIdx) => {
+                        const profiles = editingProfiles()!;
+                        const source = profiles[afterIdx] ?? profiles[profiles.length - 1];
+                        const newProfiles = [...profiles];
+                        newProfiles.splice(afterIdx + 1, 0, [...source]);
+                        handleProfileChange(newProfiles, selectedMouldId()!);
+                      }}
+                      onRemoveRing={(idx) => {
+                        const profiles = editingProfiles()!;
+                        if (profiles.length <= 1) return;
+                        const newProfiles = profiles.filter((_, i) => i !== idx);
+                        setActiveRingIndex(i => Math.min(i, newProfiles.length - 1));
+                        handleProfileChange(newProfiles, selectedMouldId()!);
+                      }}
+                      onHandleChange={(segIdx, ptIdx, radius) => {
+                        const profiles = editingProfiles()!;
+                        const newProfiles = profiles.map((ring, si) =>
+                          si === segIdx ? ring.map((r, pi) => pi === ptIdx ? Math.max(0.005, radius) : r) : ring
+                        );
+                        handleProfileChange(newProfiles, selectedMouldId()!);
+                      }}
+                      onAddHandle={(segIdx, afterPtIdx) => {
+                        const profiles = editingProfiles()!;
+                        const ring = [...profiles[segIdx]];
+                        const nextIdx = (afterPtIdx + 1) % ring.length;
+                        ring.splice(afterPtIdx + 1, 0, (ring[afterPtIdx] + ring[nextIdx]) / 2);
+                        const newProfiles = profiles.map((r, si) => si === segIdx ? ring : r);
+                        handleProfileChange(newProfiles, selectedMouldId()!);
+                      }}
+                      onRemoveHandle={(segIdx, ptIdx) => {
+                        const profiles = editingProfiles()!;
+                        if (profiles[segIdx].length <= 3) return;
+                        const newRing = profiles[segIdx].filter((_, i) => i !== ptIdx);
+                        const newProfiles = profiles.map((r, si) => si === segIdx ? newRing : r);
+                        handleProfileChange(newProfiles, selectedMouldId()!);
+                      }}
+                    />
+                  </Show>
+
+                  <Show when={!selectedJointId() && !selectedBoneEdge()}>
+                    <div class="property-section">
+                      <h4>Object</h4>
+                      <div class="property-group">
+                        <label>Name</label>
+                        <div class="input-with-button">
+                          <input
+                            type="text"
+                            class="property-input"
+                            value={selectedHuman()?.name}
+                            onInput={(e) => updateSelectedHuman({ name: e.currentTarget.value })}
+                          />
+                          <button
+                            class="input-button"
+                            onClick={randomizeName}
+                            title="Randomize name"
+                          >
+                            <Icon name="dice" size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </Show>
+
+                  <Show
+                    when={selectedJointId() || selectedBoneEdge()}
+                    fallback={
+                      <div class="property-section">
+                        <h4>Display & Mesh</h4>
+
+                        <div class="property-group">
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={showSkeleton()}
+                              onChange={(e) => setShowSkeleton(e.currentTarget.checked)}
+                            />
+                            Show Skeleton
+                          </label>
+                        </div>
+
+                        <div class="property-group">
+                          <label>Voxel Resolution</label>
+                          <select
+                            class="property-input"
+                            value={voxelResolution()}
+                            onChange={(e) => setVoxelResolution(parseInt(e.currentTarget.value) as 32 | 48 | 64 | 96 | 128 | 256)}
+                          >
+                            <option value="32">32</option>
+                            <option value="48">48</option>
+                            <option value="64">64 (Default)</option>
+                            <option value="96">96</option>
+                            <option value="128">128 (High)</option>
+                            <option value="256">256 (Very High)</option>
+                          </select>
+                        </div>
+                      </div>
+                    }
+                  >
+                    <div class="property-section">
+                      <h4>Bone Properties</h4>
+                      <div class="property-group">
+                        <div class="property-label-row">
+                          <label>Selected {selectedGraphType() === "joint" ? "Joint" : "Bone"}</label>
+                          <span class="property-value">
+                            {selectedBoneEdge()
+                              ? `${getBoneLabel(selectedBoneEdge()!.parentId, selectedBoneEdge()!.childId)} (${selectedBoneEdge()!.parentId} → ${selectedBoneEdge()!.childId})`
+                              : selectedJointId()}
+                          </span>
+                        </div>
                         <button
                           class="input-button"
-                          onClick={randomizeName}
-                          title="Randomize name"
+                          onClick={() => {
+                            setSelectedJointId(null);
+                            setSelectedBoneEdge(null);
+                            setSelectedGraphType(null);
+                          }}
+                          title="Return to human properties"
                         >
-                          <Icon name="dice" size={16} />
+                          Done
                         </button>
                       </div>
                     </div>
-                  </div>
-                  <div class="property-section">
-                    <h4>Component System</h4>
 
-                    <div class="property-group">
-                      <div class="property-label-row">
-                        <label>Mould Size</label>
-                        <span class="property-value">
-                          {mouldRadius().toFixed(2)}
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0.1"
-                        max="1.0"
-                        step="0.01"
-                        value={mouldRadius()}
-                        onInput={(e) => updateMouldRadius(parseFloat(e.currentTarget.value))}
-                        class="property-slider"
-                      />
-                    </div>
-
-                    <div class="property-group">
-                      <label>
+                    <div class="property-section">
+                      <h4>Bone Shape</h4>
+                      <div class="property-group">
+                        <div class="property-label-row">
+                          <label>Mould Size</label>
+                          <span class="property-value">
+                            {mouldRadius().toFixed(2)}
+                          </span>
+                        </div>
                         <input
-                          type="checkbox"
-                          checked={showSkeleton()}
-                          onChange={(e) => setShowSkeleton(e.currentTarget.checked)}
+                          type="range"
+                          min="0.1"
+                          max="1.0"
+                          step="0.01"
+                          value={mouldRadius()}
+                          onInput={(e) => updateMouldRadius(parseFloat(e.currentTarget.value))}
+                          class="property-slider"
                         />
-                        Show Skeleton
-                      </label>
+                      </div>
                     </div>
-
-                    <div class="property-group">
-                      <label>Voxel Resolution</label>
-                      <select
-                        class="property-input"
-                        value={voxelResolution()}
-                        onChange={(e) => setVoxelResolution(parseInt(e.currentTarget.value) as 32 | 48 | 64 | 96 | 128 | 256)}
-                      >
-                        <option value="32">32</option>
-                        <option value="48">48</option>
-                        <option value="64">64 (Default)</option>
-                        <option value="96">96</option>
-                        <option value="128">128 (High)</option>
-                        <option value="256">256 (Very High)</option>
-                      </select>
-                    </div>
-                  </div>
+                  </Show>
 
                   {selectedJointId() && (
                     <div class="property-section">
@@ -894,56 +1178,9 @@ const Humans = () => {
                     </div>
                   )}
 
-                  <Show when={selectedMouldId() && editingProfiles()}>
-                    <ProfileEditorPanel
-                      mouldId={selectedMouldId()!}
-                      mould={mouldManagerRef!.getMould(selectedMouldId()!)!}
-                      profiles={editingProfiles()!}
-                      activeRingIndex={activeRingIndex()}
-                      showGhostAbove={showGhostAbove()}
-                      onRingChange={(idx) => setActiveRingIndex(idx)}
-                      onGhostToggle={(above) => setShowGhostAbove(above)}
-                      onAddRing={(afterIdx) => {
-                        const profiles = editingProfiles()!;
-                        const source = profiles[afterIdx] ?? profiles[profiles.length - 1];
-                        const newProfiles = [...profiles];
-                        newProfiles.splice(afterIdx + 1, 0, [...source]);
-                        handleProfileChange(newProfiles, selectedMouldId()!);
-                      }}
-                      onRemoveRing={(idx) => {
-                        const profiles = editingProfiles()!;
-                        if (profiles.length <= 1) return;
-                        const newProfiles = profiles.filter((_, i) => i !== idx);
-                        setActiveRingIndex(i => Math.min(i, newProfiles.length - 1));
-                        handleProfileChange(newProfiles, selectedMouldId()!);
-                      }}
-                      onHandleChange={(segIdx, ptIdx, radius) => {
-                        const profiles = editingProfiles()!;
-                        const newProfiles = profiles.map((ring, si) =>
-                          si === segIdx ? ring.map((r, pi) => pi === ptIdx ? Math.max(0.005, radius) : r) : ring
-                        );
-                        handleProfileChange(newProfiles, selectedMouldId()!);
-                      }}
-                      onAddHandle={(segIdx, afterPtIdx) => {
-                        const profiles = editingProfiles()!;
-                        const ring = [...profiles[segIdx]];
-                        const nextIdx = (afterPtIdx + 1) % ring.length;
-                        ring.splice(afterPtIdx + 1, 0, (ring[afterPtIdx] + ring[nextIdx]) / 2);
-                        const newProfiles = profiles.map((r, si) => si === segIdx ? ring : r);
-                        handleProfileChange(newProfiles, selectedMouldId()!);
-                      }}
-                      onRemoveHandle={(segIdx, ptIdx) => {
-                        const profiles = editingProfiles()!;
-                        if (profiles[segIdx].length <= 3) return;
-                        const newRing = profiles[segIdx].filter((_, i) => i !== ptIdx);
-                        const newProfiles = profiles.map((r, si) => si === segIdx ? newRing : r);
-                        handleProfileChange(newProfiles, selectedMouldId()!);
-                      }}
-                    />
-                  </Show>
-
-                  <div class="property-section">
-                    <h4>Basic Parameters</h4>
+                  <Show when={!selectedJointId() && !selectedBoneEdge()}>
+                    <div class="property-section">
+                      <h4>Basic Parameters</h4>
 
                     <div class="property-group">
                       <label>Gender</label>
@@ -1052,7 +1289,8 @@ const Humans = () => {
                         setAgeGroup={(ag: string) => updateSelectedHuman({ ageGroup: ag })}
                       />
                     )}
-                  </div>
+                    </div>
+                  </Show>
                 </>
               )}
             </Match>
