@@ -1,4 +1,4 @@
-import { createSignal, Show, onMount, onCleanup } from "solid-js";
+import { Show, onMount, onCleanup } from "solid-js";
 import Icon from "./Icon";
 import "./ConfirmDialog.css";
 

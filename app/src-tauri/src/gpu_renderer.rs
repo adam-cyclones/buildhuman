@@ -68,8 +68,8 @@ impl OrbitCamera {
         let half_height = self.distance * 0.5;
         let half_width = half_height * aspect;
 
-        // Simple orthographic that maps a reasonable Z range to [0, 1]
-        let z_scale = 0.1_f32;  // Compress Z to fit in [0, 1]
+        // Simple orthographic depth mapping.
+        let z_scale = 0.1_f32;
         let z_offset = 0.5_f32; // Center the range
 
         // nalgebra Matrix4::new() takes row-major input
@@ -124,6 +124,84 @@ fn normalize_vec3(v: [f32; 3]) -> [f32; 3] {
     } else {
         [0.0, 0.0, 1.0]
     }
+}
+
+/// Recompute smooth per-vertex normals from triangle topology.
+/// This reduces shading artifacts from noisy/generated normals.
+fn compute_smooth_normals(vertices: &[f32], indices: &[u32]) -> Vec<f32> {
+    let vertex_count = vertices.len() / 3;
+    let mut normals = vec![0.0_f32; vertex_count * 3];
+
+    for tri in indices.chunks_exact(3) {
+        let i0 = tri[0] as usize;
+        let i1 = tri[1] as usize;
+        let i2 = tri[2] as usize;
+        if i0 >= vertex_count || i1 >= vertex_count || i2 >= vertex_count {
+            continue;
+        }
+
+        let p0 = nalgebra::Vector3::new(vertices[i0 * 3], vertices[i0 * 3 + 1], vertices[i0 * 3 + 2]);
+        let p1 = nalgebra::Vector3::new(vertices[i1 * 3], vertices[i1 * 3 + 1], vertices[i1 * 3 + 2]);
+        let p2 = nalgebra::Vector3::new(vertices[i2 * 3], vertices[i2 * 3 + 1], vertices[i2 * 3 + 2]);
+
+        // Area-weighted face normal accumulation.
+        let face = (p1 - p0).cross(&(p2 - p0));
+        let len2 = face.norm_squared();
+        if len2 < 1e-12 {
+            continue;
+        }
+
+        for idx in [i0, i1, i2] {
+            normals[idx * 3] += face.x;
+            normals[idx * 3 + 1] += face.y;
+            normals[idx * 3 + 2] += face.z;
+        }
+    }
+
+    for i in 0..vertex_count {
+        let nx = normals[i * 3];
+        let ny = normals[i * 3 + 1];
+        let nz = normals[i * 3 + 2];
+        let len = (nx * nx + ny * ny + nz * nz).sqrt();
+        if len > 1e-8 {
+            normals[i * 3] = nx / len;
+            normals[i * 3 + 1] = ny / len;
+            normals[i * 3 + 2] = nz / len;
+        } else {
+            normals[i * 3] = 0.0;
+            normals[i * 3 + 1] = 1.0;
+            normals[i * 3 + 2] = 0.0;
+        }
+    }
+
+    normals
+}
+
+fn blend_and_normalize_normals(base: &[f32], smooth: &[f32], smooth_weight: f32) -> Vec<f32> {
+    if base.len() != smooth.len() {
+        return smooth.to_vec();
+    }
+    let w = smooth_weight.clamp(0.0, 1.0);
+    let inv_w = 1.0 - w;
+    let mut out = vec![0.0_f32; base.len()];
+    let count = base.len() / 3;
+
+    for i in 0..count {
+        let x = base[i * 3] * inv_w + smooth[i * 3] * w;
+        let y = base[i * 3 + 1] * inv_w + smooth[i * 3 + 1] * w;
+        let z = base[i * 3 + 2] * inv_w + smooth[i * 3 + 2] * w;
+        let len = (x * x + y * y + z * z).sqrt();
+        if len > 1e-8 {
+            out[i * 3] = x / len;
+            out[i * 3 + 1] = y / len;
+            out[i * 3 + 2] = z / len;
+        } else {
+            out[i * 3] = 0.0;
+            out[i * 3 + 1] = 1.0;
+            out[i * 3 + 2] = 0.0;
+        }
+    }
+    out
 }
 
 /// UI layout bounds (in pixels from top-left)
@@ -195,6 +273,14 @@ impl Default for LightUniform {
     }
 }
 
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    if edge0 == edge1 {
+        return if x < edge0 { 0.0 } else { 1.0 };
+    }
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 fn create_depth_texture(
     device: &Device,
     width: u32,
@@ -254,6 +340,7 @@ pub struct GpuRenderer {
     debug_num_indices: u32,
     show_skeleton: bool,
     wireframe_enabled: bool,
+    selection_focus: bool,
 }
 
 impl GpuRenderer {
@@ -773,6 +860,7 @@ impl GpuRenderer {
             debug_num_indices: 0,
             show_skeleton: true, // Enable skeleton by default
             wireframe_enabled: false,
+            selection_focus: false,
         })
     }
 
@@ -786,13 +874,48 @@ impl GpuRenderer {
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[camera_uniform]));
     }
 
+    /// Update scene transparency based on camera distance for smooth zoom-out fade.
+    pub fn update_light_uniform(&self) {
+        let mut light = LightUniform::default();
+        let fade_start = 7.5_f32;
+        let fade_end = 10.0_f32;
+        let fade_t = smoothstep(fade_start, fade_end, self.camera.distance);
+        let selection_dim = if self.selection_focus { 0.35 } else { 1.0 };
+        light.alpha = 0.6 * selection_dim * (1.0 - fade_t);
+        self.queue.write_buffer(&self.light_buffer, 0, bytemuck::cast_slice(&[light]));
+    }
+
+    pub fn set_selection_focus(&mut self, enabled: bool) {
+        self.selection_focus = enabled;
+        self.update_light_uniform();
+    }
+
     /// Update orbit camera parameters and refresh the uniform buffer
-    pub fn set_camera(&mut self, yaw: f32, pitch: f32, distance: f32) {
-        // Allow full over-the-pole rotation; up-vector flip in view_matrix handles the singularity
-        self.camera.pitch = pitch;
+    pub fn set_camera(
+        &mut self,
+        yaw: f32,
+        pitch: f32,
+        distance: f32,
+        target_x: Option<f32>,
+        target_y: Option<f32>,
+        target_z: Option<f32>,
+    ) {
+        // Keep camera upright by preventing over-the-pole flips.
+        let max_pitch = std::f32::consts::PI * 0.49;
+        self.camera.pitch = pitch.clamp(-max_pitch, max_pitch);
         self.camera.yaw = yaw;
         self.camera.distance = distance.max(0.5); // Minimum distance
+        if let Some(x) = target_x {
+            self.camera.target.x = x;
+        }
+        if let Some(y) = target_y {
+            self.camera.target.y = y;
+        }
+        if let Some(z) = target_z {
+            self.camera.target.z = z;
+        }
         self.update_camera_uniform();
+        self.update_light_uniform();
     }
 
     /// Get current camera state
@@ -1339,11 +1462,14 @@ pub async fn update_gpu_camera(
     yaw: f32,
     pitch: f32,
     distance: f32,
+    target_x: Option<f32>,
+    target_y: Option<f32>,
+    target_z: Option<f32>,
 ) -> Result<(), String> {
     let mut renderer = GPU_RENDERER.lock().unwrap();
 
     if let Some(ref mut renderer) = *renderer {
-        renderer.set_camera(yaw, pitch, distance);
+        renderer.set_camera(yaw, pitch, distance, target_x, target_y, target_z);
         renderer.render()?;
         Ok(())
     } else {
@@ -1453,17 +1579,20 @@ pub async fn generate_and_render_gpu(
         }
     };
 
-    // Interleave vertices and normals: [pos.x, pos.y, pos.z, norm.x, norm.y, norm.z, ...]
+    // Interleave vertices and recomputed smooth normals:
+    // [pos.x, pos.y, pos.z, norm.x, norm.y, norm.z, ...]
     let vertex_count = mesh.vertices.len() / 3;
+    let smooth_normals = compute_smooth_normals(&mesh.vertices, &mesh.indices);
+    let blended_normals = blend_and_normalize_normals(&mesh.normals, &smooth_normals, 0.35);
     let mut interleaved = Vec::with_capacity(vertex_count * 6);
 
     for i in 0..vertex_count {
         interleaved.push(mesh.vertices[i * 3]);
         interleaved.push(mesh.vertices[i * 3 + 1]);
         interleaved.push(mesh.vertices[i * 3 + 2]);
-        interleaved.push(mesh.normals[i * 3]);
-        interleaved.push(mesh.normals[i * 3 + 1]);
-        interleaved.push(mesh.normals[i * 3 + 2]);
+        interleaved.push(blended_normals[i * 3]);
+        interleaved.push(blended_normals[i * 3 + 1]);
+        interleaved.push(blended_normals[i * 3 + 2]);
     }
 
     let mut renderer = GPU_RENDERER.lock().unwrap();
@@ -1517,17 +1646,19 @@ async fn generate_mesh_gpu_compute_internal(resolution: u32) -> Result<(), Strin
 
     let mesh = result?;
 
-    // Interleave vertices and normals for rendering
+    // Interleave vertices and recomputed smooth normals for rendering
     let vertex_count = mesh.vertices.len() / 3;
+    let smooth_normals = compute_smooth_normals(&mesh.vertices, &mesh.indices);
+    let blended_normals = blend_and_normalize_normals(&mesh.normals, &smooth_normals, 0.35);
     let mut interleaved = Vec::with_capacity(vertex_count * 6);
 
     for i in 0..vertex_count {
         interleaved.push(mesh.vertices[i * 3]);
         interleaved.push(mesh.vertices[i * 3 + 1]);
         interleaved.push(mesh.vertices[i * 3 + 2]);
-        interleaved.push(mesh.normals[i * 3]);
-        interleaved.push(mesh.normals[i * 3 + 1]);
-        interleaved.push(mesh.normals[i * 3 + 2]);
+        interleaved.push(blended_normals[i * 3]);
+        interleaved.push(blended_normals[i * 3 + 1]);
+        interleaved.push(blended_normals[i * 3 + 2]);
     }
 
     // Generate skeleton debug geometry
@@ -1608,17 +1739,19 @@ pub async fn generate_and_render_gpu_compute(
 
     let mesh = result?;
 
-    // Interleave vertices and normals for rendering
+    // Interleave vertices and recomputed smooth normals for rendering
     let vertex_count = mesh.vertices.len() / 3;
+    let smooth_normals = compute_smooth_normals(&mesh.vertices, &mesh.indices);
+    let blended_normals = blend_and_normalize_normals(&mesh.normals, &smooth_normals, 0.35);
     let mut interleaved = Vec::with_capacity(vertex_count * 6);
 
     for i in 0..vertex_count {
         interleaved.push(mesh.vertices[i * 3]);
         interleaved.push(mesh.vertices[i * 3 + 1]);
         interleaved.push(mesh.vertices[i * 3 + 2]);
-        interleaved.push(mesh.normals[i * 3]);
-        interleaved.push(mesh.normals[i * 3 + 1]);
-        interleaved.push(mesh.normals[i * 3 + 2]);
+        interleaved.push(blended_normals[i * 3]);
+        interleaved.push(blended_normals[i * 3 + 1]);
+        interleaved.push(blended_normals[i * 3 + 2]);
     }
 
     // Generate skeleton debug geometry
@@ -1642,6 +1775,40 @@ pub async fn generate_and_render_gpu_compute(
 
         println!("GPU compute: generated {} vertices, {} triangles at resolution {}",
                  vertex_count, mesh.indices.len() / 3, res);
+        Ok(())
+    } else {
+        Err("GPU renderer not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn set_debug_selection(
+    selected_joint_id: Option<String>,
+    highlight_mode: Option<String>,
+    highlight_value: Option<String>,
+) -> Result<(), String> {
+    crate::mesh_generation::set_debug_selection(
+        selected_joint_id,
+        highlight_mode.clone(),
+        highlight_value,
+    );
+    let (mut debug_vertices, mut debug_indices) =
+        crate::mesh_generation::generate_skeleton_debug_geometry()
+            .unwrap_or_else(|_| (Vec::new(), Vec::new()));
+    let (overlay_vertices, overlay_indices) = crate::mesh_generation::generate_selection_overlay_geometry()
+        .unwrap_or_else(|_| (Vec::new(), Vec::new()));
+    let focus_enabled = !overlay_vertices.is_empty() && !overlay_indices.is_empty();
+    if !overlay_vertices.is_empty() && !overlay_indices.is_empty() {
+        let base_idx = (debug_vertices.len() / 6) as u32;
+        debug_vertices.extend_from_slice(&overlay_vertices);
+        debug_indices.extend(overlay_indices.into_iter().map(|i| i + base_idx));
+    }
+
+    let mut renderer = GPU_RENDERER.lock().unwrap();
+    if let Some(ref mut renderer) = *renderer {
+        renderer.set_selection_focus(focus_enabled);
+        renderer.update_debug_data(&debug_vertices, &debug_indices);
+        renderer.render()?;
         Ok(())
     } else {
         Err("GPU renderer not initialized".to_string())

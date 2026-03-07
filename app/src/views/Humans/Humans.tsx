@@ -1,14 +1,39 @@
-import { createSignal, createEffect, For, Switch, Match } from "solid-js";
+import { createSignal, createEffect, For, Show, Switch, Match } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import ThreeDViewport from "./components/3DViewport";
+import ProfileEditorPanel from "./components/ProfileEditorPanel";
 import WeightForAgeChart from "./components/WeightForAgeChart";
 import HeightForAgeChart from "./components/HeightForAgeChart";
 import Tabs from "../../components/Tabs";
 import Icon from "../../components/Icon";
+import type { MouldManager } from "./morphing/mould-manager";
 import type { Human } from "./types";
 import "./Humans.css";
+
+const BODY_REGIONS = ["HEAD & NECK", "TORSO", "LEFT ARM", "RIGHT ARM", "LEFT LEG", "RIGHT LEG", "OTHER"] as const;
+type BodyRegion = typeof BODY_REGIONS[number];
+
+const getBodyRegion = (id: string): BodyRegion => {
+  const l = id.toLowerCase();
+  const hasLeft = l.includes("left") || l.includes("_l") || l.includes("-l") || l.includes(".l") || l.startsWith("l_") || l.startsWith("l-") || l.endsWith("_l") || l.endsWith("-l") || l.endsWith(".l");
+  const hasRight = l.includes("right") || l.includes("_r") || l.includes("-r") || l.includes(".r") || l.startsWith("r_") || l.startsWith("r-") || l.endsWith("_r") || l.endsWith("-r") || l.endsWith(".r");
+  if (l.includes("head") || l.includes("neck") || l.includes("skull") || l.includes("face")) return "HEAD & NECK";
+  if ((l.includes("arm") || l.includes("hand") || l.includes("forearm") || l.includes("wrist") || l.includes("elbow")) && hasLeft) return "LEFT ARM";
+  if ((l.includes("arm") || l.includes("hand") || l.includes("forearm") || l.includes("wrist") || l.includes("elbow")) && hasRight) return "RIGHT ARM";
+  if ((l.includes("leg") || l.includes("foot") || l.includes("thigh") || l.includes("calf") || l.includes("shin") || l.includes("knee") || l.includes("ankle") || l.includes("hip")) && hasLeft) return "LEFT LEG";
+  if ((l.includes("leg") || l.includes("foot") || l.includes("thigh") || l.includes("calf") || l.includes("shin") || l.includes("knee") || l.includes("ankle") || l.includes("hip")) && hasRight) return "RIGHT LEG";
+  if (l.includes("torso") || l.includes("chest") || l.includes("spine") || l.includes("shoulder") || l.includes("pelvis") || l.includes("abdomen")) return "TORSO";
+  return "OTHER";
+};
+
+const formatRegionLabel = (region: string): string =>
+  region
+    .toLowerCase()
+    .split(" ")
+    .map(part => (part === "&" ? "&" : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(" ");
 
 const Humans = () => {
   const maleNames = [
@@ -33,8 +58,6 @@ const Humans = () => {
     { id: 1, name: "Human", gender: "male", ageGroup: "adult", height: 1.75, weight: 70 },
   ]);
   const [selectedHumanId, setSelectedHumanId] = createSignal<number | null>(1);
-  const [renamingId, setRenamingId] = createSignal<number | null>(null);
-  const [expandedNodes, setExpandedNodes] = createSignal<Set<string>>(new Set(["scene", "humans"]));
   const [activeChart, setActiveChart] = createSignal<"height" | "weight">("weight");
   const [sceneTab, setSceneTab] = createSignal("Scene");
   const sceneTabs = ["Scene", "Properties"];
@@ -61,11 +84,50 @@ const Humans = () => {
   const [baseOffsetY, setBaseOffsetY] = createSignal(0);
   const [baseOffsetZ, setBaseOffsetZ] = createSignal(0);
 
+  // Profile editor state
+  const [mouldProfilesVersion, setMouldProfilesVersion] = createSignal(0);
+  const [selectedMouldId, setSelectedMouldId] = createSignal<string | null>(null);
+  const [activeRingIndex, setActiveRingIndex] = createSignal(0);
+  const [showGhostAbove, setShowGhostAbove] = createSignal(false);
+  const [editingProfiles, setEditingProfiles] = createSignal<number[][] | null>(null);
+  let mouldManagerRef: MouldManager | undefined;
+
+  // When joint is selected, auto-select its mould and copy profiles into editing state
+  createEffect(() => {
+    const jointId = selectedJointId();
+    if (!jointId || !mouldManagerRef) {
+      setSelectedMouldId(null);
+      setEditingProfiles(null);
+      return;
+    }
+    const jointMoulds = mouldManagerRef.getMouldsByJoint(jointId);
+    const mould = jointMoulds[0];
+    if (mould?.radialProfiles) {
+      setSelectedMouldId(mould.id);
+      setEditingProfiles(mould.radialProfiles.map(r => [...r]));
+      setActiveRingIndex(0);
+    } else {
+      setSelectedMouldId(null);
+      setEditingProfiles(null);
+    }
+  });
+
+  const handleMouldManagerReady = (manager: MouldManager) => {
+    mouldManagerRef = manager;
+  };
+
+  const handleProfileChange = (newProfiles: number[][], mouldId: string) => {
+    setEditingProfiles(newProfiles);
+    const mould = mouldManagerRef?.getMould(mouldId);
+    if (mould) mould.radialProfiles = newProfiles;
+    setMouldProfilesVersion(v => v + 1);
+  };
+
   // Handle joint selection - capture initial values for base offsets and mould radius
   const handleJointSelected = (
-    jointId: string,
+    _jointId: string,
     offset: [number, number, number],
-    rotation: [number, number, number, number],
+    _rotation: [number, number, number, number],
     mouldRadius: number
   ) => {
     // Reset sliders to zero (user sees centered sliders)
@@ -96,25 +158,6 @@ const Humans = () => {
   createEffect(() => {
     if (jointMovement()) {
       setTimeout(() => setJointMovement(null), 50);
-    }
-  });
-
-  // Auto-expand skeleton nodes when skeleton loads
-  createEffect(() => {
-    const joints = skeletonJoints();
-    if (joints.length > 0) {
-      setExpandedNodes(prev => {
-        const newSet = new Set(prev);
-        newSet.add('human-1'); // Expand first human
-        newSet.add('skeleton-1'); // Expand skeleton
-        // Auto-expand all joint nodes with children
-        joints.forEach(j => {
-          if (j.children.length > 0) {
-            newSet.add(`joint-${j.id}`);
-          }
-        });
-        return newSet;
-      });
     }
   });
 
@@ -167,19 +210,6 @@ const Humans = () => {
     );
     debouncedGenerateHuman();
   };
-
-  const toggleNode = (nodeId: string) => {
-    setExpandedNodes((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(nodeId)) {
-        newSet.delete(nodeId);
-      } else {
-        newSet.add(nodeId);
-      }
-      return newSet;
-    });
-  };
-
 
   const generateHuman = async (human: Human | undefined) => {
     if (!human) return;
@@ -371,40 +401,137 @@ const Humans = () => {
     }
   };
 
-  // Recursive component to render joint hierarchy
-  const JointTreeNode = (props: { joint: { id: string; parentId?: string; children: string[] }; indent: number }) => {
-    const nodeId = `joint-${props.joint.id}`;
-    const hasChildren = props.joint.children.length > 0;
+  const groupedRegions = () => {
+    const regions = new Set<BodyRegion>();
+    for (const j of skeletonJoints()) {
+      regions.add(getBodyRegion(j.id));
+    }
+    // Fallback while skeleton is still loading
+    if (regions.size === 0) {
+      for (const m of moulds()) {
+        regions.add(getBodyRegion(m.id));
+      }
+    }
+    return BODY_REGIONS.filter(r => regions.has(r));
+  };
 
+  // Browser navigation: region → bones
+  const [selectedBrowserRegion, setSelectedBrowserRegion] = createSignal<string | null>(null);
+
+  const selectionHighlight = () => {
+    if (selectedMouldId()) {
+      return { mode: "shape" as const, value: selectedMouldId()! };
+    }
+    if (selectedJointId()) {
+      return { mode: "bone" as const, value: selectedJointId()! };
+    }
+    if (selectedBrowserRegion()) {
+      return { mode: "region" as const, value: selectedBrowserRegion()! };
+    }
+    return null;
+  };
+
+  const navigateToRegion = (region: string) => {
+    // Region focus should not inherit stale bone/shape selection.
+    setSelectedJointId(null);
+    setSelectedMouldId(null);
+    setSelectedBrowserRegion(region);
+  };
+
+  const navigateBack = () => {
+    // Reset to root browser state and remove focus selection.
+    setSelectedJointId(null);
+    setSelectedMouldId(null);
+    setSelectedBrowserRegion(null);
+  };
+
+  const [searchQuery, setSearchQuery] = createSignal("");
+
+  const boneResults = () => {
+    const q = searchQuery().toLowerCase().trim();
+    if (!q) return [];
+    return skeletonJoints().filter(j => j.id.toLowerCase().includes(q));
+  };
+
+  const regionResults = () => {
+    const q = searchQuery().toLowerCase().trim();
+    if (!q) return [];
+    return groupedRegions().filter(region => region.toLowerCase().includes(q));
+  };
+
+  const regionBoneGraph = () => {
+    const region = selectedBrowserRegion();
+    if (!region) return [] as Array<{
+      id: string;
+      parentId: string | null;
+    }>;
+
+    const all = skeletonJoints();
+    const indexById = new Map(all.map((j, idx) => [j.id, idx]));
+    const joints = all.filter(j => getBodyRegion(j.id) === region);
+    const jointSet = new Set(joints.map(j => j.id));
+    const byId = new Map(joints.map(j => [j.id, j]));
+
+    const roots = joints
+      .filter(j => !j.parentId || !jointSet.has(j.parentId))
+      .sort((a, b) => (indexById.get(a.id) ?? 0) - (indexById.get(b.id) ?? 0));
+
+    const rows: Array<{ id: string; parentId: string | null }> = [];
+    const visit = (
+      id: string,
+      parentId: string | null,
+    ) => {
+      rows.push({ id, parentId });
+      const node = byId.get(id);
+      if (!node) return;
+      const kids = node.children.filter(c => jointSet.has(c));
+      for (const childId of kids) {
+        visit(childId, id);
+      }
+    };
+
+    for (const root of roots) {
+      visit(root.id, null);
+    }
+    return rows;
+  };
+
+  const boneJokeLine = () => {
+    const selected = selectedJointId();
+    if (!selected) return "the hip bone's connected to the thigh bone";
+    const parent = skeletonJoints().find(j => j.id === selected)?.parentId;
+    if (!parent) return "the head bone's connected to the neck bone";
+    return `the ${selected} bone's connected to the ${parent} bone`;
+  };
+
+  const getJointProfileSegmentCount = (jointId: string): number => {
+    // Keep this reactive when profile edits change ring counts.
+    void mouldProfilesVersion();
+    const jointMoulds = mouldManagerRef?.getMouldsByJoint(jointId) ?? [];
+    const mouldWithProfiles = jointMoulds.find(m => Array.isArray(m.radialProfiles) && m.radialProfiles.length > 0);
+    return mouldWithProfiles?.radialProfiles?.length ?? 0;
+  };
+
+  const openShapeEditorForJoint = (jointId: string) => {
+    setSelectedJointId(jointId);
+    setSceneTab("Properties");
+  };
+
+  const addJointEvenly = (jointId: string) => {
+    // UI placeholder for upcoming joint insertion workflow.
+    console.info("Add joint evenly requested for", jointId);
+  };
+
+  const highlightMatch = (text: string, query: string) => {
+    const lc = text.toLowerCase();
+    const lcq = query.toLowerCase().trim();
+    const idx = lcq ? lc.indexOf(lcq) : -1;
+    if (idx === -1) return <>{text}</>;
     return (
       <>
-        <div
-          class={`tree-item tree-indent-${props.indent} ${selectedJointId() === props.joint.id ? 'active' : ''}`}
-          onClick={() => setSelectedJointId(props.joint.id)}
-        >
-          {hasChildren && (
-            <span
-              class={`tree-icon tree-arrow ${expandedNodes().has(nodeId) ? "expanded" : ""}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleNode(nodeId);
-              }}
-            >
-              ▶
-            </span>
-          )}
-          {!hasChildren && <span class="tree-icon" style="width: 12px; display: inline-block;"></span>}
-          <span class="tree-icon">🦴</span>
-          <span class="tree-label">{props.joint.id}</span>
-        </div>
-        {hasChildren && expandedNodes().has(nodeId) && (
-          <For each={props.joint.children}>
-            {(childId) => {
-              const childJoint = skeletonJoints().find(j => j.id === childId);
-              return childJoint ? <JointTreeNode joint={childJoint} indent={props.indent + 1} /> : null;
-            }}
-          </For>
-        )}
+        {text.slice(0, idx)}
+        <span class="search-highlight">{text.slice(idx, idx + lcq.length)}</span>
+        {text.slice(idx + lcq.length)}
       </>
     );
   };
@@ -419,8 +546,11 @@ const Humans = () => {
         jointRotation={jointRotation()}
         showSkeleton={showSkeleton()}
         selectedJointId={selectedJointId()}
+        selectionHighlight={selectionHighlight()}
+        mouldProfilesVersion={mouldProfilesVersion()}
         onSkeletonReady={setSkeletonJoints}
         onMouldsReady={setMoulds}
+        onMouldManagerReady={handleMouldManagerReady}
         onJointSelected={handleJointSelected}
         onJointClicked={setSelectedJointId}
       />
@@ -432,144 +562,159 @@ const Humans = () => {
         <div class="inspector-content">
           <Switch>
             <Match when={sceneTab() === "Scene"}>
-              <div class="scene-tree">
-                <div class="tree-item tree-category">
-                  <span
-                    class={`tree-icon tree-arrow ${expandedNodes().has("scene") ? "expanded" : ""}`}
-                    onClick={() => toggleNode("scene")}
-                  >
-                    ▶
-                  </span>
-                  <span class="tree-label">Scene</span>
-                </div>
-                {expandedNodes().has("scene") && (
-                  <>
-                    <div class="tree-item tree-category tree-indent-1">
-                      <span
-                        class={`tree-icon tree-arrow ${expandedNodes().has("humans") ? "expanded" : ""}`}
-                        onClick={() => toggleNode("humans")}
+              <div class="shape-browser">
+                {/* Human tab bar */}
+                <div class="human-tabs">
+                  <For each={humans()}>
+                    {(human) => (
+                      <button
+                        class={`human-tab ${selectedHumanId() === human.id ? 'active' : ''}`}
+                        onClick={() => setSelectedHumanId(human.id)}
                       >
-                        ▶
-                      </span>
-                      <Icon name="user" size={16} class="tree-icon-svg" />
-                      <span class="tree-label">Humans</span>
-                    </div>
-                    {expandedNodes().has("humans") && (
-                      <For each={humans()}>
-                        {(human) => {
-                          const humanNodeId = `human-${human.id}`;
-                          const skeletonNodeId = `skeleton-${human.id}`;
-                          const mouldsNodeId = `moulds-${human.id}`;
+                        {human.name}
+                      </button>
+                    )}
+                  </For>
+                  <button class="human-tab human-tab-add" onClick={addHuman} title="Add human">+</button>
+                </div>
 
-                          const [tempName, setTempName] = createSignal(human.name);
+                {/* Search */}
+                <div class="browser-search">
+                  <input
+                    type="text"
+                    class="browser-search-input"
+                    placeholder="Search bones or regions…"
+                    value={searchQuery()}
+                    onInput={(e) => setSearchQuery(e.currentTarget.value)}
+                  />
+                </div>
 
-                          const startRename = () => {
-                            setTempName(human.name);
-                            setRenamingId(human.id);
-                          };
+                {/* Search results or 2-level navigation: Regions → Bones */}
+                <Show
+                  when={searchQuery().trim().length > 0}
+                  fallback={<Switch>
+                  <Match when={selectedBrowserRegion()}>
+                    {/* Level 2: bones in region */}
+                    <div class="browser-list">
+                      <div class="shape-breadcrumb">
+                        <button class="breadcrumb-back" onClick={navigateBack}>
+                          ‹ Regions
+                        </button>
+                        <span class="breadcrumb-sep">/</span>
+                        <span class="breadcrumb-current">{formatRegionLabel(selectedBrowserRegion()!)}</span>
+                      </div>
 
-                          const finishRename = () => {
-                            if (tempName() !== human.name) {
-                              setHumans(
-                                humans().map((h) =>
-                                  h.id === human.id ? { ...h, name: tempName() } : h
-                                )
-                              );
-                            }
-                            setRenamingId(null);
-                          };
-
-                          return (
+                      <div class="browser-section-header">Bone Graph</div>
+                      <div class="bone-graph-timeline">
+                        <For each={regionBoneGraph()}>
+                          {(node, idx) => (
                             <>
-                              <div
-                                class={`tree-item tree-indent-2 ${
-                                  selectedHumanId() === human.id ? "active" : ""
-                                }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedHumanId(human.id);
-                                }}
-                                onDblClick={startRename}
-                              >
-                                <span
-                                  class={`tree-icon tree-arrow ${expandedNodes().has(humanNodeId) ? "expanded" : ""}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleNode(humanNodeId);
+                              <div class={`bone-timeline-row ${selectedJointId() === node.id ? "active" : ""}`}>
+                                <div
+                                  class="bone-timeline-card"
+                                  role="button"
+                                  tabindex={0}
+                                  title={node.parentId ? `${node.parentId} → ${node.id}` : node.id}
+                                  onClick={() => setSelectedJointId(node.id)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      setSelectedJointId(node.id);
+                                    }
                                   }}
                                 >
-                                  ▶
-                                </span>
-                                <Icon name="user" size={16} class="tree-icon-svg" />
-                                {renamingId() === human.id ? (
-                                  <input
-                                    type="text"
-                                    class="tree-rename-input"
-                                    value={tempName()}
-                                    onInput={(e) => setTempName(e.currentTarget.value)}
-                                    onBlur={finishRename}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        finishRename();
-                                      } else if (e.key === "Escape") {
-                                        setRenamingId(null);
-                                      }
-                                    }}
-                                    autofocus
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
-                                ) : (
-                                  <span class="tree-label">{human.name}</span>
-                                )}
+                                  <span class="bone-timeline-card-title">{node.id}</span>
+                                  <span class="bone-timeline-card-subtitle">{(node.parentId ?? "root")} → {node.id}</span>
+                                  <span class="bone-timeline-card-metrics">profile segments: {getJointProfileSegmentCount(node.id)}</span>
+                                  <span class="bone-timeline-card-actions">
+                                    <button
+                                      type="button"
+                                      class="bone-card-action"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openShapeEditorForJoint(node.id);
+                                      }}
+                                    >
+                                      Edit Shape
+                                    </button>
+                                  </span>
+                                </div>
                               </div>
-
-                              {expandedNodes().has(humanNodeId) && (
-                                <>
-                                  {/* Skeleton hierarchy */}
-                                  <div class="tree-item tree-category tree-indent-3">
-                                    <span
-                                      class={`tree-icon tree-arrow ${expandedNodes().has(skeletonNodeId) ? "expanded" : ""}`}
-                                      onClick={() => toggleNode(skeletonNodeId)}
-                                    >
-                                      ▶
-                                    </span>
-                                    <span class="tree-label">Skeleton</span>
-                                  </div>
-                                  {expandedNodes().has(skeletonNodeId) && (
-                                    <For each={skeletonJoints().filter(j => !j.parentId)}>
-                                      {(rootJoint) => <JointTreeNode joint={rootJoint} indent={4} />}
-                                    </For>
-                                  )}
-
-                                  {/* Moulds hierarchy */}
-                                  <div class="tree-item tree-category tree-indent-3">
-                                    <span
-                                      class={`tree-icon tree-arrow ${expandedNodes().has(mouldsNodeId) ? "expanded" : ""}`}
-                                      onClick={() => toggleNode(mouldsNodeId)}
-                                    >
-                                      ▶
-                                    </span>
-                                    <span class="tree-label">Components</span>
-                                  </div>
-                                  {expandedNodes().has(mouldsNodeId) && (
-                                    <For each={moulds()}>
-                                      {(mould) => (
-                                        <div class="tree-item tree-indent-4">
-                                          <span class="tree-icon">{mould.shape === 'sphere' ? '●' : '⬭'}</span>
-                                          <span class="tree-label">{mould.id} ({mould.shape})</span>
-                                        </div>
-                                      )}
-                                    </For>
-                                  )}
-                                </>
-                              )}
+                              <Show when={idx() < regionBoneGraph().length - 1}>
+                                <div class="bone-timeline-connector" aria-hidden="true">
+                                  <span class="bone-timeline-connector-line" />
+                                  <button
+                                    type="button"
+                                    class="bone-timeline-add-joint"
+                                    title={`Add joint between ${node.id} and next`}
+                                    onClick={() => addJointEvenly(node.id)}
+                                  >
+                                    + Joint
+                                  </button>
+                                  <span class="bone-timeline-connector-arrow">▼</span>
+                                </div>
+                              </Show>
                             </>
-                          );
-                        }}
+                          )}
+                        </For>
+                        <div class="bone-timeline-joke">{boneJokeLine()}</div>
+                      </div>
+                    </div>
+                  </Match>
+                  <Match when={true}>
+                    {/* Level 1: region list */}
+                    <div class="browser-list">
+                      <For each={groupedRegions()}>
+                        {(region) => (
+                          <div class="shape-row" onClick={() => navigateToRegion(region)}>
+                            <span class="shape-row-label">{formatRegionLabel(region)}</span>
+                            <span class="shape-row-arrow">›</span>
+                          </div>
+                        )}
                       </For>
-                    )}
-                  </>
-                )}
+                    </div>
+                  </Match>
+                </Switch>}
+                >
+                  {/* Search results */}
+                  <div class="browser-list">
+                    <Show
+                      when={regionResults().length > 0 || boneResults().length > 0}
+                      fallback={<div class="browser-empty">No bones or regions found</div>}
+                    >
+                      <Show when={regionResults().length > 0}>
+                        <div class="browser-section-header">Regions</div>
+                        <For each={regionResults()}>
+                          {(region) => (
+                            <div class="shape-row" onClick={() => { setSearchQuery(""); navigateToRegion(region); }}>
+                              <span class="shape-row-label">{highlightMatch(formatRegionLabel(region), searchQuery())}</span>
+                              <span class="shape-row-arrow">›</span>
+                            </div>
+                          )}
+                        </For>
+                      </Show>
+                      <Show when={boneResults().length > 0}>
+                        <div class="browser-section-header">Bones</div>
+                        <For each={boneResults()}>
+                          {(joint) => (
+                            <div
+                              class={`shape-row ${selectedJointId() === joint.id ? 'active' : ''}`}
+                              onClick={() => {
+                                setSearchQuery("");
+                                navigateToRegion(getBodyRegion(joint.id));
+                                setSelectedJointId(joint.id);
+                              }}
+                            >
+                              <span class="shape-row-icon">🦴</span>
+                              <span class="shape-row-label">{highlightMatch(joint.id, searchQuery())}</span>
+                              <span class="shape-row-region">{formatRegionLabel(getBodyRegion(joint.id))}</span>
+                            </div>
+                          )}
+                        </For>
+                      </Show>
+                    </Show>
+                  </div>
+                </Show>
               </div>
             </Match>
             <Match when={sceneTab() === "Properties"}>
@@ -748,6 +893,54 @@ const Humans = () => {
                       </div>
                     </div>
                   )}
+
+                  <Show when={selectedMouldId() && editingProfiles()}>
+                    <ProfileEditorPanel
+                      mouldId={selectedMouldId()!}
+                      mould={mouldManagerRef!.getMould(selectedMouldId()!)!}
+                      profiles={editingProfiles()!}
+                      activeRingIndex={activeRingIndex()}
+                      showGhostAbove={showGhostAbove()}
+                      onRingChange={(idx) => setActiveRingIndex(idx)}
+                      onGhostToggle={(above) => setShowGhostAbove(above)}
+                      onAddRing={(afterIdx) => {
+                        const profiles = editingProfiles()!;
+                        const source = profiles[afterIdx] ?? profiles[profiles.length - 1];
+                        const newProfiles = [...profiles];
+                        newProfiles.splice(afterIdx + 1, 0, [...source]);
+                        handleProfileChange(newProfiles, selectedMouldId()!);
+                      }}
+                      onRemoveRing={(idx) => {
+                        const profiles = editingProfiles()!;
+                        if (profiles.length <= 1) return;
+                        const newProfiles = profiles.filter((_, i) => i !== idx);
+                        setActiveRingIndex(i => Math.min(i, newProfiles.length - 1));
+                        handleProfileChange(newProfiles, selectedMouldId()!);
+                      }}
+                      onHandleChange={(segIdx, ptIdx, radius) => {
+                        const profiles = editingProfiles()!;
+                        const newProfiles = profiles.map((ring, si) =>
+                          si === segIdx ? ring.map((r, pi) => pi === ptIdx ? Math.max(0.005, radius) : r) : ring
+                        );
+                        handleProfileChange(newProfiles, selectedMouldId()!);
+                      }}
+                      onAddHandle={(segIdx, afterPtIdx) => {
+                        const profiles = editingProfiles()!;
+                        const ring = [...profiles[segIdx]];
+                        const nextIdx = (afterPtIdx + 1) % ring.length;
+                        ring.splice(afterPtIdx + 1, 0, (ring[afterPtIdx] + ring[nextIdx]) / 2);
+                        const newProfiles = profiles.map((r, si) => si === segIdx ? ring : r);
+                        handleProfileChange(newProfiles, selectedMouldId()!);
+                      }}
+                      onRemoveHandle={(segIdx, ptIdx) => {
+                        const profiles = editingProfiles()!;
+                        if (profiles[segIdx].length <= 3) return;
+                        const newRing = profiles[segIdx].filter((_, i) => i !== ptIdx);
+                        const newProfiles = profiles.map((r, si) => si === segIdx ? newRing : r);
+                        handleProfileChange(newProfiles, selectedMouldId()!);
+                      }}
+                    />
+                  </Show>
 
                   <div class="property-section">
                     <h4>Basic Parameters</h4>

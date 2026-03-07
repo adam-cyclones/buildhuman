@@ -1,4 +1,4 @@
-import { createSignal, createEffect, onMount, onCleanup } from "solid-js";
+import { createSignal, createEffect, on, onMount, onCleanup } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { initializeDefaultHumanoid, type HumanoidData } from "../morphing/humanoidInit";
 import { syncToRustBackend, createRustSyncScheduler } from "../morphing/rustSync";
@@ -15,8 +15,11 @@ type ThreeDViewportProps = {
   jointRotation: { jointId: string; euler: [number, number, number] } | null;
   showSkeleton: boolean;
   selectedJointId: string | null;
+  selectionHighlight?: { mode: "bone" | "shape" | "region"; value: string } | null;
+  mouldProfilesVersion?: number;
   onSkeletonReady?: (joints: Array<{ id: string; parentId?: string; children: string[] }>) => void;
   onMouldsReady?: (moulds: Array<{ id: string; shape: "sphere" | "capsule" | "profiled-capsule"; parentJointId?: string }>) => void;
+  onMouldManagerReady?: (manager: MouldManager) => void;
   onJointSelected?: (jointId: string, offset: [number, number, number], rotation: [number, number, number, number], mouldRadius: number) => void;
   onJointClicked?: (jointId: string) => void;
 }
@@ -35,10 +38,42 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
   const [cameraYaw, setCameraYaw] = createSignal(0);
   const [cameraPitch, setCameraPitch] = createSignal(0);
   const [cameraDistance, setCameraDistance] = createSignal(2.0);
+  const [cameraTarget, setCameraTarget] = createSignal<[number, number, number]>([0, 0.3, 0]);
   const [gpuInitialized, setGpuInitialized] = createSignal(false);
+  const MAX_CAMERA_PITCH = Math.PI * 0.49;
+  const PITCH_BRAKE_ZONE = 0.22;
+  const clampPitch = (pitch: number) => Math.max(-MAX_CAMERA_PITCH, Math.min(MAX_CAMERA_PITCH, pitch));
+  const normalizeWheelDelta = (delta: number, deltaMode: number) => {
+    // Wheel events may arrive in lines/pages instead of pixels.
+    if (deltaMode === 1) return delta * 16;
+    if (deltaMode === 2) return delta * window.innerHeight;
+    return delta;
+  };
+  const compressTrackpadDelta = (deltaPixels: number) => {
+    // Compress OS acceleration spikes while preserving fine control near zero.
+    const normalized = Math.tanh(deltaPixels / 48) * 48;
+    return normalized;
+  };
+  const applyPitchDeltaWithMagneticBraking = (deltaPitch: number) => {
+    const currentPitch = cameraPitch();
+    const distanceToEdge = MAX_CAMERA_PITCH - Math.abs(currentPitch);
+    const movingTowardEdge = currentPitch * deltaPitch > 0;
+    let easedDelta = deltaPitch;
+
+    // Magnetic braking near cap: apply stronger non-linear slowdown only
+    // when motion heads toward the cap. Motion away from the cap stays responsive.
+    if (movingTowardEdge && Math.abs(currentPitch) > 0.03 && distanceToEdge < PITCH_BRAKE_ZONE) {
+      const t = Math.max(0, Math.min(1, distanceToEdge / PITCH_BRAKE_ZONE));
+      const brakeFactor = 0.08 + 0.92 * (t * t);
+      easedDelta *= brakeFactor;
+    }
+
+    return clampPitch(currentPitch + easedDelta);
+  };
 
   // Mouse drag state
   let isDragging = false;
+  let dragMode: "orbit" | "pan" | "zoom" | null = null;
   let lastMouseX = 0;
   let lastMouseY = 0;
 
@@ -50,7 +85,7 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
 
   // Camera update state - prevent overlapping calls
   let cameraUpdatePending = false;
-  let pendingCameraState: { yaw: number; pitch: number; distance: number } | null = null;
+  let pendingCameraState: { yaw: number; pitch: number; distance: number; targetX: number; targetY: number; targetZ: number } | null = null;
 
   // Create Rust sync scheduler
   const { scheduleSync: scheduleSyncToRustBackend } = createRustSyncScheduler(
@@ -59,9 +94,16 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
   );
 
   // Update camera on Rust side with coalescing to prevent flickering
-  const updateCamera = async (yaw: number, pitch: number, distance: number) => {
+  const updateCamera = async (yaw: number, pitch: number, distance: number, target: [number, number, number]) => {
     // Store the latest state
-    pendingCameraState = { yaw, pitch, distance };
+    pendingCameraState = {
+      yaw,
+      pitch,
+      distance,
+      targetX: target[0],
+      targetY: target[1],
+      targetZ: target[2]
+    };
 
     // If an update is already in flight, let it pick up the new state when done
     if (cameraUpdatePending) return;
@@ -103,13 +145,14 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
 
       // Apply velocity to camera state
       const newYaw = cameraYaw() + velocityYaw;
-      const newPitch = cameraPitch() + velocityPitch;
+      const newPitch = applyPitchDeltaWithMagneticBraking(velocityPitch);
       const newDistance = Math.max(0.5, Math.min(10, cameraDistance() + velocityDistance));
+      const target = cameraTarget();
 
       setCameraYaw(newYaw);
       setCameraPitch(newPitch);
       setCameraDistance(newDistance);
-      void updateCamera(newYaw, newPitch, newDistance);
+      void updateCamera(newYaw, newPitch, newDistance, target);
 
       animationFrameId = requestAnimationFrame(animate);
     };
@@ -119,7 +162,12 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
 
   // Mouse event handlers for orbit camera
   const handleMouseDown = (e: MouseEvent) => {
+    // Blender-style mouse controls: camera only on middle mouse drag.
+    // This leaves left click available for selection/other interactions.
+    if (e.button !== 1) return;
+
     isDragging = true;
+    dragMode = e.shiftKey ? "pan" : (e.ctrlKey || e.metaKey) ? "zoom" : "orbit";
     lastMouseX = e.clientX;
     lastMouseY = e.clientY;
 
@@ -130,57 +178,164 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
     }
     velocityYaw = 0;
     velocityPitch = 0;
+    velocityDistance = 0;
 
     e.preventDefault();
   };
 
   const handleMouseMove = (e: MouseEvent) => {
-    if (!isDragging) return;
+    if (!isDragging || !dragMode) return;
 
     const deltaX = e.clientX - lastMouseX;
     const deltaY = e.clientY - lastMouseY;
     lastMouseX = e.clientX;
     lastMouseY = e.clientY;
 
-    // Sensitivity for rotation
-    const sensitivity = 0.01;
+    if (dragMode === "orbit") {
+      // Sensitivity for rotation
+      const sensitivity = 0.01;
 
-    // Store velocity for momentum
-    velocityYaw = deltaX * sensitivity;
-    velocityPitch = -deltaY * sensitivity;
+      // Store velocity for momentum
+      velocityYaw = deltaX * sensitivity;
+      velocityPitch = -deltaY * sensitivity;
 
-    const newYaw = cameraYaw() + velocityYaw;
-    const newPitch = cameraPitch() + velocityPitch;
+      const newYaw = cameraYaw() + velocityYaw;
+      const newPitch = applyPitchDeltaWithMagneticBraking(velocityPitch);
 
-    setCameraYaw(newYaw);
-    setCameraPitch(newPitch);
-    void updateCamera(newYaw, newPitch, cameraDistance());
+      setCameraYaw(newYaw);
+      setCameraPitch(newPitch);
+      void updateCamera(newYaw, newPitch, cameraDistance(), cameraTarget());
+      return;
+    }
+
+    if (dragMode === "zoom") {
+      // Blender-like Ctrl/Cmd+MMB drag zoom
+      const zoomFactor = 0.01;
+      velocityDistance = deltaY * zoomFactor * cameraDistance();
+      const newDistance = Math.max(0.5, Math.min(10, cameraDistance() + velocityDistance));
+      setCameraDistance(newDistance);
+      void updateCamera(cameraYaw(), cameraPitch(), newDistance, cameraTarget());
+      return;
+    }
+
+    // Shift+MMB pan in camera screen-space
+    const yaw = cameraYaw();
+    const pitch = cameraPitch();
+    const distance = cameraDistance();
+    const [targetX, targetY, targetZ] = cameraTarget();
+
+    const cosPitch = Math.cos(pitch);
+    const sinPitch = Math.sin(pitch);
+    const cosYaw = Math.cos(yaw);
+    const sinYaw = Math.sin(yaw);
+
+    const rightX = cosYaw;
+    const rightY = 0;
+    const rightZ = -sinYaw;
+    const upX = sinPitch * sinYaw;
+    const upY = cosPitch;
+    const upZ = sinPitch * cosYaw;
+
+    const panScale = 0.003 * distance;
+    const moveX = -deltaX * panScale;
+    const moveY = deltaY * panScale;
+
+    const nextTarget: [number, number, number] = [
+      targetX + rightX * moveX + upX * moveY,
+      targetY + rightY * moveX + upY * moveY,
+      targetZ + rightZ * moveX + upZ * moveY
+    ];
+    setCameraTarget(nextTarget);
+    void updateCamera(yaw, pitch, distance, nextTarget);
   };
 
   const handleMouseUp = () => {
     if (isDragging) {
       // Start momentum animation if there's velocity
-      if (Math.abs(velocityYaw) > 0.001 || Math.abs(velocityPitch) > 0.001) {
+      if (Math.abs(velocityYaw) > 0.001 || Math.abs(velocityPitch) > 0.001 || Math.abs(velocityDistance) > 0.001) {
         startMomentumAnimation();
       }
     }
     isDragging = false;
+    dragMode = null;
   };
 
   const handleWheel = (e: WheelEvent) => {
     e.preventDefault();
+    const deltaX = compressTrackpadDelta(normalizeWheelDelta(e.deltaX, e.deltaMode));
+    const deltaY = compressTrackpadDelta(normalizeWheelDelta(e.deltaY, e.deltaMode));
 
-    // Zoom sensitivity - apply as velocity for smooth zoom
-    const zoomFactor = 0.002;
-    velocityDistance = e.deltaY * zoomFactor * cameraDistance();
+    // Trackpad/scroll behavior:
+    // - No modifier: orbit (Blender-like trackpad fallback)
+    // - Shift: pan
+    // - Ctrl/Cmd: zoom
+    if (e.shiftKey) {
+      const yaw = cameraYaw();
+      const pitch = cameraPitch();
+      const distance = cameraDistance();
+      const [targetX, targetY, targetZ] = cameraTarget();
 
-    // Immediate update plus start momentum for smooth continuation
-    const newDistance = Math.max(0.5, Math.min(10, cameraDistance() + velocityDistance));
-    setCameraDistance(newDistance);
-    void updateCamera(cameraYaw(), cameraPitch(), newDistance);
+      const cosPitch = Math.cos(pitch);
+      const sinPitch = Math.sin(pitch);
+      const cosYaw = Math.cos(yaw);
+      const sinYaw = Math.sin(yaw);
 
-    // Start momentum animation for smooth zoom decay
-    startMomentumAnimation();
+      // Camera basis vectors in world space for screen-space panning
+      const rightX = cosYaw;
+      const rightY = 0;
+      const rightZ = -sinYaw;
+      const upX = sinPitch * sinYaw;
+      const upY = cosPitch;
+      const upZ = sinPitch * cosYaw;
+
+      const panScale = 0.0015 * distance;
+      const moveX = -deltaX * panScale;
+      const moveY = deltaY * panScale;
+
+      const nextTarget: [number, number, number] = [
+        targetX + rightX * moveX + upX * moveY,
+        targetY + rightY * moveX + upY * moveY,
+        targetZ + rightZ * moveX + upZ * moveY
+      ];
+      setCameraTarget(nextTarget);
+      void updateCamera(yaw, pitch, distance, nextTarget);
+      return;
+    }
+
+    if (e.ctrlKey || e.metaKey) {
+      // Zoom sensitivity - apply as velocity for smooth zoom
+      const zoomFactor = 0.002;
+      velocityDistance = deltaY * zoomFactor * cameraDistance();
+
+      // Immediate update plus start momentum for smooth continuation
+      const newDistance = Math.max(0.5, Math.min(10, cameraDistance() + velocityDistance));
+      setCameraDistance(newDistance);
+      void updateCamera(cameraYaw(), cameraPitch(), newDistance, cameraTarget());
+
+      // Start momentum animation for smooth zoom decay
+      startMomentumAnimation();
+      return;
+    }
+
+    // Default: orbit from two-finger trackpad movement
+    const orbitSensitivity = 0.006;
+    const nextVelocityYaw = deltaX * orbitSensitivity;
+    const nextVelocityPitch = deltaY * orbitSensitivity;
+
+    // Trackpad orbit should be direct, not inertial, to avoid direction wobble
+    // from OS scroll acceleration/deceleration tails.
+    if (animationFrameId !== null) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+    velocityYaw = 0;
+    velocityPitch = 0;
+
+    const newYaw = cameraYaw() + nextVelocityYaw;
+    const newPitch = applyPitchDeltaWithMagneticBraking(nextVelocityPitch);
+    setCameraYaw(newYaw);
+    setCameraPitch(newPitch);
+    void updateCamera(newYaw, newPitch, cameraDistance(), cameraTarget());
   };
 
   // Helper to trigger GPU render
@@ -233,6 +388,11 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
       props.onMouldsReady(humanoidData.moulds);
     }
 
+    // Share mould manager reference so parent can mutate profiles
+    if (props.onMouldManagerReady) {
+      props.onMouldManagerReady(humanoidData.mouldManager);
+    }
+
     // Sync to Rust backend
     await syncToRustBackend(currentSkeleton, currentMouldManager);
 
@@ -249,6 +409,32 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
       void renderToGpu();
     }
   });
+
+  // Re-sync and re-render when mould profiles are edited externally
+  createEffect(on(
+    () => props.mouldProfilesVersion,
+    () => {
+      if (gpuInitialized()) {
+        void scheduleSyncToRustBackend(true);
+        void renderToGpu();
+      }
+    },
+    { defer: true }
+  ));
+
+  // Update selection heatmap in debug skeleton overlay.
+  createEffect(on(
+    () => [gpuInitialized(), props.selectedJointId, props.selectionHighlight] as const,
+    ([ready, selectedId, highlight]) => {
+      if (!ready) return;
+      void invoke("set_debug_selection", {
+        selectedJointId: selectedId,
+        highlightMode: highlight?.mode ?? null,
+        highlightValue: highlight?.value ?? null
+      });
+    },
+    { defer: true }
+  ));
 
   // Handle joint movement from sliders
   createEffect(() => {
@@ -410,7 +596,7 @@ const ThreeDViewport = (props: ThreeDViewportProps) => {
       <div class="viewport-content" ref={viewportContentRef}>
         {/* GPU renders directly to the window - this div captures mouse events */}
         <div
-          style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: auto; background: transparent; cursor: grab;"
+          style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: auto; background: transparent; cursor: default;"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}

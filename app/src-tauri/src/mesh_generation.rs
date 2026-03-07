@@ -7,6 +7,7 @@ use crate::mesh::{
     MouldData, MouldManager, Skeleton, VoxelGrid, MeshData, Pt3, AABB,
 };
 use once_cell::sync::Lazy;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
 /// Global state holding the skeleton and mould manager
@@ -21,6 +22,9 @@ pub struct MeshGeneratorState {
     brick_map: Option<BrickMap>,
     brick_map_resolution: Option<u32>,
     last_mesh: Option<MeshData>,
+    selected_debug_joint_id: Option<String>,
+    selected_highlight_mode: Option<String>,
+    selected_highlight_value: Option<String>,
 }
 
 impl MeshGeneratorState {
@@ -36,6 +40,9 @@ impl MeshGeneratorState {
             brick_map: None,
             brick_map_resolution: None,
             last_mesh: None,
+            selected_debug_joint_id: None,
+            selected_highlight_mode: None,
+            selected_highlight_value: None,
         }
     }
 }
@@ -809,6 +816,294 @@ pub fn get_mould_manager_for_gpu() -> Result<MouldManager, String> {
     Ok(mould_manager.clone())
 }
 
+pub fn set_debug_selection(
+    selected_joint_id: Option<String>,
+    highlight_mode: Option<String>,
+    highlight_value: Option<String>,
+) {
+    let mut state = MESH_STATE.lock().unwrap();
+    state.selected_debug_joint_id = selected_joint_id;
+    state.selected_highlight_mode = highlight_mode;
+    state.selected_highlight_value = highlight_value;
+}
+
+fn body_region_from_id(id: &str) -> &'static str {
+    let l = id.to_lowercase();
+    let has_left = l.contains("left")
+        || l.contains("_l")
+        || l.contains("-l")
+        || l.contains(".l")
+        || l.starts_with("l_")
+        || l.starts_with("l-")
+        || l.ends_with("_l")
+        || l.ends_with("-l")
+        || l.ends_with(".l");
+    let has_right = l.contains("right")
+        || l.contains("_r")
+        || l.contains("-r")
+        || l.contains(".r")
+        || l.starts_with("r_")
+        || l.starts_with("r-")
+        || l.ends_with("_r")
+        || l.ends_with("-r")
+        || l.ends_with(".r");
+    if l.contains("head") || l.contains("neck") || l.contains("skull") || l.contains("face") {
+        "HEAD & NECK"
+    } else if l.contains("torso")
+        || l.contains("chest")
+        || l.contains("spine")
+        || l.contains("shoulder")
+        || l.contains("pelvis")
+        || l.contains("abdomen")
+    {
+        "TORSO"
+    } else if (l.contains("arm") || l.contains("hand") || l.contains("forearm") || l.contains("wrist") || l.contains("elbow")) && has_left {
+        "LEFT ARM"
+    } else if (l.contains("arm") || l.contains("hand") || l.contains("forearm") || l.contains("wrist") || l.contains("elbow")) && has_right {
+        "RIGHT ARM"
+    } else if (l.contains("leg")
+        || l.contains("foot")
+        || l.contains("thigh")
+        || l.contains("calf")
+        || l.contains("shin")
+        || l.contains("knee")
+        || l.contains("ankle"))
+        && has_left
+    {
+        "LEFT LEG"
+    } else if (l.contains("leg")
+        || l.contains("foot")
+        || l.contains("thigh")
+        || l.contains("calf")
+        || l.contains("shin")
+        || l.contains("knee")
+        || l.contains("ankle"))
+        && has_right
+    {
+        "RIGHT LEG"
+    } else {
+        "OTHER"
+    }
+}
+
+fn distance_to_world_mould(point: &Pt3, mould: &crate::mesh::mould::WorldSpaceMould) -> f32 {
+    match mould.shape {
+        crate::mesh::types::MouldShape::Sphere => {
+            crate::mesh::sdf::sphere_sdf(point, &mould.world_center, mould.radius)
+        }
+        crate::mesh::types::MouldShape::Capsule => {
+            if let Some(end) = mould.world_end {
+                crate::mesh::sdf::capsule_sdf(point, &mould.world_center, &end, mould.radius)
+            } else {
+                crate::mesh::sdf::sphere_sdf(point, &mould.world_center, mould.radius)
+            }
+        }
+        crate::mesh::types::MouldShape::ProfiledCapsule => {
+            if let (Some(end), Some(ref profiles)) = (mould.world_end, mould.radial_profiles.as_ref()) {
+                crate::mesh::sdf::profiled_capsule_sdf(
+                    point,
+                    &mould.world_center,
+                    &end,
+                    profiles,
+                    mould.use_splines,
+                )
+            } else if let Some(end) = mould.world_end {
+                crate::mesh::sdf::capsule_sdf(point, &mould.world_center, &end, mould.radius)
+            } else {
+                crate::mesh::sdf::sphere_sdf(point, &mould.world_center, mould.radius)
+            }
+        }
+    }
+}
+
+pub fn generate_selection_overlay_geometry() -> Result<(Vec<f32>, Vec<u32>), String> {
+    let mut state = MESH_STATE.lock().unwrap();
+    let mesh = state
+        .last_mesh
+        .clone()
+        .ok_or("No mesh available for selection overlay")?;
+
+    let mode = match state.selected_highlight_mode.clone() {
+        Some(m) => m,
+        None => return Ok((Vec::new(), Vec::new())),
+    };
+    let value = match state.selected_highlight_value.clone() {
+        Some(v) => v,
+        None => return Ok((Vec::new(), Vec::new())),
+    };
+
+    let skeleton_clone = state.skeleton.clone();
+
+    let mould_manager = state
+        .mould_manager
+        .as_mut()
+        .ok_or("No mould manager initialized")?;
+    mould_manager.rebuild_cache();
+
+    let mut selected_ids: HashSet<String> = HashSet::new();
+    let moulds = mould_manager.get_moulds();
+
+    match mode.as_str() {
+        "shape" => {
+            selected_ids.insert(value.clone());
+        }
+        "bone" => {
+            let mut has_direct = false;
+            for mould in moulds {
+                if mould.parent_joint_id.as_deref() == Some(value.as_str()) {
+                    selected_ids.insert(mould.id.clone());
+                    has_direct = true;
+                }
+            }
+            // Some joints (e.g. wrists) don't have direct moulds.
+            // Expand to nearest mould-bearing joints in the skeleton graph.
+            if !has_direct {
+                if let Some(skeleton) = skeleton_clone.as_ref() {
+                    let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
+                    for j in skeleton.get_joints() {
+                        adjacency.entry(j.id.clone()).or_default();
+                        if let Some(parent) = &j.parent_id {
+                            adjacency.entry(j.id.clone()).or_default().push(parent.clone());
+                            adjacency.entry(parent.clone()).or_default().push(j.id.clone());
+                        }
+                    }
+
+                    let mut moulds_by_joint: HashMap<String, Vec<String>> = HashMap::new();
+                    for mould in mould_manager.get_moulds() {
+                        if let Some(jid) = &mould.parent_joint_id {
+                            moulds_by_joint.entry(jid.clone()).or_default().push(mould.id.clone());
+                        }
+                    }
+
+                    let mut visited: HashSet<String> = HashSet::new();
+                    let mut frontier = vec![value.clone()];
+                    visited.insert(value.clone());
+
+                    // Find nearest ring of joints that has moulds.
+                    for _depth in 0..6 {
+                        let mut found_any = false;
+                        for node in &frontier {
+                            if let Some(ids) = moulds_by_joint.get(node) {
+                                for id in ids {
+                                    selected_ids.insert(id.clone());
+                                }
+                                found_any = true;
+                            }
+                        }
+                        if found_any {
+                            break;
+                        }
+
+                        let mut next_frontier: Vec<String> = Vec::new();
+                        for node in &frontier {
+                            if let Some(neighbors) = adjacency.get(node) {
+                                for n in neighbors {
+                                    if visited.insert(n.clone()) {
+                                        next_frontier.push(n.clone());
+                                    }
+                                }
+                            }
+                        }
+                        if next_frontier.is_empty() {
+                            break;
+                        }
+                        frontier = next_frontier;
+                    }
+                }
+            }
+        }
+        "region" => {
+            for mould in moulds {
+                let in_region = body_region_from_id(&mould.id) == value
+                    || mould
+                        .parent_joint_id
+                        .as_deref()
+                        .map(body_region_from_id)
+                        .map(|r| r == value)
+                        .unwrap_or(false);
+                if in_region {
+                    selected_ids.insert(mould.id.clone());
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if selected_ids.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+
+    let selected_world: Vec<crate::mesh::mould::WorldSpaceMould> = mould_manager
+        .get_moulds_world_space()
+        .into_iter()
+        .filter(|m| selected_ids.contains(&m.id))
+        .collect();
+
+    if selected_world.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+
+    let vertex_count = mesh.vertices.len() / 3;
+    let mut selected_vertex = vec![false; vertex_count];
+    // Surface band around selected SDF region (meters). Binary mask, no gradient.
+    let surface_band = 0.03_f32;
+
+    for i in 0..vertex_count {
+        let p = Pt3::new(
+            mesh.vertices[i * 3],
+            mesh.vertices[i * 3 + 1],
+            mesh.vertices[i * 3 + 2],
+        );
+        let mut min_d = f32::INFINITY;
+        for mould in &selected_world {
+            let d = distance_to_world_mould(&p, mould);
+            if d < min_d {
+                min_d = d;
+            }
+        }
+        selected_vertex[i] = min_d <= surface_band;
+    }
+
+    let mut vertices: Vec<f32> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    let mut remap: HashMap<u32, u32> = HashMap::new();
+    let highlight_color = [0.16_f32, 0.48, 1.0];
+
+    for tri in mesh.indices.chunks_exact(3) {
+        let i0 = tri[0] as usize;
+        let i1 = tri[1] as usize;
+        let i2 = tri[2] as usize;
+        if i0 >= vertex_count || i1 >= vertex_count || i2 >= vertex_count {
+            continue;
+        }
+        if !(selected_vertex[i0] || selected_vertex[i1] || selected_vertex[i2]) {
+            continue;
+        }
+
+        for &old_i in tri {
+            let new_i = if let Some(&mapped) = remap.get(&old_i) {
+                mapped
+            } else {
+                let oi = old_i as usize;
+                let mapped = (vertices.len() / 6) as u32;
+                vertices.extend_from_slice(&[
+                    mesh.vertices[oi * 3],
+                    mesh.vertices[oi * 3 + 1],
+                    mesh.vertices[oi * 3 + 2],
+                    highlight_color[0],
+                    highlight_color[1],
+                    highlight_color[2],
+                ]);
+                remap.insert(old_i, mapped);
+                mapped
+            };
+            indices.push(new_i);
+        }
+    }
+
+    Ok((vertices, indices))
+}
+
 /// Generate high-resolution mesh using sparse brick map storage
 /// Recommended for resolutions >= 128
 /// Uses two-pass algorithm to only allocate memory near the surface
@@ -1036,63 +1331,76 @@ fn extract_mesh_ring_vertices(
 
 /// Generate skeleton debug visualization geometry for GPU rendering
 /// Returns interleaved vertex data [pos.x, pos.y, pos.z, norm.x, norm.y, norm.z, ...] and indices
-/// Joint color is encoded in the normals (yellow = 1,1,0 for joints, cyan = 0,1,1 for bones)
+/// Joint color is encoded in the normals (yellow joints, tangerine-yellow bones)
 pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String> {
     let state = MESH_STATE.lock().unwrap();
 
     let skeleton = state.skeleton.as_ref().ok_or("No skeleton initialized")?;
+    let selected_joint_id = state.selected_debug_joint_id.clone();
+    let highlight_mode = state.selected_highlight_mode.clone();
+    let highlight_value = state.selected_highlight_value.clone();
 
     let mut vertices: Vec<f32> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
 
-    let joint_radius = 0.03_f32;
-    let bone_radius = 0.008_f32;
+    let joint_radius = 0.015_f32;
+    let bone_radius = 0.0026_f32;
 
-    // Joint color (yellow) - encoded as "normal" for unlit rendering
-    let joint_color = [1.0_f32, 1.0, 0.0];
-    // Bone color (cyan)
-    let bone_color = [0.0_f32, 1.0, 1.0];
+    // Blender-like selection palette:
+    // - default: white skeleton
+    // - selected: strong primary blue
+    // - non-selected while focused: knocked back gray
+    let joint_color = [0.93_f32, 0.93, 0.93];
+    let bone_color = [0.93_f32, 0.93, 0.93];
+    let dim_color = [0.26_f32, 0.26, 0.26];
+    let selected_color = [0.16_f32, 0.48, 1.0];
+    let mut selected_joint_set: HashSet<String> = HashSet::new();
+    if let (Some(mode), Some(value)) = (highlight_mode.as_deref(), highlight_value.as_deref()) {
+        match mode {
+            "bone" => {
+                if skeleton.get_joint(value).is_some() {
+                    selected_joint_set.insert(value.to_string());
+                }
+            }
+            "shape" => {
+                if let Some(mm) = state.mould_manager.as_ref() {
+                    for mould in mm.get_moulds() {
+                        if mould.id == value {
+                            if let Some(parent) = &mould.parent_joint_id {
+                                selected_joint_set.insert(parent.clone());
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            "region" => {
+                for joint in skeleton.get_joints() {
+                    if body_region_from_id(&joint.id) == value {
+                        selected_joint_set.insert(joint.id.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if selected_joint_set.is_empty() {
+        if let Some(sel) = selected_joint_id.as_ref() {
+            if skeleton.get_joint(sel).is_some() {
+                selected_joint_set.insert(sel.clone());
+            }
+        }
+    }
+    let has_selection = !selected_joint_set.is_empty();
 
-    // Generate geometry for each joint
+    // Cache joint positions so we can render joints after bones.
+    let mut joint_positions: Vec<(nalgebra::Vector3<f32>, String)> = Vec::new();
+
+    // Generate bone geometry for each joint-parent pair.
     for joint in skeleton.get_joints() {
         let world_transform = skeleton.get_world_transform_immutable(&joint.id);
         let pos = world_transform.translation.vector;
-
-        // Generate octahedron for joint (6 vertices, 8 triangles)
-        let base_idx = (vertices.len() / 6) as u32;
-
-        // Octahedron vertices: +X, -X, +Y, -Y, +Z, -Z
-        let offsets = [
-            [joint_radius, 0.0, 0.0],
-            [-joint_radius, 0.0, 0.0],
-            [0.0, joint_radius, 0.0],
-            [0.0, -joint_radius, 0.0],
-            [0.0, 0.0, joint_radius],
-            [0.0, 0.0, -joint_radius],
-        ];
-
-        for offset in &offsets {
-            vertices.extend_from_slice(&[
-                pos.x + offset[0],
-                pos.y + offset[1],
-                pos.z + offset[2],
-                joint_color[0],
-                joint_color[1],
-                joint_color[2],
-            ]);
-        }
-
-        // Octahedron faces (8 triangles)
-        // Top half (+Y)
-        indices.extend_from_slice(&[base_idx + 2, base_idx + 4, base_idx + 0]); // +Y, +Z, +X
-        indices.extend_from_slice(&[base_idx + 2, base_idx + 0, base_idx + 5]); // +Y, +X, -Z
-        indices.extend_from_slice(&[base_idx + 2, base_idx + 5, base_idx + 1]); // +Y, -Z, -X
-        indices.extend_from_slice(&[base_idx + 2, base_idx + 1, base_idx + 4]); // +Y, -X, +Z
-        // Bottom half (-Y)
-        indices.extend_from_slice(&[base_idx + 3, base_idx + 0, base_idx + 4]); // -Y, +X, +Z
-        indices.extend_from_slice(&[base_idx + 3, base_idx + 5, base_idx + 0]); // -Y, -Z, +X
-        indices.extend_from_slice(&[base_idx + 3, base_idx + 1, base_idx + 5]); // -Y, -X, -Z
-        indices.extend_from_slice(&[base_idx + 3, base_idx + 4, base_idx + 1]); // -Y, +Z, -X
+        joint_positions.push((pos, joint.id.clone()));
 
         // Generate bone to parent (cylinder approximation with 6 sides)
         if let Some(parent_id) = &joint.parent_id {
@@ -1104,6 +1412,15 @@ pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String
             let length = dir.magnitude();
             if length > 0.001 {
                 let dir_norm = dir / length;
+                let selected_bone =
+                    selected_joint_set.contains(parent_id) || selected_joint_set.contains(&joint.id);
+                let bone_debug_color = if !has_selection {
+                    bone_color
+                } else if selected_bone {
+                    selected_color
+                } else {
+                    dim_color
+                };
 
                 // Create orthonormal basis
                 let up = if dir_norm.y.abs() < 0.9 {
@@ -1130,9 +1447,9 @@ pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String
                             ring_center.x + offset.x,
                             ring_center.y + offset.y,
                             ring_center.z + offset.z,
-                            bone_color[0],
-                            bone_color[1],
-                            bone_color[2],
+                            bone_debug_color[0],
+                            bone_debug_color[1],
+                            bone_debug_color[2],
                         ]);
                     }
                 }
@@ -1148,6 +1465,61 @@ pub fn generate_skeleton_debug_geometry() -> Result<(Vec<f32>, Vec<u32>), String
                     indices.extend_from_slice(&[i0, i2, i1]);
                     indices.extend_from_slice(&[i1, i2, i3]);
                 }
+            }
+        }
+    }
+
+    // Render joints as spheres (instead of octahedra) so they read cleanly on top of bones.
+    let sphere_lat_segments = 8_u32;
+    let sphere_lon_segments = 12_u32;
+    for (pos, joint_id) in joint_positions {
+        let selected_joint = selected_joint_set.contains(&joint_id);
+        let joint_debug_color = if !has_selection {
+            joint_color
+        } else if selected_joint {
+            selected_color
+        } else {
+            dim_color
+        };
+        let base_idx = (vertices.len() / 6) as u32;
+        let ring = sphere_lon_segments + 1;
+
+        for lat in 0..=sphere_lat_segments {
+            let v = lat as f32 / sphere_lat_segments as f32;
+            let theta = v * std::f32::consts::PI;
+            let sin_theta = theta.sin();
+            let cos_theta = theta.cos();
+
+            for lon in 0..=sphere_lon_segments {
+                let u = lon as f32 / sphere_lon_segments as f32;
+                let phi = u * std::f32::consts::TAU;
+                let cos_phi = phi.cos();
+                let sin_phi = phi.sin();
+
+                let x = sin_theta * cos_phi;
+                let y = cos_theta;
+                let z = sin_theta * sin_phi;
+
+                vertices.extend_from_slice(&[
+                    pos.x + x * joint_radius,
+                    pos.y + y * joint_radius,
+                    pos.z + z * joint_radius,
+                    joint_debug_color[0],
+                    joint_debug_color[1],
+                    joint_debug_color[2],
+                ]);
+            }
+        }
+
+        for lat in 0..sphere_lat_segments {
+            for lon in 0..sphere_lon_segments {
+                let i0 = base_idx + lat * ring + lon;
+                let i1 = i0 + 1;
+                let i2 = i0 + ring;
+                let i3 = i2 + 1;
+
+                indices.extend_from_slice(&[i0, i2, i1]);
+                indices.extend_from_slice(&[i1, i2, i3]);
             }
         }
     }

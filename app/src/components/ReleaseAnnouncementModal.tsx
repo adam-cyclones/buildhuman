@@ -1,4 +1,4 @@
-import { createSignal, Show, For, onMount, onCleanup } from "solid-js";
+import { Show, For, onMount, onCleanup } from "solid-js";
 import Icon from "./Icon";
 import type { Release, Asset } from "../views/AssetLibrary/types";
 import "./ReleaseAnnouncementModal.css";

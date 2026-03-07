@@ -233,6 +233,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             gpu_renderer::generate_and_render_gpu_compute,
             gpu_renderer::update_gpu_camera,
             gpu_renderer::get_gpu_camera,
+            gpu_renderer::set_debug_selection,
             gpu_renderer::set_skeleton_visible,
             gpu_renderer::set_wireframe_mode,
             gpu_renderer::shutdown_gpu_renderer,
